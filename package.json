@@ -4,12 +4,13 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "dev:all": "concurrently -c \"#93c5fd,#c4b5fd,#fb7185,#fdba74\" \"php artisan serve\" \"php artisan queue:listen --tries=1\" \"php artisan pail --timeout=0\" \"npm run dev\" --names=server,queue,logs,vite --kill-others"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
         "axios": "^1.11.0",
-        "concurrently": "^9.0.1",
+        "concurrently": "^9.2.1",
         "laravel-vite-plugin": "^2.0.0",
         "tailwindcss": "^4.0.0",
         "vite": "^7.0.4"
