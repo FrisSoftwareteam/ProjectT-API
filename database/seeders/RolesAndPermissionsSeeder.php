@@ -17,7 +17,9 @@ class RolesAndPermissionsSeeder extends Seeder
         // Reset cached roles and permissions
         app()[\Spatie\Permission\PermissionRegistrar::class]->forgetCachedPermissions();
 
-        // Create permissions
+        $this->command->info('Seeding roles and permissions...');
+
+        // Create permissions (using firstOrCreate to avoid duplicates)
         $permissions = [
             // User Management
             'users.view',
@@ -83,6 +85,9 @@ class RolesAndPermissionsSeeder extends Seeder
             'roles.delete',
             'permissions.view',
             'permissions.assign',
+            'permissions.create',
+            'permissions.delete',
+            'permissions.edit',
 
             // Audit Trail
             'audit.view',
@@ -126,8 +131,13 @@ class RolesAndPermissionsSeeder extends Seeder
         ];
 
         foreach ($permissions as $permission) {
-            Permission::create(['name' => $permission]);
+            Permission::firstOrCreate([
+                'name' => $permission,
+                'guard_name' => 'web',
+            ]);
         }
+
+        $this->command->info('Created ' . count($permissions) . ' permissions');
 
         // Create roles and assign permissions
         $this->createSuperAdminRole();
@@ -143,18 +153,27 @@ class RolesAndPermissionsSeeder extends Seeder
         $this->createReconciliationRole();
         $this->createInternalAuditRole();
         $this->createMailingRole();
+
+        $this->command->info('✓ Roles and permissions seeded successfully!');
     }
 
     private function createSuperAdminRole()
     {
-        $role = Role::create(['name' => 'Super Admin']);
-        $role->givePermissionTo(Permission::all());
+        $role = Role::firstOrCreate([
+            'name' => 'Super Admin',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions(Permission::all());
+        $this->command->info('✓ Super Admin role created');
     }
 
     private function createAdminRole()
     {
-        $role = Role::create(['name' => 'Admin']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Admin',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'users.view', 'users.create', 'users.edit', 'users.activate', 'users.deactivate',
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
@@ -169,8 +188,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createShareholderManagementRole()
     {
-        $role = Role::create(['name' => 'Shareholder Management']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Shareholder Management',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shares.view', 'shares.create', 'shares.edit', 'shares.transfer', 'shares.export',
             'reports.view', 'reports.generate',
@@ -180,8 +202,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createCertificateManagementRole()
     {
-        $role = Role::create(['name' => 'Certificate Management']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Certificate Management',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'certificates.view', 'certificates.create', 'certificates.edit', 'certificates.issue', 'certificates.cancel', 'certificates.export',
             'shareholders.view',
             'shares.view',
@@ -192,8 +217,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createWarrantManagementRole()
     {
-        $role = Role::create(['name' => 'Warrant Management']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Warrant Management',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'warrants.view', 'warrants.create', 'warrants.edit', 'warrants.exercise', 'warrants.export',
             'shareholders.view',
             'shares.view',
@@ -204,8 +232,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createCustomerServiceRole()
     {
-        $role = Role::create(['name' => 'Customer Service']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Customer Service',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'shareholders.view',
             'shares.view',
             'certificates.view',
@@ -218,8 +249,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createCustomerSupportRole()
     {
-        $role = Role::create(['name' => 'Customer Support']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Customer Support',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'shareholders.view',
             'shares.view',
             'certificates.view',
@@ -232,8 +266,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createFinanceRole()
     {
-        $role = Role::create(['name' => 'Finance']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Finance',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'finance.view', 'finance.manage', 'finance.reports', 'finance.transactions',
             'shareholders.view',
             'shares.view', 'shares.transfer',
@@ -246,8 +283,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createMarketingRole()
     {
-        $role = Role::create(['name' => 'Marketing']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Marketing',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'marketing.campaigns', 'marketing.manage', 'marketing.analytics',
             'shareholders.view',
             'notifications.view', 'notifications.send', 'notifications.manage',
@@ -257,8 +297,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createComplianceRole()
     {
-        $role = Role::create(['name' => 'Compliance']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Compliance',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'compliance.view', 'compliance.manage', 'compliance.reports',
             'shareholders.view',
             'shares.view',
@@ -272,8 +315,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createReconciliationRole()
     {
-        $role = Role::create(['name' => 'Reconciliation']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Reconciliation',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'reconciliation.view', 'reconciliation.process', 'reconciliation.manage',
             'shareholders.view',
             'shares.view',
@@ -286,8 +332,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createInternalAuditRole()
     {
-        $role = Role::create(['name' => 'Internal Audit']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Internal Audit',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'audit.internal.view', 'audit.internal.manage', 'audit.internal.reports',
             'shareholders.view',
             'shares.view',
@@ -301,8 +350,11 @@ class RolesAndPermissionsSeeder extends Seeder
 
     private function createMailingRole()
     {
-        $role = Role::create(['name' => 'Mailing']);
-        $role->givePermissionTo([
+        $role = Role::firstOrCreate([
+            'name' => 'Mailing',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
             'mailing.view', 'mailing.send', 'mailing.manage',
             'shareholders.view',
             'notifications.view', 'notifications.send', 'notifications.manage',

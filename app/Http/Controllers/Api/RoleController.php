@@ -8,6 +8,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Illuminate\Support\Facades\Log;
+use App\Models\AdminUser;
 
 class RoleController extends Controller
 {
@@ -209,7 +211,7 @@ class RoleController extends Controller
      */
     public function users(Role $role): JsonResponse
     {
-        $users = $role->users()->paginate(15);
+        $users = AdminUser::role($role->name)->paginate(15);
 
         return response()->json([
             'success' => true,

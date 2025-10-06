@@ -91,6 +91,7 @@ class AuthController extends Controller
      */
     public function simulateLogin(Request $request): JsonResponse
     {
+        // Log::info('Simulate login request: ' . $request->all());
         $request->validate([
             'email' => 'required|email|exists:admin_users,email',
         ]);

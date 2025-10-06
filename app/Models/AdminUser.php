@@ -13,6 +13,13 @@ class AdminUser extends Authenticatable
     use HasFactory, HasApiTokens, HasRoles;
 
     /**
+     * The guard name for the model.
+     *
+     * @var string
+     */
+    protected $guard_name = 'web';
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>

@@ -13,21 +13,24 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
-
-        User::factory()->create([
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
-
-        // Seed roles and permissions first
+        // Always seed roles and permissions (required for production)
         $this->call([
             RolesAndPermissionsSeeder::class,
         ]);
 
-        // Seed admin users
-        $this->call([
-            AdminUserSeeder::class,
-        ]);
+        // Only seed test data in non-production environments
+        if (!app()->environment('production')) {
+            // User::factory(10)->create();
+
+            User::factory()->create([
+                'name' => 'Test User',
+                'email' => 'test@example.com',
+            ]);
+
+            // Seed test admin users with fake data
+            $this->call([
+                AdminUserSeeder::class,
+            ]);
+        }
     }
 }

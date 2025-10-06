@@ -8,6 +8,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
+use App\Models\AdminUser;
+use Illuminate\Support\Facades\Log;
 
 class PermissionController extends Controller
 {
@@ -133,27 +135,55 @@ class PermissionController extends Controller
     /**
      * Get roles that have this permission
      */
-    public function roles(Permission $permission): JsonResponse
+    public function roles(Request $request, $id): JsonResponse
     {
-        $roles = $permission->roles()->paginate(15);
+        try {
+            // Find the permission by ID to ensure we have the correct permission
+            $permission = Permission::findOrFail($id);
+            
+            // Get roles that have this specific permission
+            $roles = $permission->roles()->paginate(15);
 
-        return response()->json([
-            'success' => true,
-            'data' => $roles,
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $roles,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving roles for permission ID ' . $id . ': ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving roles for permission',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
      * Get users that have this permission
      */
-    public function users(Permission $permission): JsonResponse
+    public function users(Request $request, $id): JsonResponse
     {
-        $users = $permission->users()->paginate(15);
+        try {
+            // Find the permission by ID to ensure we have the correct permission
+            $permission = Permission::findOrFail($id);
+            
+            // Get users that have this specific permission
+            $users = AdminUser::permission($permission->name)->paginate(15);
 
-        return response()->json([
-            'success' => true,
-            'data' => $users,
-        ]);
+            return response()->json([
+                'success' => true,
+                'data' => $users,
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving users for permission ID ' . $id . ': ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving users for permission',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
 
     /**
