@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Laravel\Socialite\Facades\Socialite;
@@ -19,8 +20,32 @@ class AuthController extends Controller
     public function redirectToMicrosoft(): JsonResponse
     {
         try {
+            // Validate Microsoft OAuth configuration
+            $clientId = config('services.microsoft.client_id');
+            $clientSecret = config('services.microsoft.client_secret');
+            $redirectUri = config('services.microsoft.redirect');
+
+            if (empty($clientId) || empty($clientSecret) || empty($redirectUri)) {
+                Log::error('Microsoft OAuth configuration incomplete', [
+                    'has_client_id' => !empty($clientId),
+                    'has_client_secret' => !empty($clientSecret),
+                    'has_redirect_uri' => !empty($redirectUri)
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Microsoft OAuth is not properly configured',
+                    'error' => 'Missing required configuration values'
+                ], 500);
+            }
+
+            Log::info('Initiating Microsoft OAuth redirect', [
+                'client_id' => $clientId,
+                'redirect_uri' => $redirectUri
+            ]);
+
             $redirectUrl = Socialite::driver('microsoft')
-                ->scopes(['openid', 'profile', 'email', 'User.Read'])
+                ->stateless()
                 ->redirect()
                 ->getTargetUrl();
 
@@ -30,7 +55,13 @@ class AuthController extends Controller
                 'message' => 'Redirect to Microsoft OAuth'
             ]);
         } catch (\Exception $e) {
-            Log::error('Microsoft OAuth redirect failed: ' . $e->getMessage());
+            Log::error('Microsoft OAuth redirect failed', [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
             
             return response()->json([
                 'success' => false,
@@ -43,10 +74,32 @@ class AuthController extends Controller
     /**
      * Handle Microsoft OAuth callback
      */
-    public function handleMicrosoftCallback(Request $request): JsonResponse
+    public function handleMicrosoftCallback(Request $request): JsonResponse|RedirectResponse
     {
         try {
-            $microsoftUser = Socialite::driver('microsoft')->user();
+            // Log the incoming request for debugging
+            Log::info('Microsoft OAuth callback received', [
+                'query_params' => $request->query(),
+                'has_code' => $request->has('code'),
+                'has_state' => $request->has('state'),
+                'has_error' => $request->has('error')
+            ]);
+
+            // Check for OAuth errors in the callback
+            if ($request->has('error')) {
+                Log::error('Microsoft OAuth returned error', [
+                    'error' => $request->query('error'),
+                    'error_description' => $request->query('error_description')
+                ]);
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'OAuth authentication error',
+                    'error' => $request->query('error_description') ?? $request->query('error')
+                ], 401);
+            }
+
+            $microsoftUser = Socialite::driver('microsoft')->stateless()->user();
             
             // Find or create admin user
             $adminUser = AdminUser::firstOrCreate(
@@ -67,22 +120,64 @@ class AuthController extends Controller
             // Create API token
             $token = $adminUser->createToken('API Token')->plainTextToken;
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Login successful',
-                'user' => $adminUser,
+            // Check if there's a frontend callback URL to redirect to
+            $frontendUrl = env('FRONTEND_URL', config('app.url'));
+            $callbackUrl = $request->query('redirect_uri') ?? $frontendUrl . '/auth/callback';
+
+            // If request expects JSON response (API client), return JSON
+            if ($request->expectsJson() || $request->query('response_type') === 'json') {
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Login successful',
+                    'user' => $adminUser,
+                    'token' => $token,
+                    'token_type' => 'Bearer'
+                ]);
+            }
+
+            // Otherwise, redirect to frontend with token in URL
+            $redirectUrl = $callbackUrl . '?' . http_build_query([
                 'token' => $token,
-                'token_type' => 'Bearer'
+                'token_type' => 'Bearer',
+                'user_id' => $adminUser->id,
+                'email' => $adminUser->email
             ]);
 
+            Log::info('Redirecting to frontend after successful OAuth', [
+                'redirect_url' => $redirectUrl
+            ]);
+
+            return redirect($redirectUrl);
+
         } catch (\Exception $e) {
-            Log::error('Microsoft OAuth callback failed: ' . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Authentication failed',
-                'error' => $e->getMessage()
-            ], 401);
+            Log::error('Microsoft OAuth callback failed', [
+                'message' => $e->getMessage(),
+                'exception' => get_class($e),
+                'file' => $e->getFile(),
+                'line' => $e->getLine(),
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            // Check if there's a frontend error callback URL
+            $frontendUrl = env('FRONTEND_URL', config('app.url'));
+            $errorUrl = $request->query('error_redirect_uri') ?? $frontendUrl . '/auth/error';
+
+            // If request expects JSON response (API client), return JSON
+            if ($request->expectsJson() || $request->query('response_type') === 'json') {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Authentication failed',
+                    'error' => $e->getMessage() ?: 'An unexpected error occurred during authentication'
+                ], 401);
+            }
+
+            // Otherwise, redirect to frontend error page with error message
+            $redirectUrl = $errorUrl . '?' . http_build_query([
+                'error' => 'authentication_failed',
+                'error_description' => $e->getMessage() ?: 'An unexpected error occurred during authentication'
+            ]);
+
+            return redirect($redirectUrl);
         }
     }
 

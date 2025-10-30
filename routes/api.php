@@ -20,9 +20,11 @@ use App\Http\Controllers\Api\PermissionController;
 
 // Authentication Routes (Public)
 Route::prefix('auth')->group(function () {
-    // Microsoft OAuth Routes
-    Route::get('/microsoft/redirect', [AuthController::class, 'redirectToMicrosoft']);
-    Route::get('/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback']);
+    // Microsoft OAuth Routes (require session for state parameter)
+    Route::middleware(['web'])->group(function () {
+        Route::get('/microsoft/redirect', [AuthController::class, 'redirectToMicrosoft']);
+        Route::get('/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback']);
+    });
     
     // Simulation Routes (for testing)
     Route::post('/simulate', [AuthController::class, 'simulateLogin']);

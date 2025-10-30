@@ -7,6 +7,7 @@ use App\Models\AdminUser;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\Log;
 
 class AdminUserController extends Controller
 {
@@ -99,8 +100,17 @@ class AdminUserController extends Controller
     /**
      * Display the specified resource.
      */
-    public function show(AdminUser $adminUser): JsonResponse
+    public function show($id): JsonResponse
     {
+        $adminUser = AdminUser::find($id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         // Load roles and permissions
         $adminUser->load(['roles', 'permissions']);
 
@@ -113,8 +123,17 @@ class AdminUserController extends Controller
     /**
      * Update the specified resource in storage.
      */
-    public function update(Request $request, AdminUser $adminUser): JsonResponse
+    public function update(Request $request, $id): JsonResponse
     {
+        $adminUser = AdminUser::find($id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         try {
             $validated = $request->validate([
                 'microsoft_id' => 'nullable|string|unique:admin_users,microsoft_id,' . $adminUser->id,
@@ -146,8 +165,17 @@ class AdminUserController extends Controller
     /**
      * Remove the specified resource from storage.
      */
-    public function destroy(AdminUser $adminUser): JsonResponse
+    public function destroy($id): JsonResponse
     {
+        $adminUser = AdminUser::find($id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         $adminUser->delete();
 
         return response()->json([
@@ -159,8 +187,17 @@ class AdminUserController extends Controller
     /**
      * Assign roles to user
      */
-    public function assignRoles(Request $request, AdminUser $adminUser): JsonResponse
+    public function assignRoles(Request $request, $user_id): JsonResponse
     {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         try {
             $validated = $request->validate([
                 'roles' => 'required|array',
@@ -188,8 +225,17 @@ class AdminUserController extends Controller
     /**
      * Revoke roles from user
      */
-    public function revokeRoles(Request $request, AdminUser $adminUser): JsonResponse
+    public function revokeRoles(Request $request, $user_id): JsonResponse
     {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         try {
             $validated = $request->validate([
                 'roles' => 'required|array',
@@ -217,8 +263,17 @@ class AdminUserController extends Controller
     /**
      * Assign permissions directly to user
      */
-    public function assignPermissions(Request $request, AdminUser $adminUser): JsonResponse
+    public function assignPermissions(Request $request, $user_id): JsonResponse
     {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         try {
             $validated = $request->validate([
                 'permissions' => 'required|array',
@@ -246,8 +301,17 @@ class AdminUserController extends Controller
     /**
      * Revoke permissions from user
      */
-    public function revokePermissions(Request $request, AdminUser $adminUser): JsonResponse
+    public function revokePermissions(Request $request, $user_id): JsonResponse
     {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         try {
             $validated = $request->validate([
                 'permissions' => 'required|array',
@@ -275,8 +339,17 @@ class AdminUserController extends Controller
     /**
      * Get user's roles
      */
-    public function getRoles(AdminUser $adminUser): JsonResponse
+    public function getRoles($user_id): JsonResponse
     {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         $adminUser->load('roles');
 
         return response()->json([
@@ -288,8 +361,17 @@ class AdminUserController extends Controller
     /**
      * Get user's permissions (including from roles)
      */
-    public function getPermissions(AdminUser $adminUser): JsonResponse
+    public function getPermissions($user_id): JsonResponse
     {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
         $adminUser->load('permissions');
         
         // Get all permissions (direct + via roles)
