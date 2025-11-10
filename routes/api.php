@@ -6,27 +6,23 @@ use App\Http\Controllers\Api\Admin\AdminUserController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\PermissionController;
+use App\Http\Controllers\Api\Admin\CompanyController;
+use App\Http\Controllers\Api\Admin\RegisterController;
+use App\Http\Controllers\Api\Admin\ShareClassController;
 
 /*
 |--------------------------------------------------------------------------
 | API Routes
 |--------------------------------------------------------------------------
-|
-| Here is where you can register API routes for your application. These
-| routes are loaded by the RouteServiceProvider and all of them will
-| be assigned to the "api" middleware group. Make something great!
-|
 */
 
 // Authentication Routes (Public)
 Route::prefix('auth')->group(function () {
-    // Microsoft OAuth Routes (require session for state parameter)
     Route::middleware(['web'])->group(function () {
         Route::get('/microsoft/redirect', [AuthController::class, 'redirectToMicrosoft']);
         Route::get('/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback']);
     });
     
-    // Simulation Routes (for testing)
     Route::post('/simulate', [AuthController::class, 'simulateLogin']);
     Route::get('/simulation-users', [AuthController::class, 'getSimulationUsers']);
 });
@@ -43,7 +39,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
     
     // Admin Users API Routes
     Route::prefix('admin/users')->group(function () {
-        // User role and permission management (must be before resource routes)
         Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles']);
         Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles']);
         Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles']);
@@ -65,7 +60,6 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/{role}', [RoleController::class, 'update'])->middleware('permission:roles.edit');
         Route::delete('/{role}', [RoleController::class, 'destroy'])->middleware('permission:roles.delete');
         
-        // Role-specific endpoints
         Route::post('/{role}/permissions', [RoleController::class, 'assignPermissions'])->middleware('permission:roles.assign');
         Route::delete('/{role}/permissions', [RoleController::class, 'revokePermissions'])->middleware('permission:roles.assign');
         Route::get('/{role}/users', [RoleController::class, 'users'])->middleware('permission:roles.view');
@@ -81,11 +75,78 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/{permission}', [PermissionController::class, 'update'])->middleware('permission:permissions.edit');
         Route::delete('/{permission}', [PermissionController::class, 'destroy']);
         
-        // Permission-specific endpoints
         Route::get('/{permission}/roles', [PermissionController::class, 'roles']);
         Route::get('/{permission}/users', [PermissionController::class, 'users']);
         Route::get('/grouped/modules', [PermissionController::class, 'groupedByModule']);
         Route::get('/modules/list', [PermissionController::class, 'modules']);
         Route::get('/actions/list', [PermissionController::class, 'actions']);
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | NEW: Company Management Routes
+    |--------------------------------------------------------------------------
+    */
+    Route::prefix('admin')->group(function () {
+        
+        // Company Routes
+        Route::prefix('companies')->group(function () {
+            Route::get('/', [CompanyController::class, 'index'])
+                ->middleware('permission:users.view');
+            
+            Route::post('/', [CompanyController::class, 'store'])
+                ->middleware('role:Super Admin');
+            
+            Route::get('/{id}', [CompanyController::class, 'show'])
+                ->middleware('permission:users.view');
+            
+            Route::put('/{id}', [CompanyController::class, 'update'])
+                ->middleware('permission:users.view');
+            
+            Route::delete('/{id}', [CompanyController::class, 'destroy'])
+                ->middleware('role:Super Admin');
+            
+            Route::post('/{id}/restore', [CompanyController::class, 'restore'])
+                ->middleware('role:Super Admin');
+            
+            Route::get('/statistics/overview', [CompanyController::class, 'statistics'])
+                ->middleware('permission:users.view');
+        });
+
+        // Register Routes
+        Route::prefix('registers')->group(function () {
+            Route::get('/', [RegisterController::class, 'index'])
+                ->middleware('permission:users.view');
+            
+            Route::post('/', [RegisterController::class, 'store'])
+                ->middleware('role:Super Admin');
+            
+            Route::get('/{id}', [RegisterController::class, 'show'])
+                ->middleware('permission:users.view');
+            
+            Route::put('/{id}', [RegisterController::class, 'update'])
+                ->middleware('permission:users.view');
+            
+            Route::delete('/{id}', [RegisterController::class, 'destroy'])
+                ->middleware('role:Super Admin');
+        });
+
+        // Share Class Routes
+        Route::prefix('share-classes')->group(function () {
+            Route::get('/', [ShareClassController::class, 'index'])
+                ->middleware('permission:users.view');
+            
+            Route::post('/', [ShareClassController::class, 'store'])
+                ->middleware('role:Super Admin');
+            
+            Route::get('/{id}', [ShareClassController::class, 'show'])
+                ->middleware('permission:users.view');
+            
+            Route::put('/{id}', [ShareClassController::class, 'update'])
+                ->middleware('permission:users.view');
+            
+            Route::delete('/{id}', [ShareClassController::class, 'destroy'])
+                ->middleware('role:Super Admin');
+        });
     });
 });

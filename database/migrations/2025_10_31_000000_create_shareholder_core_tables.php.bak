@@ -141,7 +141,7 @@ return new class extends Migration {
             $t->foreignId('verified_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('verified_at')->nullable();
             $t->timestamps();
-            $t->unique(['shareholder_id','bank_name','account_number'], 'uk_bank_mandate');
+            $t->unique(['shareholder_id','bank_name','account_number']);
         });
 
         // ------------------------------
