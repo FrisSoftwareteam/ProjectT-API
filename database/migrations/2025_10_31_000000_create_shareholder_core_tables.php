@@ -29,7 +29,7 @@ return new class extends Migration {
 
         Schema::create('user_activity_logs', function (Blueprint $t) {
             $t->id();
-            $t->foreignId('user_id')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('user_id')->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->string('action', 255);
             $t->json('metadata')->nullable();
             $t->timestamp('created_at')->useCurrent();
@@ -37,11 +37,11 @@ return new class extends Migration {
 
         Schema::create('user_kyc_documents', function (Blueprint $t) {
             $t->id();
-            $t->foreignId('user_id')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('user_id')->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->string('document_type', 100);
             $t->string('file_ref', 255)->nullable();
             $t->enum('status', ['pending','approved','rejected'])->default('pending');
-            $t->foreignId('reviewed_by')->nullable()->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('reviewed_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('reviewed_at')->nullable();
             $t->timestamps();
         });
@@ -88,7 +88,9 @@ return new class extends Migration {
             $t->id();
             $t->string('account_no', 20)->unique();
             $t->enum('holder_type', ['individual','corporate']);
-            $t->string('full_name', 255);
+            $t->string('first_name',255);
+            $t->string('last_name',100)->nullable();
+            $t->string('middle_name',100)->nullable();
             $t->string('email', 255)->unique();
             $t->string('phone', 32)->unique();
             $t->date('date_of_birth')->nullable();
@@ -108,7 +110,7 @@ return new class extends Migration {
             $t->date('issued_on')->nullable();
             $t->date('expires_on')->nullable();
             $t->enum('verified_status', ['pending','verified','rejected'])->default('pending');
-            $t->foreignId('verified_by')->nullable()->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('verified_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('verified_at')->nullable();
             $t->string('file_ref', 255)->nullable();
             $t->timestamps();
@@ -138,10 +140,10 @@ return new class extends Migration {
             $t->string('account_number', 20);
             $t->string('bvn', 20)->nullable();
             $t->enum('status', ['pending','verified','active','rejected','revoked'])->default('pending');
-            $t->foreignId('verified_by')->nullable()->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('verified_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('verified_at')->nullable();
             $t->timestamps();
-            $t->unique(['shareholder_id','bank_name','account_number']);
+            $t->unique(['shareholder_id','bank_name','account_number'], 'uk_bank_mandate');
         });
 
         // ------------------------------
@@ -196,7 +198,7 @@ return new class extends Migration {
             $t->string('tx_ref', 64)->nullable();
             $t->timestamp('tx_date');
             $t->timestamp('created_at')->useCurrent();
-            $t->foreignId('created_by')->nullable()->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('created_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->index(['sra_id','share_class_id','tx_date']);
             $t->index('tx_ref');
         });
@@ -217,7 +219,7 @@ return new class extends Migration {
             $t->decimal('scrip_ratio_den', 18, 6)->nullable();
             $t->enum('status', ['scheduled','approved','posted','closed'])->default('scheduled');
             $t->timestamps();
-            $t->foreignId('created_by')->nullable()->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('created_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
         });
 
         Schema::create('dividend_entitlements', function (Blueprint $t) {
@@ -244,7 +246,7 @@ return new class extends Migration {
             $t->string('paid_ref', 64)->nullable();
             $t->enum('status', ['initiated','paid','failed','reversed'])->default('initiated');
             $t->timestamps();
-            $t->foreignId('created_by')->nullable()->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('created_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
         });
 
         // ------------------------------
@@ -306,7 +308,7 @@ return new class extends Migration {
             $t->string('reason', 255)->nullable();
             $t->enum('status', ['draft','submitted','verified','approved_level1','approved_level2','rejected','applied'])->default('submitted');
             $t->string('control_no', 40);
-            $t->foreignId('submitted_by')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('submitted_by')->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('submitted_at')->useCurrent();
             $t->timestamp('updated_at')->useCurrent()->useCurrentOnUpdate();
             $t->index(['shareholder_id','status']);
@@ -317,7 +319,7 @@ return new class extends Migration {
             $t->foreignId('change_request_id')->constrained('shareholder_change_requests')->cascadeOnUpdate()->restrictOnDelete();
             $t->unsignedInteger('level_no');
             $t->enum('decision', ['approved','rejected']);
-            $t->foreignId('decided_by')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('decided_by')->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('decided_at')->useCurrent();
             $t->string('remarks', 255)->nullable();
             $t->unique(['change_request_id','level_no']);
@@ -327,7 +329,7 @@ return new class extends Migration {
             $t->id();
             $t->foreignId('shareholder_id')->constrained('shareholders')->cascadeOnUpdate()->restrictOnDelete();
             $t->enum('event_type', ['view_profile','export_profile','download_statement','create','update','delete']);
-            $t->foreignId('actor_user_id')->constrained('users')->cascadeOnUpdate()->restrictOnDelete();
+            $t->foreignId('actor_user_id')->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->json('event_payload')->nullable();
             $t->timestamp('created_at')->useCurrent();
             $t->index(['shareholder_id','created_at']);
@@ -338,6 +340,10 @@ return new class extends Migration {
     public function down(): void
     {
         // Drop in reverse order of dependencies
+
+        Schema::dropIfExists('user_activity_logs');
+        Schema::dropIfExists('positions');
+        Schema::dropIfExists('departments');
 
         Schema::dropIfExists('shareholder_audit_events');
         Schema::dropIfExists('shareholder_change_approvals');
@@ -367,8 +373,5 @@ return new class extends Migration {
         Schema::dropIfExists('companies');
 
         Schema::dropIfExists('user_kyc_documents');
-        Schema::dropIfExists('user_activity_logs');
-        Schema::dropIfExists('positions');
-        Schema::dropIfExists('departments');
     }
 };

@@ -1,11 +1,11 @@
 <?php
 
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\Admin\AdminUserController;
 use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\PermissionController;
+use App\Http\Controllers\Api\Admin\ShareholderController;
 
 /*
 |--------------------------------------------------------------------------
@@ -87,5 +87,20 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::get('/grouped/modules', [PermissionController::class, 'groupedByModule']);
         Route::get('/modules/list', [PermissionController::class, 'modules']);
         Route::get('/actions/list', [PermissionController::class, 'actions']);
+    });
+
+    // Shareholders API Routes
+    Route::prefix('shareholders')->group(function () {
+        Route::get('/', [ShareholderController::class, 'index']);
+        Route::post('/', [ShareholderController::class, 'store']);
+        Route::get('/{shareholder}', [ShareholderController::class, 'show']);
+        Route::put('/{shareholder}', [ShareholderController::class, 'update']);
+        Route::delete('/{shareholder}', [ShareholderController::class, 'destroy']);
+        Route::post('/{shareholder}/addresses', [ShareholderController::class, 'addAddress']);
+        Route::put('/{shareholder}/addresses/{address}', [ShareholderController::class, 'updateAddress']);
+        Route::post('/{shareholder}/mandates', [ShareholderController::class, 'addMandate']);
+        Route::put('/{shareholder}/mandates/{mandate}', [ShareholderController::class, 'updateMandate']);
+        Route::post('/{shareholder}/identities', [ShareholderController::class, 'shareholderIdentityCreate']);
+        Route::put('/{shareholder}/identities/{identity}', [ShareholderController::class, 'shareholderIdentityUpdate']);
     });
 });
