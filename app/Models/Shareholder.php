@@ -38,6 +38,11 @@ class Shareholder extends Model
 
     public function mandates()
     {
-        return $this->hasMany(ShareholderMandate::class);
+        return $this->hasMany(ShareholderMandate::class,'shareholder_id','id');
+    }
+
+    public function identities()
+    {
+        return $this->hasMany(ShareholderIdentity::class,'shareholder_id','id');
     }
 }

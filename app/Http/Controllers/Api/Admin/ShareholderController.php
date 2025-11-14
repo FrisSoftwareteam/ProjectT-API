@@ -24,7 +24,7 @@ class ShareholderController extends Controller
 
     public function index()
     {
-        $shareholders = Shareholder::all();
+        $shareholders = Shareholder::paginate(20);
 
         return response()->json($shareholders);
     }
@@ -41,7 +41,7 @@ class ShareholderController extends Controller
 
     public function show($id)
     {
-        $shareholder = Shareholder::find($id);
+        $shareholder = Shareholder::find($id)::with('addresses','mandates','identities')->get();
 
         return response()->json($shareholder);
     }
@@ -98,6 +98,12 @@ class ShareholderController extends Controller
             ->firstOrFail();
         $shareholderMandate->update($request->validated());
         return response()->json($shareholderMandate);
+    }
+
+    public function getAllShareholdersParameters($id)
+    {
+        $shareholderMandates = Shareholder::find($id)::with('addresses','mandates','identities')->get();
+        return response()->json($shareholderMandates);
     }
 
     public function shareholderIdentityCreate(ShareholderIdentityRequest $request, $id)
