@@ -10,11 +10,6 @@ class ShareClass extends Model
 {
     use HasFactory, SoftDeletes;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'register_id',
         'class_code',
@@ -23,11 +18,6 @@ class ShareClass extends Model
         'description',
     ];
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
-     */
     protected $casts = [
         'par_value' => 'decimal:6',
         'created_at' => 'datetime',
@@ -43,29 +33,30 @@ class ShareClass extends Model
         return $this->belongsTo(Register::class);
     }
 
-    /**
-     * Get the share positions for this share class.
-     */
-    public function sharePositions()
-    {
-        return $this->hasMany(SharePosition::class);
-    }
+    // TEMPORARILY COMMENTED OUT - Will enable when we create these models
+    // /**
+    //  * Get the share positions for this share class.
+    //  */
+    // public function sharePositions()
+    // {
+    //     return $this->hasMany(SharePosition::class);
+    // }
 
-    /**
-     * Get the share lots for this share class.
-     */
-    public function shareLots()
-    {
-        return $this->hasMany(ShareLot::class);
-    }
+    // /**
+    //  * Get the share lots for this share class.
+    //  */
+    // public function shareLots()
+    // {
+    //     return $this->hasMany(ShareLot::class);
+    // }
 
-    /**
-     * Get the share transactions for this share class.
-     */
-    public function shareTransactions()
-    {
-        return $this->hasMany(ShareTransaction::class);
-    }
+    // /**
+    //  * Get the share transactions for this share class.
+    //  */
+    // public function shareTransactions()
+    // {
+    //     return $this->hasMany(ShareTransaction::class);
+    // }
 
     /**
      * Scope a query to filter by currency.
@@ -80,6 +71,6 @@ class ShareClass extends Model
      */
     public function getFormattedParValueAttribute(): string
     {
-        return number_format($this->par_value, 2) . ' ' . $this->currency;
+        return number_format((float)$this->par_value, 2) . ' ' . $this->currency;
     }
 }

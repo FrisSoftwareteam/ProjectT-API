@@ -232,46 +232,48 @@ class ShareClassController extends Controller
     }
 
     /**
-     * Remove the specified share class (soft delete).
-     */
-    public function destroy(Request $request, $id): JsonResponse
-    {
-        try {
-            $shareClass = ShareClass::findOrFail($id);
+ * Remove the specified share class (soft delete).
+ */
+public function destroy(Request $request, $id): JsonResponse
+{
+    try {
+        $shareClass = ShareClass::findOrFail($id);
 
-            // Check if share class has associated positions or transactions
-            if ($shareClass->sharePositions()->exists() || $shareClass->shareTransactions()->exists()) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Cannot delete share class with associated positions or transactions',
-                ], 422);
-            }
+        // For now, we'll allow deletion since we haven't built the related features yet
+        // When you create SharePosition and ShareTransaction models, uncomment the check below:
+        
+        // if ($shareClass->sharePositions()->exists() || $shareClass->shareTransactions()->exists()) {
+        //     return response()->json([
+        //         'success' => false,
+        //         'message' => 'Cannot delete share class with associated positions or transactions',
+        //     ], 422);
+        // }
 
-            $shareClass->delete();
+        $shareClass->delete();
 
-            Log::info('Share class deleted', [
-                'share_class_id' => $shareClass->id,
-                'register_id' => $shareClass->register_id,
-                'deleted_by' => $request->user()->id
-            ]);
+        Log::info('Share class deleted', [
+            'share_class_id' => $shareClass->id,
+            'register_id' => $shareClass->register_id,
+            'deleted_by' => $request->user()->id
+        ]);
 
-            return response()->json([
-                'success' => true,
-                'message' => 'Share class deleted successfully',
-            ]);
-        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Share class not found',
-            ], 404);
-        } catch (\Exception $e) {
-            Log::error('Error deleting share class: ' . $e->getMessage());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Error deleting share class',
-                'error' => $e->getMessage()
-            ], 500);
-        }
+        return response()->json([
+            'success' => true,
+            'message' => 'Share class deleted successfully',
+        ]);
+    } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Share class not found',
+        ], 404);
+    } catch (\Exception $e) {
+        Log::error('Error deleting share class: ' . $e->getMessage());
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Error deleting share class',
+            'error' => $e->getMessage()
+        ], 500);
     }
+}
 }

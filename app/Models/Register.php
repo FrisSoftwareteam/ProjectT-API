@@ -10,11 +10,6 @@ class Register extends Model
 {
     use HasFactory, SoftDeletes;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
     protected $fillable = [
         'company_id',
         'register_code',
@@ -23,11 +18,6 @@ class Register extends Model
         'status',
     ];
 
-    /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
-     */
     protected $casts = [
         'is_default' => 'boolean',
         'created_at' => 'datetime',
@@ -51,13 +41,14 @@ class Register extends Model
         return $this->hasMany(ShareClass::class);
     }
 
-    /**
-     * Get the shareholder register accounts for this register.
-     */
-    public function shareholderRegisterAccounts()
-    {
-        return $this->hasMany(ShareholderRegisterAccount::class);
-    }
+    // TEMPORARILY COMMENTED OUT - Will enable when we create this model
+    // /**
+    //  * Get the shareholder register accounts for this register.
+    //  */
+    // public function shareholderRegisterAccounts()
+    // {
+    //     return $this->hasMany(ShareholderRegisterAccount::class);
+    // }
 
     /**
      * Scope a query to only include active registers.
