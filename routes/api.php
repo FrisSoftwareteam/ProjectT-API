@@ -6,6 +6,10 @@ use App\Http\Controllers\Api\Admin\AuthController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\PermissionController;
 use App\Http\Controllers\Api\Admin\ShareholderController;
+use App\Http\Controllers\Api\UserActivityLogController;
+use App\Http\Controllers\Api\SraGuardianController;
+use App\Http\Controllers\Api\ProbateCaseController;
+use App\Http\Controllers\Api\ShareAllocationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -102,5 +106,58 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/{shareholder}/mandates/{mandate}', [ShareholderController::class, 'updateMandate']);
         Route::post('/{shareholder}/identities', [ShareholderController::class, 'shareholderIdentityCreate']);
         Route::put('/{shareholder}/identities/{identity}', [ShareholderController::class, 'shareholderIdentityUpdate']);
+        // Allocate shares to a shareholder
+        Route::post('/{shareholder}/shares', [ShareAllocationController::class, 'allocate']);
+    });
+
+    // User Activity Logs
+    Route::prefix('user-activity-logs')->group(function () {
+        Route::get('/', [UserActivityLogController::class, 'index']);
+        Route::post('/', [UserActivityLogController::class, 'store']);
+        Route::get('/{userActivityLog}', [UserActivityLogController::class, 'show']);
+        Route::put('/{userActivityLog}', [UserActivityLogController::class, 'update']);
+        Route::delete('/{userActivityLog}', [UserActivityLogController::class, 'destroy']);
+        Route::post('/bulk-delete', [UserActivityLogController::class, 'bulkDestroy']);
+        Route::post('/{id}/restore', [UserActivityLogController::class, 'restore']);
+        Route::delete('/{id}/force', [UserActivityLogController::class, 'forceDelete']);
+    });
+
+    // Guardianship (SRA Guardians)
+    Route::prefix('sra-guardians')->group(function () {
+        Route::get('/', [SraGuardianController::class, 'index']);
+        Route::post('/', [SraGuardianController::class, 'store']);
+        Route::get('/{sraGuardian}', [SraGuardianController::class, 'show']);
+        Route::put('/{sraGuardian}', [SraGuardianController::class, 'update']);
+        Route::delete('/{sraGuardian}', [SraGuardianController::class, 'destroy']);
+    });
+
+    // Probate cases & beneficiaries
+    Route::prefix('probates')->group(function () {
+        Route::get('/', [ProbateCaseController::class, 'index']);
+        Route::post('/', [ProbateCaseController::class, 'store']);
+        Route::get('/{probateCase}', [ProbateCaseController::class, 'show']);
+        Route::put('/{probateCase}', [ProbateCaseController::class, 'update']);
+        Route::delete('/{probateCase}', [ProbateCaseController::class, 'destroy']);
+
+        // beneficiaries under a probate case
+        Route::post('/{probateCase}/beneficiaries', [ProbateCaseController::class, 'addBeneficiary']);
+        Route::post('/beneficiaries/{id}/execute', [ProbateCaseController::class, 'executeBeneficiary']);
+    });
+
+    // Share data endpoints
+    Route::prefix('share-positions')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\SharePositionController::class, 'index']);
+        Route::get('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'show']);
+        Route::put('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'update']);
+    });
+
+    Route::prefix('share-lots')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\ShareLotController::class, 'index']);
+        Route::get('/{shareLot}', [\App\Http\Controllers\Api\ShareLotController::class, 'show']);
+    });
+
+    Route::prefix('share-transactions')->group(function () {
+        Route::get('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'index']);
+        Route::get('/{shareTransaction}', [\App\Http\Controllers\Api\ShareTransactionController::class, 'show']);
     });
 });
