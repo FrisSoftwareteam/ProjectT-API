@@ -88,9 +88,7 @@ return new class extends Migration {
             $t->id();
             $t->string('account_no', 20)->unique();
             $t->enum('holder_type', ['individual','corporate']);
-            $t->string('first_name',255);
-            $t->string('last_name',100)->nullable();
-            $t->string('middle_name',100)->nullable();
+            $t->string('full_name', 255);
             $t->string('email', 255)->unique();
             $t->string('phone', 32)->unique();
             $t->date('date_of_birth')->nullable();
@@ -143,7 +141,7 @@ return new class extends Migration {
             $t->foreignId('verified_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
             $t->timestamp('verified_at')->nullable();
             $t->timestamps();
-            $t->unique(['shareholder_id','bank_name','account_number'], 'uk_bank_mandate');
+            $t->unique(['shareholder_id','bank_name','account_number']);
         });
 
         // ------------------------------
@@ -341,10 +339,6 @@ return new class extends Migration {
     {
         // Drop in reverse order of dependencies
 
-        Schema::dropIfExists('user_activity_logs');
-        Schema::dropIfExists('positions');
-        Schema::dropIfExists('departments');
-
         Schema::dropIfExists('shareholder_audit_events');
         Schema::dropIfExists('shareholder_change_approvals');
         Schema::dropIfExists('shareholder_change_requests');
@@ -373,5 +367,8 @@ return new class extends Migration {
         Schema::dropIfExists('companies');
 
         Schema::dropIfExists('user_kyc_documents');
+        Schema::dropIfExists('user_activity_logs');
+        Schema::dropIfExists('positions');
+        Schema::dropIfExists('departments');
     }
 };
