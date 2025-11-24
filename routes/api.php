@@ -75,25 +75,25 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Permissions API Routes
     Route::prefix('permissions')->group(function () {
         Route::get('/', [PermissionController::class, 'index'])->middleware('permission:permissions.view');
-        Route::post('/', [PermissionController::class, 'store']);
+        Route::post('/', [PermissionController::class, 'store'])->middleware('permission:permissions.create');
         Route::post('/bulk', [PermissionController::class, 'bulkCreate'])->middleware('permission:permissions.create');
         Route::get('/{permission}', [PermissionController::class, 'show'])->middleware('permission:permissions.view');
         Route::put('/{permission}', [PermissionController::class, 'update'])->middleware('permission:permissions.edit');
-        Route::delete('/{permission}', [PermissionController::class, 'destroy']);
+        Route::delete('/{permission}', [PermissionController::class, 'destroy'])->middleware('permission:permissions.delete');
         
         // Permission-specific endpoints
-        Route::get('/{permission}/roles', [PermissionController::class, 'roles']);
-        Route::get('/{permission}/users', [PermissionController::class, 'users']);
-        Route::get('/grouped/modules', [PermissionController::class, 'groupedByModule']);
-        Route::get('/modules/list', [PermissionController::class, 'modules']);
-        Route::get('/actions/list', [PermissionController::class, 'actions']);
+        Route::get('/{permission}/roles', [PermissionController::class, 'roles'])->middleware('permission:permissions.view');
+        Route::get('/{permission}/users', [PermissionController::class, 'users'])->middleware('permission:permissions.view');
+        Route::get('/grouped/modules', [PermissionController::class, 'groupedByModule'])->middleware('permission:permissions.view');
+        Route::get('/modules/list', [PermissionController::class, 'modules'])->middleware('permission:permissions.view');
+        Route::get('/actions/list', [PermissionController::class, 'actions'])->middleware('permission:permissions.view');
     });
 
     // Shareholders API Routes
     Route::prefix('shareholders')->group(function () {
-        Route::get('/', [ShareholderController::class, 'index']);
+        Route::get('/', [ShareholderController::class, 'index'])->middleware('permission:shareholders.view');
         Route::post('/', [ShareholderController::class, 'store'])->middleware('permission:shareholders.create');
-        Route::get('/{shareholder}', [ShareholderController::class, 'show']);
+        Route::get('/{shareholder}', [ShareholderController::class, 'show'])->middleware('permission:shareholders.view');
         Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit');
         Route::delete('/{shareholder}', [ShareholderController::class, 'destroy'])->middleware('permission:shareholders.delete');
         Route::post('/{shareholder}/addresses', [ShareholderController::class, 'addAddress'])->middleware('permission:shareholders.edit');
