@@ -44,6 +44,13 @@ class RolesAndPermissionsSeeder extends Seeder
             'shares.transfer',
             'shares.export',
 
+            // Shareholder Mandate Management
+            'shareholder_mandates.view',
+            'shareholder_mandates.create',
+            'shareholder_mandates.edit',
+            'shareholder_mandates.delete',
+            'shareholder_mandates.export',
+
             // Certificate Management
             'certificates.view',
             'certificates.create',
