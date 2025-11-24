@@ -135,6 +135,40 @@ class RolesAndPermissionsSeeder extends Seeder
             'mailing.view',
             'mailing.send',
             'mailing.manage',
+
+            // SRA Guardians
+            'sra_guardians.view',
+            'sra_guardians.create',
+            'sra_guardians.edit',
+            'sra_guardians.delete',
+            'sra_guardians.export',
+
+            // Probate Cases
+            'probates.view',
+            'probates.create',
+            'probates.edit',
+            'probates.delete',
+            'probates.export',
+
+            // Share Positions
+            'share_positions.view',
+            'share_positions.create',
+            'share_positions.edit',
+            'share_positions.delete',
+            'share_positions.export',
+
+            // Share Lots
+            'share_lots.view',
+            'share_lots.create',
+            'share_lots.edit',
+            'share_lots.delete',
+            'share_lots.export',
+
+            // Share Transactions
+            'share_transactions.view',
+            'share_transactions.create',
+            'share_transactions.edit',
+            'share_transactions.delete',
         ];
 
         foreach ($permissions as $permission) {
@@ -181,7 +215,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'guard_name' => 'web',
         ]);
         $role->syncPermissions([
-            'users.view', 'users.create', 'users.edit', 'users.activate', 'users.deactivate',
+            'users.view', 'users.create', 'users.edit', 'users.delete', 'users.activate', 'users.deactivate',
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
             'certificates.view', 'certificates.create', 'certificates.edit', 'certificates.issue',

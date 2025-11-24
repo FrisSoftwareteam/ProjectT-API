@@ -43,12 +43,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
     
     // Admin Users API Routes
     Route::prefix('admin/users')->group(function () {
-        Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles']);
-        Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles']);
-        Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles']);
-        Route::post('/{adminUser}/permissions', [AdminUserController::class, 'assignPermissions']);
-        Route::delete('/{adminUser}/permissions', [AdminUserController::class, 'revokePermissions']);
-        Route::get('/{adminUser}/permissions', [AdminUserController::class, 'getPermissions']);
+        Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles'])->middleware('permission:users.edit');
+        Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles'])->middleware('permission:users.edit');
+        Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles'])->middleware('permission:users.view');
+        Route::post('/{adminUser}/permissions', [AdminUserController::class, 'assignPermissions'])->middleware('permission:users.edit');
+        Route::delete('/{adminUser}/permissions', [AdminUserController::class, 'revokePermissions'])->middleware('permission:users.edit');
+        Route::get('/{adminUser}/permissions', [AdminUserController::class, 'getPermissions'])->middleware('permission:users.view');
     });
     
     // Admin Users CRUD
@@ -104,53 +104,53 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     // User Activity Logs
     Route::prefix('user-activity-logs')->group(function () {
-        Route::get('/', [UserActivityLogController::class, 'index']);
-        Route::post('/', [UserActivityLogController::class, 'store']);
-        Route::get('/{userActivityLog}', [UserActivityLogController::class, 'show']);
-        Route::put('/{userActivityLog}', [UserActivityLogController::class, 'update']);
-        Route::delete('/{userActivityLog}', [UserActivityLogController::class, 'destroy']);
-        Route::post('/bulk-delete', [UserActivityLogController::class, 'bulkDestroy']);
-        Route::post('/{id}/restore', [UserActivityLogController::class, 'restore']);
-        Route::delete('/{id}/force', [UserActivityLogController::class, 'forceDelete']);
+        Route::get('/', [UserActivityLogController::class, 'index'])->middleware('permission:user_activity_logs.view');
+        Route::post('/', [UserActivityLogController::class, 'store'])->middleware('permission:user_activity_logs.create');
+        Route::get('/{userActivityLog}', [UserActivityLogController::class, 'show'])->middleware('permission:user_activity_logs.view');
+        Route::put('/{userActivityLog}', [UserActivityLogController::class, 'update'])->middleware('permission:user_activity_logs.edit');
+        Route::delete('/{userActivityLog}', [UserActivityLogController::class, 'destroy'])->middleware('permission:user_activity_logs.delete');
+        Route::post('/bulk-delete', [UserActivityLogController::class, 'bulkDestroy'])->middleware('permission:user_activity_logs.delete');
+        Route::post('/{id}/restore', [UserActivityLogController::class, 'restore'])->middleware('permission:user_activity_logs.edit');
+        Route::delete('/{id}/force', [UserActivityLogController::class, 'forceDelete'])->middleware('permission:user_activity_logs.delete');
     });
 
     // Guardianship (SRA Guardians)
     Route::prefix('sra-guardians')->group(function () {
-        Route::get('/', [SraGuardianController::class, 'index']);
-        Route::post('/', [SraGuardianController::class, 'store']);
-        Route::get('/{sraGuardian}', [SraGuardianController::class, 'show']);
-        Route::put('/{sraGuardian}', [SraGuardianController::class, 'update']);
-        Route::delete('/{sraGuardian}', [SraGuardianController::class, 'destroy']);
+        Route::get('/', [SraGuardianController::class, 'index'])->middleware('permission:sra_guardians.view');
+        Route::post('/', [SraGuardianController::class, 'store'])->middleware('permission:sra_guardians.create');
+        Route::get('/{sraGuardian}', [SraGuardianController::class, 'show'])->middleware('permission:sra_guardians.view');
+        Route::put('/{sraGuardian}', [SraGuardianController::class, 'update'])->middleware('permission:sra_guardians.edit');
+        Route::delete('/{sraGuardian}', [SraGuardianController::class, 'destroy'])->middleware('permission:sra_guardians.delete');
     });
 
     // Probate cases & beneficiaries
     Route::prefix('probates')->group(function () {
-        Route::get('/', [ProbateCaseController::class, 'index']);
-        Route::post('/', [ProbateCaseController::class, 'store']);
-        Route::get('/{probateCase}', [ProbateCaseController::class, 'show']);
-        Route::put('/{probateCase}', [ProbateCaseController::class, 'update']);
-        Route::delete('/{probateCase}', [ProbateCaseController::class, 'destroy']);
+        Route::get('/', [ProbateCaseController::class, 'index'])->middleware('permission:probates.view');
+        Route::post('/', [ProbateCaseController::class, 'store'])->middleware('permission:probates.create');
+        Route::get('/{probateCase}', [ProbateCaseController::class, 'show'])->middleware('permission:probates.view');
+        Route::put('/{probateCase}', [ProbateCaseController::class, 'update'])->middleware('permission:probates.edit');
+        Route::delete('/{probateCase}', [ProbateCaseController::class, 'destroy'])->middleware('permission:probates.delete');
 
         // beneficiaries under a probate case
-        Route::post('/{probateCase}/beneficiaries', [ProbateCaseController::class, 'addBeneficiary']);
-        Route::post('/beneficiaries/{id}/execute', [ProbateCaseController::class, 'executeBeneficiary']);
+        Route::post('/{probateCase}/beneficiaries', [ProbateCaseController::class, 'addBeneficiary'])->middleware('permission:probates.edit');
+        Route::post('/beneficiaries/{id}/execute', [ProbateCaseController::class, 'executeBeneficiary'])->middleware('permission:probates.edit');
     });
 
     // Share data endpoints
     Route::prefix('share-positions')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\SharePositionController::class, 'index']);
-        Route::get('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'show']);
-        Route::put('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'update']);
+        Route::get('/', [\App\Http\Controllers\Api\SharePositionController::class, 'index'])->middleware('permission:shares.view');
+        Route::get('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'show'])->middleware('permission:shares.view');
+        Route::put('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'update'])->middleware('permission:shares.edit');
     });
 
     Route::prefix('share-lots')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\ShareLotController::class, 'index']);
-        Route::get('/{shareLot}', [\App\Http\Controllers\Api\ShareLotController::class, 'show']);
+        Route::get('/', [\App\Http\Controllers\Api\ShareLotController::class, 'index'])->middleware('permission:shares.view');
+        Route::get('/{shareLot}', [\App\Http\Controllers\Api\ShareLotController::class, 'show'])->middleware('permission:shares.view');
     });
 
     Route::prefix('share-transactions')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'index']);
-        Route::get('/{shareTransaction}', [\App\Http\Controllers\Api\ShareTransactionController::class, 'show']);
+        Route::get('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'index'])->middleware('permission:shares.view');
+        Route::get('/{shareTransaction}', [\App\Http\Controllers\Api\ShareTransactionController::class, 'show'])->middleware('permission:shares.view');
     });
 
     /*
