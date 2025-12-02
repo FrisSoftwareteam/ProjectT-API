@@ -21,7 +21,9 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          # Better to align with what Azure supports (e.g. 8.2 or 8.3)
+          php-version: '8.2'
+          extensions: mbstring, intl, pdo_mysql, bcmath, openssl, tokenizer
 
       - name: Check if composer.json exists
         id: check_files
@@ -29,10 +31,21 @@ jobs:
         with:
           files: 'composer.json'
 
-      - name: Run composer install if composer.json exists
+      - name: Install dependencies (composer)
         if: steps.check_files.outputs.files_exists == 'true'
-        run: composer validate --no-check-publish && composer install --prefer-dist --no-progress
+        run: |
+          composer validate --no-check-publish
+          composer install --prefer-dist --no-progress --no-dev
+          composer dump-autoload --optimize
 
+      # Optional: run Laravel optimizations on the artifact
+      - name: Laravel optimizations
+        if: steps.check_files.outputs.files_exists == 'true'
+        run: |
+          php artisan config:clear || true
+          php artisan config:cache || true
+          php artisan route:cache || true
+          php artisan view:cache || true
 
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
@@ -45,14 +58,14 @@ jobs:
     needs: build
     permissions:
       id-token: write #This is required for requesting the JWT
-      contents: read #This is required for actions/checkout
+      contents: read  #This is required for actions/checkout
 
     steps:
       - name: Download artifact from build job
         uses: actions/download-artifact@v4
         with:
           name: php-app
-      
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -67,4 +80,3 @@ jobs:
           app-name: 'Project-TAPI'
           slot-name: 'Production'
           package: .
-          
