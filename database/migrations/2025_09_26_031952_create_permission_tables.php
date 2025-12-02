@@ -11,14 +11,35 @@ return new class extends Migration
      */
     public function up(): void
     {
-        $teams = config('permission.teams');
-        $tableNames = config('permission.table_names');
-        $columnNames = config('permission.column_names');
+        // Fallback defaults if config/permission.php hasn't been published or loaded
+        $defaultTableNames = [
+            'permissions' => 'permissions',
+            'roles' => 'roles',
+            'model_has_permissions' => 'model_has_permissions',
+            'model_has_roles' => 'model_has_roles',
+            'role_has_permissions' => 'role_has_permissions',
+        ];
+
+        $defaultColumnNames = [
+            'model_morph_key' => 'model_id',
+            'team_foreign_key' => 'team_id',
+            'role_pivot_key' => 'role_id',
+            'permission_pivot_key' => 'permission_id',
+        ];
+
+        $teams = config('permission.teams', false);
+        $tableNames = config('permission.table_names', $defaultTableNames);
+        $columnNames = config('permission.column_names', $defaultColumnNames);
         $pivotRole = $columnNames['role_pivot_key'] ?? 'role_id';
         $pivotPermission = $columnNames['permission_pivot_key'] ?? 'permission_id';
 
-        throw_if(empty($tableNames), new Exception('Error: config/permission.php not loaded. Run [php artisan config:clear] and try again.'));
-        throw_if($teams && empty($columnNames['team_foreign_key'] ?? null), new Exception('Error: team_foreign_key on config/permission.php not loaded. Run [php artisan config:clear] and try again.'));
+        // If config missing, fall back to defaults instead of throwing to avoid breaking migrations
+        if (empty($tableNames) || !is_array($tableNames)) {
+            $tableNames = $defaultTableNames;
+        }
+        if (empty($columnNames) || !is_array($columnNames)) {
+            $columnNames = $defaultColumnNames;
+        }
 
         Schema::create($tableNames['permissions'], static function (Blueprint $table) {
             // $table->engine('InnoDB');
@@ -111,9 +132,14 @@ return new class extends Migration
             $table->primary([$pivotPermission, $pivotRole], 'role_has_permissions_permission_id_role_id_primary');
         });
 
-        app('cache')
-            ->store(config('permission.cache.store') != 'default' ? config('permission.cache.store') : null)
-            ->forget(config('permission.cache.key'));
+        // Clear the package cache key if possible; wrap to avoid breaking migrations
+        try {
+            $cacheKey = config('permission.cache.key', 'spatie.permission.cache');
+            $store = config('permission.cache.store', null) !== 'default' ? config('permission.cache.store') : null;
+            app('cache')->store($store)->forget($cacheKey);
+        } catch (\Throwable $e) {
+            // If cache or config is not available, continue without failing migrations.
+        }
     }
 
     /**
@@ -121,16 +147,24 @@ return new class extends Migration
      */
     public function down(): void
     {
-        $tableNames = config('permission.table_names');
+        // Use same defaults as up() so rollback doesn't throw if config missing
+        $defaultTableNames = [
+            'permissions' => 'permissions',
+            'roles' => 'roles',
+            'model_has_permissions' => 'model_has_permissions',
+            'model_has_roles' => 'model_has_roles',
+            'role_has_permissions' => 'role_has_permissions',
+        ];
 
-        if (empty($tableNames)) {
-            throw new \Exception('Error: config/permission.php not found and defaults could not be merged. Please publish the package configuration before proceeding, or drop the tables manually.');
+        $tableNames = config('permission.table_names', $defaultTableNames);
+        if (empty($tableNames) || !is_array($tableNames)) {
+            $tableNames = $defaultTableNames;
         }
 
-        Schema::drop($tableNames['role_has_permissions']);
-        Schema::drop($tableNames['model_has_roles']);
-        Schema::drop($tableNames['model_has_permissions']);
-        Schema::drop($tableNames['roles']);
-        Schema::drop($tableNames['permissions']);
+        Schema::dropIfExists($tableNames['role_has_permissions'] ?? 'role_has_permissions');
+        Schema::dropIfExists($tableNames['model_has_roles'] ?? 'model_has_roles');
+        Schema::dropIfExists($tableNames['model_has_permissions'] ?? 'model_has_permissions');
+        Schema::dropIfExists($tableNames['roles'] ?? 'roles');
+        Schema::dropIfExists($tableNames['permissions'] ?? 'permissions');
     }
 };
