@@ -339,12 +339,7 @@ return new class extends Migration {
 
     public function down(): void
     {
-        // Drop in reverse order of dependencies
-
-        Schema::dropIfExists('user_activity_logs');
-        Schema::dropIfExists('positions');
-        Schema::dropIfExists('departments');
-
+        // Drop in reverse order of creation to avoid FK constraint issues
         Schema::dropIfExists('shareholder_audit_events');
         Schema::dropIfExists('shareholder_change_approvals');
         Schema::dropIfExists('shareholder_change_requests');
@@ -373,5 +368,8 @@ return new class extends Migration {
         Schema::dropIfExists('companies');
 
         Schema::dropIfExists('user_kyc_documents');
+        Schema::dropIfExists('user_activity_logs');
+        Schema::dropIfExists('positions');
+        Schema::dropIfExists('departments');
     }
 };
