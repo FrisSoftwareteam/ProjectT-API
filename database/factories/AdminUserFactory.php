@@ -3,11 +3,12 @@
 namespace Database\Factories;
 
 use App\Models\AdminUser;
-use Faker\Factory as FakerFactory;
 use Illuminate\Database\Eloquent\Factories\Factory;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 /**
- * @extends \Illuminate\Database\Eloquent\Factories\Factory<\App\Models\AdminUser>
+ * @extends \Illuminate\Database\Eloquent\Factories.Factory<\App\Models\AdminUser>
  */
 class AdminUserFactory extends Factory
 {
@@ -15,29 +16,48 @@ class AdminUserFactory extends Factory
 
     public function definition(): array
     {
-        // Use a static Faker instance so we don't recreate it every time
-        static $faker = null;
+        // basic pools for fake-ish data
+        $firstNames = ['John', 'Jane', 'Michael', 'Sarah', 'David', 'Mary', 'Daniel', 'Grace', 'Joshua', 'Tosin'];
+        $lastNames  = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Garcia', 'Musa', 'Okafor', 'Adebayo', 'Esan'];
 
-        if ($faker === null) {
-            $faker = FakerFactory::create();
+        $departments = [
+            'IT', 'Finance', 'HR', 'Operations', 'Compliance',
+            'Customer Service', 'Marketing', 'Legal',
+        ];
+
+        $firstName = $firstNames[array_rand($firstNames)];
+        $lastName  = $lastNames[array_rand($lastNames)];
+
+        // 90% chance active
+        $isActive = random_int(1, 100) <= 90;
+
+        // 70% chance of having a last_login_at within the last 30 days
+        $lastLoginAt = null;
+        if (random_int(1, 100) <= 70) {
+            $daysAgo = random_int(0, 30);
+            $lastLoginAt = Carbon::now()->subDays($daysAgo);
+        }
+
+        // 30% chance of having a profile picture
+        $profilePicture = null;
+        if (random_int(1, 100) <= 30) {
+            // simple avatar placeholder
+            $profilePicture = 'https://i.pravatar.cc/200?u=' . Str::uuid()->toString();
         }
 
         return [
-            'microsoft_id' => $faker->unique()->uuid(),
-            'email'        => $faker->unique()->safeEmail(),
-            'first_name'   => $faker->firstName(),
-            'last_name'    => $faker->lastName(),
-            'department'   => $faker->randomElement([
-                'IT', 'Finance', 'HR', 'Operations', 'Compliance',
-                'Customer Service', 'Marketing', 'Legal',
-            ]),
-            'is_active'    => $faker->boolean(90), // 90% chance of being active
-            'last_login_at' => $faker->optional(0.7)->dateTimeBetween('-30 days', 'now'),
-            'profile_picture' => $faker->optional(0.3)->imageUrl(200, 200, 'people'),
+            'microsoft_id'   => (string) Str::uuid(),
+            'email'          => strtolower($firstName . '.' . $lastName) . '+' . Str::random(5) . '@example.com',
+            'first_name'     => $firstName,
+            'last_name'      => $lastName,
+            'department'     => $departments[array_rand($departments)],
+            'is_active'      => $isActive,
+            'last_login_at'  => $lastLoginAt,
+            'profile_picture'=> $profilePicture,
             'microsoft_data' => [
-                'displayName'       => $faker->name(),
-                'jobTitle'          => $faker->jobTitle(),
-                'officeLocation'    => $faker->city(),
+                'displayName'       => $firstName . ' ' . $lastName,
+                'jobTitle'          => 'System ' . ['Administrator', 'Analyst', 'Manager', 'Engineer'][array_rand(['Administrator', 'Analyst', 'Manager', 'Engineer'])],
+                'officeLocation'    => ['Head Office', 'Lagos', 'Abuja', 'Remote'][array_rand(['Head Office', 'Lagos', 'Abuja', 'Remote'])],
                 'preferredLanguage' => 'en-US',
             ],
         ];
