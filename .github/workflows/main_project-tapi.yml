@@ -35,7 +35,7 @@ jobs:
         if: steps.check_files.outputs.files_exists == 'true'
         run: |
           composer validate --no-check-publish
-          composer install --prefer-dist --no-progress --no-dev
+          composer install
           composer dump-autoload --optimize
 
       # Optional: run Laravel optimizations on the artifact
