@@ -218,6 +218,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             Route::delete('/{id}', [ShareClassController::class, 'destroy'])
                 ->middleware('role:Super Admin');
+            
+             // New tax calculation endpoint
+            Route::post('/{id}/calculate-tax', [ShareClassController::class, 'calculateTax'])
+               ->middleware('permission:users.view');    
         });
     });
 });

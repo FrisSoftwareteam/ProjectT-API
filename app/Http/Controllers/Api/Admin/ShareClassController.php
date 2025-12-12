@@ -79,6 +79,7 @@ class ShareClassController extends Controller
                 'currency' => 'nullable|string|size:3',
                 'par_value' => 'nullable|numeric|min:0|max:999999999999.999999',
                 'description' => 'nullable|string|max:255',
+                'withholding_tax_rate' => 'nullable|numeric|min:0|max:100',
             ]);
 
             // Check for unique combination of register_id and class_code
@@ -97,6 +98,7 @@ class ShareClassController extends Controller
             // Set default values
             $validated['currency'] = $validated['currency'] ?? 'NGN';
             $validated['par_value'] = $validated['par_value'] ?? 0;
+            $validated['withholding_tax_rate'] = $validated['withholding_tax_rate'] ?? 0;
 
             $shareClass = ShareClass::create($validated);
             $shareClass->load('register.company');
@@ -105,6 +107,7 @@ class ShareClassController extends Controller
                 'share_class_id' => $shareClass->id,
                 'register_id' => $shareClass->register_id,
                 'class_code' => $shareClass->class_code,
+                'withholding_tax_rate' => $shareClass->withholding_tax_rate,
                 'created_by' => $request->user()->id
             ]);
 
@@ -179,6 +182,7 @@ class ShareClassController extends Controller
                 'currency' => 'nullable|string|size:3',
                 'par_value' => 'nullable|numeric|min:0|max:999999999999.999999',
                 'description' => 'nullable|string|max:255',
+                'withholding_tax_rate' => 'nullable|numeric|min:0|max:100',
             ]);
 
             // Check for unique combination of register_id and class_code
@@ -201,6 +205,7 @@ class ShareClassController extends Controller
             Log::info('Share class updated', [
                 'share_class_id' => $shareClass->id,
                 'register_id' => $shareClass->register_id,
+                'withholding_tax_rate' => $shareClass->withholding_tax_rate,
                 'updated_by' => $request->user()->id
             ]);
 
@@ -232,48 +237,115 @@ class ShareClassController extends Controller
     }
 
     /**
- * Remove the specified share class (soft delete).
- */
-public function destroy(Request $request, $id): JsonResponse
-{
-    try {
-        $shareClass = ShareClass::findOrFail($id);
+     * Remove the specified share class (soft delete).
+     */
+    public function destroy(Request $request, $id): JsonResponse
+    {
+        try {
+            $shareClass = ShareClass::findOrFail($id);
 
-        // For now, we'll allow deletion since we haven't built the related features yet
-        // When you create SharePosition and ShareTransaction models, uncomment the check below:
-        
-        // if ($shareClass->sharePositions()->exists() || $shareClass->shareTransactions()->exists()) {
-        //     return response()->json([
-        //         'success' => false,
-        //         'message' => 'Cannot delete share class with associated positions or transactions',
-        //     ], 422);
-        // }
+            // For now, we'll allow deletion since we haven't built the related features yet
+            // When you create SharePosition and ShareTransaction models, uncomment the check below:
+            
+            // if ($shareClass->sharePositions()->exists() || $shareClass->shareTransactions()->exists()) {
+            //     return response()->json([
+            //         'success' => false,
+            //         'message' => 'Cannot delete share class with associated positions or transactions',
+            //     ], 422);
+            // }
 
-        $shareClass->delete();
+            $shareClass->delete();
 
-        Log::info('Share class deleted', [
-            'share_class_id' => $shareClass->id,
-            'register_id' => $shareClass->register_id,
-            'deleted_by' => $request->user()->id
-        ]);
+            Log::info('Share class deleted', [
+                'share_class_id' => $shareClass->id,
+                'register_id' => $shareClass->register_id,
+                'deleted_by' => $request->user()->id
+            ]);
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Share class deleted successfully',
-        ]);
-    } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
-        return response()->json([
-            'success' => false,
-            'message' => 'Share class not found',
-        ], 404);
-    } catch (\Exception $e) {
-        Log::error('Error deleting share class: ' . $e->getMessage());
-        
-        return response()->json([
-            'success' => false,
-            'message' => 'Error deleting share class',
-            'error' => $e->getMessage()
-        ], 500);
+            return response()->json([
+                'success' => true,
+                'message' => 'Share class deleted successfully',
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Share class not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error deleting share class: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error deleting share class',
+                'error' => $e->getMessage()
+            ], 500);
+        }
     }
-}
+
+    /**
+     * Calculate withholding tax for a given amount.
+     */
+    public function calculateTax(Request $request, $id): JsonResponse
+    {
+        try {
+            $shareClass = ShareClass::findOrFail($id);
+
+            $validated = $request->validate([
+                'amount' => 'required|numeric|min:0',
+            ]);
+
+            $amount = (float) $validated['amount'];
+            $taxAmount = $shareClass->calculateWithholdingTax($amount);
+            $netAmount = $shareClass->calculateNetAmount($amount);
+
+            Log::info('Tax calculation performed', [
+                'share_class_id' => $shareClass->id,
+                'class_code' => $shareClass->class_code,
+                'gross_amount' => $amount,
+                'tax_rate' => $shareClass->withholding_tax_rate,
+                'tax_amount' => $taxAmount,
+                'net_amount' => $netAmount,
+                'calculated_by' => $request->user()->id
+            ]);
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'share_class' => [
+                        'id' => $shareClass->id,
+                        'class_code' => $shareClass->class_code,
+                        'withholding_tax_rate' => $shareClass->withholding_tax_rate,
+                        'currency' => $shareClass->currency,
+                    ],
+                    'calculation' => [
+                        'gross_amount' => number_format($amount, 2),
+                        'tax_rate' => number_format((float)$shareClass->withholding_tax_rate, 2) . '%',
+                        'tax_amount' => number_format($taxAmount, 2),
+                        'net_amount' => number_format($netAmount, 2),
+                        'currency' => $shareClass->currency,
+                    ]
+                ],
+                'message' => 'Tax calculated successfully'
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Share class not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error calculating tax: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error calculating tax',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
 }
