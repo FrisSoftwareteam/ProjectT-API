@@ -120,9 +120,9 @@ class AuthController extends Controller
             // Create API token
             $token = $adminUser->createToken('API Token')->plainTextToken;
 
-            // Check if there's a frontend callback URL to redirect to
-            $frontendUrl = env('FRONTEND_URL', config('app.url'));
-            $callbackUrl = $request->query('redirect_uri') ?? $frontendUrl . '/auth/callback';
+            // Always send the final response to the configured landing page (can be overridden via query)
+            $defaultCallbackUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
+            $callbackUrl = $request->query('redirect_uri') ?? $defaultCallbackUrl;
 
             // If request expects JSON response (API client), return JSON
             if ($request->expectsJson() || $request->query('response_type') === 'json') {
@@ -135,8 +135,10 @@ class AuthController extends Controller
                 ]);
             }
 
-            // Otherwise, redirect to frontend with token in URL
-            $redirectUrl = $callbackUrl . '?' . http_build_query([
+            // Otherwise, redirect to landing page with token and status
+            $redirectUrl = $callbackUrl . (str_contains($callbackUrl, '?') ? '&' : '?') . http_build_query([
+                'status' => 'success',
+                'message' => 'Login successful',
                 'token' => $token,
                 'token_type' => 'Bearer',
                 'user_id' => $adminUser->id,
@@ -158,9 +160,9 @@ class AuthController extends Controller
                 'trace' => $e->getTraceAsString()
             ]);
 
-            // Check if there's a frontend error callback URL
-            $frontendUrl = env('FRONTEND_URL', config('app.url'));
-            $errorUrl = $request->query('error_redirect_uri') ?? $frontendUrl . '/auth/error';
+            // Always send the final response to the configured landing page on errors (can be overridden via query)
+            $defaultErrorUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
+            $errorUrl = $request->query('error_redirect_uri') ?? $defaultErrorUrl;
 
             // If request expects JSON response (API client), return JSON
             if ($request->expectsJson() || $request->query('response_type') === 'json') {
@@ -171,8 +173,9 @@ class AuthController extends Controller
                 ], 401);
             }
 
-            // Otherwise, redirect to frontend error page with error message
-            $redirectUrl = $errorUrl . '?' . http_build_query([
+            // Otherwise, redirect to landing page with error details
+            $redirectUrl = $errorUrl . (str_contains($errorUrl, '?') ? '&' : '?') . http_build_query([
+                'status' => 'error',
                 'error' => 'authentication_failed',
                 'error_description' => $e->getMessage() ?: 'An unexpected error occurred during authentication'
             ]);
@@ -344,4 +347,3 @@ class AuthController extends Controller
         }
     }
 }
-
