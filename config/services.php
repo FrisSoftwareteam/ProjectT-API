@@ -39,6 +39,9 @@ return [
         'client_id' => env('MICROSOFT_CLIENT_ID'),
         'client_secret' => env('MICROSOFT_CLIENT_SECRET'),
         'redirect' => env('MICROSOFT_REDIRECT_URI'),
+        // Set your Azure AD tenant to avoid the default `/common` endpoint.
+        // Examples: 'contoso.onmicrosoft.com', 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx', or 'organizations'.
+        'tenant' => env('MICROSOFT_TENANT_ID', 'common'),
     ],
 
 ];
