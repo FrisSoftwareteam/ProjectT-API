@@ -121,7 +121,7 @@ class AuthController extends Controller
             $token = $adminUser->createToken('API Token')->plainTextToken;
 
             // Always redirect to the configured landing page (OAuth callback must redirect)
-            $defaultCallbackUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
+            $defaultCallbackUrl = rtrim('http://localhost:3000/', '/');
             $callbackUrl = $request->query('redirect_uri') ?? $defaultCallbackUrl;
 
             $redirectUrl = $callbackUrl . (str_contains($callbackUrl, '?') ? '&' : '?') . http_build_query([
@@ -149,7 +149,7 @@ class AuthController extends Controller
             ]);
 
             // Always send the final response to the configured landing page on errors (can be overridden via query)
-            $defaultErrorUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
+            $defaultErrorUrl = rtrim('http://localhost:3000/', '/');
             $errorUrl = $request->query('error_redirect_uri') ?? $defaultErrorUrl;
 
             // If request expects JSON response (API client), return JSON
