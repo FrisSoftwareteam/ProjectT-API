@@ -120,22 +120,10 @@ class AuthController extends Controller
             // Create API token
             $token = $adminUser->createToken('API Token')->plainTextToken;
 
-            // Always send the final response to the configured landing page (can be overridden via query)
+            // Always redirect to the configured landing page (OAuth callback must redirect)
             $defaultCallbackUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
             $callbackUrl = $request->query('redirect_uri') ?? $defaultCallbackUrl;
 
-            // If request expects JSON response (API client), return JSON
-            if ($request->expectsJson() || $request->query('response_type') === 'json') {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Login successful',
-                    'user' => $adminUser,
-                    'token' => $token,
-                    'token_type' => 'Bearer'
-                ]);
-            }
-
-            // Otherwise, redirect to landing page with token and status
             $redirectUrl = $callbackUrl . (str_contains($callbackUrl, '?') ? '&' : '?') . http_build_query([
                 'status' => 'success',
                 'message' => 'Login successful',
