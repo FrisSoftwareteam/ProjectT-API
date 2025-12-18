@@ -120,8 +120,14 @@ class AuthController extends Controller
             // Create API token
             $token = $adminUser->createToken('API Token')->plainTextToken;
 
-            // Always redirect to the configured landing page (OAuth callback must redirect)
-            $defaultCallbackUrl = rtrim('http://localhost:3000/', '/');
+            // Choose landing page based on route target (defaults to production)
+            $target = $request->route('target');
+            $defaultCallbackUrl = rtrim(
+                $target === 'local'
+                    ? config('services.microsoft.frontend_local_redirect')
+                    : config('services.microsoft.frontend_redirect'),
+                '/'
+            );
             $callbackUrl = $request->query('redirect_uri') ?? $defaultCallbackUrl;
 
             $redirectUrl = $callbackUrl . (str_contains($callbackUrl, '?') ? '&' : '?') . http_build_query([
@@ -149,7 +155,13 @@ class AuthController extends Controller
             ]);
 
             // Always send the final response to the configured landing page on errors (can be overridden via query)
-            $defaultErrorUrl = rtrim('http://localhost:3000/', '/');
+            $target = $request->route('target');
+            $defaultErrorUrl = rtrim(
+                $target === 'local'
+                    ? config('services.microsoft.frontend_local_redirect')
+                    : config('services.microsoft.frontend_redirect'),
+                '/'
+            );
             $errorUrl = $request->query('error_redirect_uri') ?? $defaultErrorUrl;
 
             // If request expects JSON response (API client), return JSON

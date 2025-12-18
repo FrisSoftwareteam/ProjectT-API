@@ -24,7 +24,9 @@ use App\Http\Controllers\Api\ShareAllocationController;
 Route::prefix('auth')->group(function () {
     Route::middleware(['web'])->group(function () {
         Route::get('/microsoft/redirect', [AuthController::class, 'redirectToMicrosoft']);
-        Route::get('/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback']);
+        // Optional target lets us pick prod or local frontend (e.g. /microsoft/callback/local)
+        Route::get('/microsoft/callback/{target?}', [AuthController::class, 'handleMicrosoftCallback'])
+            ->whereIn('target', ['local', null]);
     });
     
     Route::post('/simulate', [AuthController::class, 'simulateLogin']);
