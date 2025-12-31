@@ -6,19 +6,29 @@ use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
-    /**
-     * Run the migrations.
-     */
     public function up(): void
     {
-        //
+        Schema::table('share_classes', function (Blueprint $table) {
+            if (!Schema::hasColumn('share_classes', 'deleted_at')) {
+                $table->softDeletes();
+            }
+        });
+
+        Schema::table('registers', function (Blueprint $table) {
+            if (!Schema::hasColumn('registers', 'deleted_at')) {
+                $table->softDeletes();
+            }
+        });
     }
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
-        //
+        Schema::table('share_classes', function (Blueprint $table) {
+            $table->dropSoftDeletes();
+        });
+
+        Schema::table('registers', function (Blueprint $table) {
+            $table->dropSoftDeletes();
+        });
     }
 };
