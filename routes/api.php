@@ -24,7 +24,10 @@ use App\Http\Controllers\Api\ShareAllocationController;
 Route::prefix('auth')->group(function () {
     Route::middleware(['web'])->group(function () {
         Route::get('/microsoft/redirect', [AuthController::class, 'redirectToMicrosoft']);
+        // Explicit routes keep the Microsoft callback suffix stable
         Route::get('/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback']);
+        Route::get('/local/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback'])
+            ->defaults('target', 'local');
     });
     
     Route::post('/simulate', [AuthController::class, 'simulateLogin']);
@@ -46,6 +49,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles'])->middleware('permission:users.edit');
         Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles'])->middleware('permission:users.edit');
         Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles'])->middleware('permission:users.view');
+        Route::get('/{adminUser}/roles-with-permissions', [AdminUserController::class, 'getRolesWithPermissions'])
+            ->middleware('permission:users.view');
         Route::post('/{adminUser}/permissions', [AdminUserController::class, 'assignPermissions'])->middleware('permission:users.edit');
         Route::delete('/{adminUser}/permissions', [AdminUserController::class, 'revokePermissions'])->middleware('permission:users.edit');
         Route::get('/{adminUser}/permissions', [AdminUserController::class, 'getPermissions'])->middleware('permission:users.view');
