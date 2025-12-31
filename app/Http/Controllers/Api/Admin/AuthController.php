@@ -120,22 +120,16 @@ class AuthController extends Controller
             // Create API token
             $token = $adminUser->createToken('API Token')->plainTextToken;
 
-            // Always send the final response to the configured landing page (can be overridden via query)
-            $defaultCallbackUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
+            // Choose landing page based on route target (defaults to production)
+            $target = $request->route('target');
+            $defaultCallbackUrl = rtrim(
+                $target === 'local'
+                    ? config('services.microsoft.frontend_local_redirect')
+                    : config('services.microsoft.frontend_redirect'),
+                '/'
+            );
             $callbackUrl = $request->query('redirect_uri') ?? $defaultCallbackUrl;
 
-            // If request expects JSON response (API client), return JSON
-            if ($request->expectsJson() || $request->query('response_type') === 'json') {
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Login successful',
-                    'user' => $adminUser,
-                    'token' => $token,
-                    'token_type' => 'Bearer'
-                ]);
-            }
-
-            // Otherwise, redirect to landing page with token and status
             $redirectUrl = $callbackUrl . (str_contains($callbackUrl, '?') ? '&' : '?') . http_build_query([
                 'status' => 'success',
                 'message' => 'Login successful',
@@ -161,7 +155,13 @@ class AuthController extends Controller
             ]);
 
             // Always send the final response to the configured landing page on errors (can be overridden via query)
-            $defaultErrorUrl = rtrim('https://project-t.firstregistrarsapi.com/', '/');
+            $target = $request->route('target');
+            $defaultErrorUrl = rtrim(
+                $target === 'local'
+                    ? config('services.microsoft.frontend_local_redirect')
+                    : config('services.microsoft.frontend_redirect'),
+                '/'
+            );
             $errorUrl = $request->query('error_redirect_uri') ?? $defaultErrorUrl;
 
             // If request expects JSON response (API client), return JSON
