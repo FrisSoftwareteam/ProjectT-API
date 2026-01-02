@@ -2,15 +2,25 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-
+use Illuminate\Database\Eloquent\Model;
 
 class ShareholderRegisterAccount extends Model
 {
     use HasFactory;
+
+    /**
+     * The table associated with the model.
+     *
+     * @var string
+     */
     protected $table = 'shareholder_register_accounts';
 
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array<int, string>
+     */
     protected $fillable = [
         'shareholder_id',
         'register_id',
@@ -32,15 +42,12 @@ class ShareholderRegisterAccount extends Model
         'updated_at' => 'datetime',
     ];
 
-    public static function generateAccountNumber($shareholderId)
-    {
-        // Simple account number generator: SRA-{shareholderId}-{timestamp}
-        return 'SRA-' . $shareholderId . '-' . substr(time(), -6);
-    }
-
+    /**
+     * Get the shareholder that owns the account.
+     */
     public function shareholder()
     {
-        return $this->belongsTo(Shareholder::class, 'shareholder_id');
+        return $this->belongsTo(Shareholder::class);
     }
 
     /**
@@ -73,5 +80,13 @@ class ShareholderRegisterAccount extends Model
     public function shareTransactions()
     {
         return $this->hasMany(ShareTransaction::class, 'sra_id');
+    }
+
+    /**
+     * Get the dividend entitlements for this account.
+     */
+    public function dividendEntitlements()
+    {
+        return $this->hasMany(DividendEntitlement::class, 'register_account_id');
     }
 }

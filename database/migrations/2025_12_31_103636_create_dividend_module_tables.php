@@ -61,9 +61,22 @@ return new class extends Migration
         // 2. Dividend Declaration Share Classes (Junction Table)
         Schema::create('dividend_declaration_share_classes', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('dividend_declaration_id')->constrained('dividend_declarations')->cascadeOnUpdate()->cascadeOnDelete();
-            $table->foreignId('share_class_id')->constrained('share_classes')->cascadeOnUpdate()->restrictOnDelete();
+            $table->unsignedBigInteger('dividend_declaration_id');
+            $table->unsignedBigInteger('share_class_id');
             $table->timestamp('created_at')->useCurrent();
+            
+            // Add foreign keys with custom names
+            $table->foreign('dividend_declaration_id', 'fk_div_decl_sc_decl_id')
+                ->references('id')
+                ->on('dividend_declarations')
+                ->cascadeOnUpdate()
+                ->cascadeOnDelete();
+            
+            $table->foreign('share_class_id', 'fk_div_decl_sc_class_id')
+                ->references('id')
+                ->on('share_classes')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
             
             $table->unique(['dividend_declaration_id', 'share_class_id'], 'uq_div_decl_share_class');
         });
@@ -71,11 +84,11 @@ return new class extends Migration
         // 3. Dividend Entitlement Runs (Snapshot Header)
         Schema::create('dividend_entitlement_runs', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('dividend_declaration_id')->constrained('dividend_declarations')->cascadeOnUpdate()->cascadeOnDelete();
+            $table->unsignedBigInteger('dividend_declaration_id');
             $table->enum('run_type', ['PREVIEW', 'FROZEN'])->default('PREVIEW');
             $table->enum('run_status', ['PENDING', 'COMPLETED', 'FAILED'])->default('PENDING');
             $table->timestamp('computed_at')->nullable();
-            $table->foreignId('computed_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
+            $table->unsignedBigInteger('computed_by')->nullable();
             
             // Computed totals
             $table->decimal('total_gross_amount', 18, 2)->nullable();
@@ -87,7 +100,20 @@ return new class extends Migration
             
             $table->timestamp('created_at')->useCurrent();
             
-            $table->index('dividend_declaration_id');
+            // Add foreign keys with custom names
+            $table->foreign('dividend_declaration_id', 'fk_div_ent_runs_decl_id')
+                ->references('id')
+                ->on('dividend_declarations')
+                ->cascadeOnUpdate()
+                ->cascadeOnDelete();
+            
+            $table->foreign('computed_by', 'fk_div_ent_runs_computed_by')
+                ->references('id')
+                ->on('admin_users')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
+            
+            $table->index('dividend_declaration_id', 'idx_div_ent_runs_decl_id');
             $table->index('run_type');
             $table->index('run_status');
         });
@@ -95,10 +121,10 @@ return new class extends Migration
         // 4. Dividend Entitlements (Line Items per Holder)
         Schema::create('dividend_entitlements', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('entitlement_run_id')->constrained('dividend_entitlement_runs')->cascadeOnUpdate()->cascadeOnDelete();
-            $table->foreignId('dividend_declaration_id')->constrained('dividend_declarations')->cascadeOnUpdate()->cascadeOnDelete();
-            $table->foreignId('register_account_id')->constrained('shareholder_register_accounts')->cascadeOnUpdate()->restrictOnDelete();
-            $table->foreignId('share_class_id')->constrained('share_classes')->cascadeOnUpdate()->restrictOnDelete();
+            $table->unsignedBigInteger('entitlement_run_id');
+            $table->unsignedBigInteger('dividend_declaration_id');
+            $table->unsignedBigInteger('register_account_id');
+            $table->unsignedBigInteger('share_class_id');
             
             $table->decimal('eligible_shares', 18, 6)->default(0);
             $table->decimal('gross_amount', 18, 2)->default(0);
@@ -111,23 +137,61 @@ return new class extends Migration
             
             $table->timestamp('created_at')->useCurrent();
             
+            // Add foreign keys with custom names
+            $table->foreign('entitlement_run_id', 'fk_div_ent_run_id')
+                ->references('id')
+                ->on('dividend_entitlement_runs')
+                ->cascadeOnUpdate()
+                ->cascadeOnDelete();
+            
+            $table->foreign('dividend_declaration_id', 'fk_div_ent_decl_id')
+                ->references('id')
+                ->on('dividend_declarations')
+                ->cascadeOnUpdate()
+                ->cascadeOnDelete();
+            
+            $table->foreign('register_account_id', 'fk_div_ent_reg_acct_id')
+                ->references('id')
+                ->on('shareholder_register_accounts')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
+            
+            $table->foreign('share_class_id', 'fk_div_ent_class_id')
+                ->references('id')
+                ->on('share_classes')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
+            
             $table->unique(['entitlement_run_id', 'register_account_id', 'share_class_id'], 'uq_div_ent_run_acct_class');
-            $table->index('dividend_declaration_id');
-            $table->index('register_account_id');
-            $table->index('share_class_id');
+            $table->index('dividend_declaration_id', 'idx_div_ent_decl_id');
+            $table->index('register_account_id', 'idx_div_ent_reg_acct_id');
+            $table->index('share_class_id', 'idx_div_ent_share_class_id');
             $table->index('is_payable');
         });
 
         // 5. Dividend Workflow Events (Audit Trail)
         Schema::create('dividend_workflow_events', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('dividend_declaration_id')->constrained('dividend_declarations')->cascadeOnUpdate()->cascadeOnDelete();
+            $table->unsignedBigInteger('dividend_declaration_id');
             $table->enum('event_type', ['CREATED', 'UPDATED', 'SUBMITTED', 'VERIFIED', 'APPROVED', 'REJECTED', 'EXPORTED', 'PAYMENT_REISSUED']);
-            $table->foreignId('actor_id')->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
+            $table->unsignedBigInteger('actor_id');
             $table->string('note', 255)->nullable();
             $table->timestamp('created_at')->useCurrent();
             
-            $table->index('dividend_declaration_id');
+            // Add foreign keys with custom names
+            $table->foreign('dividend_declaration_id', 'fk_div_wf_decl_id')
+                ->references('id')
+                ->on('dividend_declarations')
+                ->cascadeOnUpdate()
+                ->cascadeOnDelete();
+            
+            $table->foreign('actor_id', 'fk_div_wf_actor_id')
+                ->references('id')
+                ->on('admin_users')
+                ->cascadeOnUpdate()
+                ->restrictOnDelete();
+            
+            $table->index('dividend_declaration_id', 'idx_div_wf_events_decl_id');
             $table->index('event_type');
             $table->index('actor_id');
             $table->index('created_at');

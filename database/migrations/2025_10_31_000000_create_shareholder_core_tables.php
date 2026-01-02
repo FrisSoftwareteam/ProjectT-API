@@ -49,15 +49,16 @@ return new class extends Migration {
         // ------------------------------
         // 1) COMPANIES / REGISTERS / CLASSES
         // ------------------------------
-        Schema::create('companies', function (Blueprint $t) {
-            $t->id();
-            $t->string('issuer_code', 32)->unique();
-            $t->string('name', 255);
-            $t->string('rc_number', 50)->nullable();
-            $t->string('tin', 50)->nullable();
-            $t->enum('status', ['active','suspended','closed'])->default('active');
-            $t->timestamps();
-        });
+       Schema::create('companies', function (Blueprint $t) {
+    $t->id();
+    $t->string('issuer_code', 32)->unique();
+    $t->string('name', 255);
+    $t->string('rc_number', 50)->nullable();
+    $t->string('tin', 50)->nullable();
+    $t->enum('status', ['active','suspended','closed'])->default('active');
+    $t->timestamps();
+    $t->softDeletes(); // Add this line
+});
 
         Schema::create('registers', function (Blueprint $t) {
             $t->id();
@@ -88,9 +89,7 @@ return new class extends Migration {
             $t->id();
             $t->string('account_no', 20)->unique();
             $t->enum('holder_type', ['individual','corporate']);
-            $t->string('first_name',255);
-            $t->string('last_name',100)->nullable();
-            $t->string('middle_name',100)->nullable();
+            $t->string('full_name', 255);
             $t->string('email', 255)->unique();
             $t->string('phone', 32)->unique();
             $t->date('date_of_birth')->nullable();
@@ -132,19 +131,21 @@ return new class extends Migration {
             $t->timestamps();
         });
 
-        Schema::create('shareholder_bank_mandates', function (Blueprint $t) {
-            $t->id();
-            $t->foreignId('shareholder_id')->constrained('shareholders')->cascadeOnUpdate()->restrictOnDelete();
-            $t->string('bank_name', 150);
-            $t->string('account_name', 255);
-            $t->string('account_number', 20);
-            $t->string('bvn', 20)->nullable();
-            $t->enum('status', ['pending','verified','active','rejected','revoked'])->default('pending');
-            $t->foreignId('verified_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
-            $t->timestamp('verified_at')->nullable();
-            $t->timestamps();
-            $t->unique(['shareholder_id','bank_name','account_number'], 'uk_bank_mandate');
-        });
+      Schema::create('shareholder_bank_mandates', function (Blueprint $t) {
+    $t->id();
+    $t->foreignId('shareholder_id')->constrained('shareholders')->cascadeOnUpdate()->restrictOnDelete();
+    $t->string('bank_name', 150);
+    $t->string('account_name', 255);
+    $t->string('account_number', 20);
+    $t->string('bvn', 20)->nullable();
+    $t->enum('status', ['pending','verified','active','rejected','revoked'])->default('pending');
+    $t->foreignId('verified_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
+    $t->timestamp('verified_at')->nullable();
+    $t->timestamps();
+    
+    // Manually specify short constraint name to avoid MySQL 64-char limit
+    $t->unique(['shareholder_id', 'bank_name', 'account_number'], 'uk_bank_mandate');
+});
 
         // ------------------------------
         // 3) REGISTER ACCOUNTS & HOLDINGS
@@ -214,7 +215,7 @@ return new class extends Migration {
             $t->date('announcement_date')->nullable();
             $t->date('record_date')->nullable();
             $t->date('payment_date')->nullable();
-            $t->decimal('cash_rate', 18, 6)->nullable(); // for dividends
+            $t->decimal('cash_rate', 18, 6)->nullable();
             $t->decimal('scrip_ratio_num', 18, 6)->nullable();
             $t->decimal('scrip_ratio_den', 18, 6)->nullable();
             $t->enum('status', ['scheduled','approved','posted','closed'])->default('scheduled');
@@ -334,12 +335,10 @@ return new class extends Migration {
             $t->timestamp('created_at')->useCurrent();
             $t->index(['shareholder_id','created_at']);
         });
-
     }
 
     public function down(): void
     {
-        // Drop in reverse order of creation to avoid FK constraint issues
         Schema::dropIfExists('shareholder_audit_events');
         Schema::dropIfExists('shareholder_change_approvals');
         Schema::dropIfExists('shareholder_change_requests');

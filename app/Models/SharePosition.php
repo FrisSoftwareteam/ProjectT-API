@@ -7,8 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class SharePosition extends Model
 {
-    protected $table = 'share_positions';
-
     use HasFactory;
 
     /**
@@ -21,8 +19,8 @@ class SharePosition extends Model
         'share_class_id',
         'quantity',
         'holding_mode',
+        'last_updated_at',
     ];
-
 
     /**
      * The attributes that should be cast.
@@ -36,20 +34,27 @@ class SharePosition extends Model
         'updated_at' => 'datetime',
     ];
 
-    public function sra()
-    {
-        return $this->belongsTo(ShareholderRegisterAccount::class, 'sra_id');
-    }
-
+    /**
+     * Get the share class that owns the position.
+     */
     public function shareClass()
     {
-        return $this->belongsTo(ShareClass::class, 'share_class_id');
+        return $this->belongsTo(ShareClass::class);
     }
 
     /**
      * Get the shareholder register account that owns the position.
      */
     public function shareholderRegisterAccount()
+    {
+        return $this->belongsTo(ShareholderRegisterAccount::class, 'sra_id');
+    }
+
+    /**
+     * Alias for shareholderRegisterAccount relationship.
+     * Provides alternative naming convention.
+     */
+    public function registerAccount()
     {
         return $this->belongsTo(ShareholderRegisterAccount::class, 'sra_id');
     }
