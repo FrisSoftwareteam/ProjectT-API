@@ -6,6 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\DividendDeclaration;
 use App\Models\SharePosition;
 use App\Models\ShareholderRegisterAccount;
+use App\Models\Register;
+use App\Models\ShareClass;
+use App\Models\DividendWorkflowEvent;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -15,8 +18,375 @@ use Carbon\Carbon;
 class DividendEntitlementController extends Controller
 {
     /**
+     * 1.1 Create Dividend Declaration (Draft)
+     * POST /admin/registers/{register_id}/dividend-declarations
+     */
+    public function store(Request $request, int $register_id): JsonResponse
+    {
+        try {
+            // Validate request
+            $validated = $request->validate([
+                'period_label' => 'required|string|max:100',
+                'description' => 'nullable|string|max:255',
+                'share_class_ids' => 'required|array|min:1',
+                'share_class_ids.*' => 'required|exists:share_classes,id',
+                'rate_per_share' => 'nullable|numeric|min:0|max:999999999999.999999',
+                'announcement_date' => 'nullable|date',
+                'record_date' => 'nullable|date',
+                'payment_date' => 'nullable|date|after_or_equal:record_date',
+                'exclude_caution_accounts' => 'nullable|boolean',
+                'require_active_bank_mandate' => 'nullable|boolean',
+            ]);
+
+            // Verify register exists and get company_id
+            $register = Register::findOrFail($register_id);
+
+            // Verify all share classes belong to this register
+            $shareClasses = ShareClass::whereIn('id', $validated['share_class_ids'])
+                ->where('register_id', $register_id)
+                ->get();
+
+            if ($shareClasses->count() !== count($validated['share_class_ids'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'One or more share classes do not belong to this register',
+                    'errors' => [
+                        'share_class_ids' => ['All share classes must belong to the specified register']
+                    ]
+                ], 422);
+            }
+
+            // Check for duplicate period_label within company
+            $exists = DividendDeclaration::where('company_id', $register->company_id)
+                ->where('period_label', $validated['period_label'])
+                ->exists();
+
+            if ($exists) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'A dividend declaration with this period label already exists for this company',
+                    'errors' => [
+                        'period_label' => ['This period label is already in use for this company']
+                    ]
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            try {
+                // Create dividend declaration
+                $declaration = DividendDeclaration::create([
+                    'company_id' => $register->company_id,
+                    'register_id' => $register_id,
+                    'period_label' => $validated['period_label'],
+                    'description' => $validated['description'] ?? null,
+                    'action_type' => 'DIVIDEND',
+                    'declaration_method' => 'RATE_PER_SHARE',
+                    'rate_per_share' => $validated['rate_per_share'] ?? null,
+                    'announcement_date' => $validated['announcement_date'] ?? null,
+                    'record_date' => $validated['record_date'] ?? null,
+                    'payment_date' => $validated['payment_date'] ?? null,
+                    'exclude_caution_accounts' => $validated['exclude_caution_accounts'] ?? false,
+                    'require_active_bank_mandate' => $validated['require_active_bank_mandate'] ?? true,
+                    'status' => 'DRAFT',
+                    'created_by' => $request->user()->id,
+                ]);
+
+                // Attach share classes
+                $declaration->shareClasses()->attach($validated['share_class_ids']);
+
+                // Create workflow event
+                DividendWorkflowEvent::create([
+                    'dividend_declaration_id' => $declaration->id,
+                    'event_type' => 'CREATED',
+                    'actor_id' => $request->user()->id,
+                    'note' => 'Dividend declaration created',
+                ]);
+
+                DB::commit();
+
+                // Load relationships
+                $declaration->load(['shareClasses', 'register.company', 'creator']);
+
+                Log::info('Dividend declaration created', [
+                    'declaration_id' => $declaration->id,
+                    'register_id' => $register_id,
+                    'company_id' => $register->company_id,
+                    'period_label' => $declaration->period_label,
+                    'created_by' => $request->user()->id
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Dividend declaration created successfully',
+                    'data' => $declaration,
+                ], 201);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Register not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error creating dividend declaration: ' . $e->getMessage(), [
+                'register_id' => $register_id,
+                'trace' => $e->getTraceAsString()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error creating dividend declaration',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * 1.2 Get Dividend Declaration (Full Context)
+     * GET /admin/dividend-declarations/{declaration_id}
+     */
+    public function show(int $declaration_id): JsonResponse
+    {
+        try {
+            $declaration = DividendDeclaration::with([
+                'shareClasses',
+                'register.company',
+                'creator',
+                'submitter',
+                'verifier',
+                'approver',
+                'rejecter',
+                'workflowEvents.actor'
+            ])->findOrFail($declaration_id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $declaration,
+                'message' => 'Dividend declaration retrieved successfully'
+            ]);
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dividend declaration not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving dividend declaration: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving dividend declaration',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * 1.3 Update Dividend Declaration (Draft Only)
+     * PUT /admin/dividend-declarations/{declaration_id}
+     */
+    public function update(Request $request, int $declaration_id): JsonResponse
+    {
+        try {
+            $declaration = DividendDeclaration::findOrFail($declaration_id);
+
+            // Only allow editing drafts
+            if (!$declaration->canBeEdited()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only draft declarations can be edited',
+                    'errors' => [
+                        'status' => ['This declaration is no longer in draft status and cannot be edited']
+                    ]
+                ], 422);
+            }
+
+            $validated = $request->validate([
+                'period_label' => 'nullable|string|max:100',
+                'description' => 'nullable|string|max:255',
+                'share_class_ids' => 'nullable|array|min:1',
+                'share_class_ids.*' => 'nullable|exists:share_classes,id',
+                'rate_per_share' => 'nullable|numeric|min:0|max:999999999999.999999',
+                'announcement_date' => 'nullable|date',
+                'record_date' => 'nullable|date',
+                'payment_date' => 'nullable|date|after_or_equal:record_date',
+                'exclude_caution_accounts' => 'nullable|boolean',
+                'require_active_bank_mandate' => 'nullable|boolean',
+            ]);
+
+            DB::beginTransaction();
+
+            try {
+                // Check for duplicate period_label if it's being changed
+                if (isset($validated['period_label']) && $validated['period_label'] !== $declaration->period_label) {
+                    $exists = DividendDeclaration::where('company_id', $declaration->company_id)
+                        ->where('period_label', $validated['period_label'])
+                        ->where('id', '!=', $declaration->id)
+                        ->exists();
+
+                    if ($exists) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'A dividend declaration with this period label already exists',
+                            'errors' => [
+                                'period_label' => ['This period label is already in use for this company']
+                            ]
+                        ], 422);
+                    }
+                }
+
+                // Update share classes if provided
+                if (isset($validated['share_class_ids'])) {
+                    // Verify all share classes belong to this register
+                    $shareClasses = ShareClass::whereIn('id', $validated['share_class_ids'])
+                        ->where('register_id', $declaration->register_id)
+                        ->get();
+
+                    if ($shareClasses->count() !== count($validated['share_class_ids'])) {
+                        return response()->json([
+                            'success' => false,
+                            'message' => 'One or more share classes do not belong to this register',
+                            'errors' => [
+                                'share_class_ids' => ['All share classes must belong to the specified register']
+                            ]
+                        ], 422);
+                    }
+
+                    $declaration->shareClasses()->sync($validated['share_class_ids']);
+                    unset($validated['share_class_ids']);
+                }
+
+                // Update declaration
+                $declaration->update($validated);
+
+                // Create workflow event
+                DividendWorkflowEvent::create([
+                    'dividend_declaration_id' => $declaration->id,
+                    'event_type' => 'UPDATED',
+                    'actor_id' => $request->user()->id,
+                    'note' => 'Dividend declaration updated',
+                ]);
+
+                DB::commit();
+
+                $declaration->load(['shareClasses', 'register.company', 'creator', 'workflowEvents.actor']);
+
+                Log::info('Dividend declaration updated', [
+                    'declaration_id' => $declaration->id,
+                    'updated_by' => $request->user()->id
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Dividend declaration updated successfully',
+                    'data' => $declaration,
+                ]);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dividend declaration not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error updating dividend declaration: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error updating dividend declaration',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * 1.4 Cancel Draft Declaration
+     * DELETE /admin/dividend-declarations/{declaration_id}
+     */
+    public function destroy(Request $request, int $declaration_id): JsonResponse
+    {
+        try {
+            $declaration = DividendDeclaration::findOrFail($declaration_id);
+
+            // Only allow deleting drafts
+            if (!$declaration->canBeDeleted()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Only draft declarations can be deleted',
+                    'errors' => [
+                        'status' => ['This declaration is no longer in draft status and cannot be deleted']
+                    ]
+                ], 422);
+            }
+
+            DB::beginTransaction();
+
+            try {
+                // Delete related records (cascade should handle most, but being explicit)
+                $declaration->shareClasses()->detach();
+                $declaration->workflowEvents()->delete();
+                $declaration->entitlementRuns()->delete();
+                
+                // Delete the declaration
+                $declaration->delete();
+
+                DB::commit();
+
+                Log::info('Dividend declaration deleted', [
+                    'declaration_id' => $declaration_id,
+                    'deleted_by' => $request->user()->id
+                ]);
+
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Dividend declaration deleted successfully',
+                ]);
+
+            } catch (\Exception $e) {
+                DB::rollBack();
+                throw $e;
+            }
+
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Dividend declaration not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error deleting dividend declaration: ' . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Error deleting dividend declaration',
+                'error' => $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
      * 2.1 Generate Entitlement Preview (Compute & Paginate)
-     * POST /dividend-declarations/{declaration_id}/preview
+     * POST /admin/dividend-declarations/{declaration_id}/preview
      */
     public function generatePreview(Request $request, int $declaration_id): JsonResponse
     {
@@ -56,12 +426,16 @@ class DividendEntitlementController extends Controller
 
     /**
      * 2.2 Fetch Entitlement Preview (Paginated)
-     * GET /dividend-declarations/{declaration_id}/preview
+     * GET /admin/dividend-declarations/{declaration_id}/preview
      */
     public function fetchPreview(Request $request, int $declaration_id): JsonResponse
     {
         return $this->generatePreview($request, $declaration_id);
     }
+
+    // ========================================================================
+    // PRIVATE HELPER METHODS
+    // ========================================================================
 
     /**
      * Load declaration with relations
