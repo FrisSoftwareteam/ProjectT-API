@@ -277,7 +277,7 @@ class AdminUserController extends Controller
         try {
             $validated = $request->validate([
                 'permissions' => 'required|array',
-                'permissions.*' => 'exists:permissions,name',
+                'permissions.*' => 'exists:permissions,id',
             ]);
 
             $adminUser->syncPermissions($validated['permissions']);
