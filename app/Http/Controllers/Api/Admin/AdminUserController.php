@@ -385,5 +385,36 @@ class AdminUserController extends Controller
             ],
         ]);
     }
+
+    /**
+     * Get user's roles with their permissions grouped per role
+     */
+    public function getRolesWithPermissions($user_id): JsonResponse
+    {
+        $adminUser = AdminUser::find($user_id);
+
+        if (!$adminUser) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Admin user not found',
+            ], 404);
+        }
+
+        $adminUser->load('roles.permissions', 'permissions');
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'roles' => $adminUser->roles->map(function ($role) {
+                    return [
+                        'id' => $role->id,
+                        'name' => $role->name,
+                        'permissions' => $role->permissions,
+                    ];
+                }),
+                'direct_permissions' => $adminUser->permissions,
+            ],
+        ]);
+    }
 }
 
