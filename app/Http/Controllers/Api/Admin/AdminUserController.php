@@ -400,17 +400,20 @@ class AdminUserController extends Controller
             ], 404);
         }
 
-        $adminUser->load('roles.permissions');
+        $adminUser->load('roles.permissions', 'permissions');
 
         return response()->json([
             'success' => true,
-            'data' => $adminUser->roles->map(function ($role) {
-                return [
-                    'id' => $role->id,
-                    'name' => $role->name,
-                    'permissions' => $role->permissions,
-                ];
-            }),
+            'data' => [
+                'roles' => $adminUser->roles->map(function ($role) {
+                    return [
+                        'id' => $role->id,
+                        'name' => $role->name,
+                        'permissions' => $role->permissions,
+                    ];
+                }),
+                'direct_permissions' => $adminUser->permissions,
+            ],
         ]);
     }
 }
