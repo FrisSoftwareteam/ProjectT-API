@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Admin\CompanyController;
 use App\Http\Controllers\Api\Admin\RegisterController;
 use App\Http\Controllers\Api\Admin\ShareClassController;
 use App\Http\Controllers\Api\Admin\ShareholderController;
+use App\Http\Controllers\Api\Admin\DividendEntitlementController;
 use App\Http\Controllers\Api\UserActivityLogController;
 use App\Http\Controllers\Api\SraGuardianController;
 use App\Http\Controllers\Api\ProbateCaseController;
@@ -24,7 +25,10 @@ use App\Http\Controllers\Api\ShareAllocationController;
 Route::prefix('auth')->group(function () {
     Route::middleware(['web'])->group(function () {
         Route::get('/microsoft/redirect', [AuthController::class, 'redirectToMicrosoft']);
+        // Explicit routes keep the Microsoft callback suffix stable
         Route::get('/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback']);
+        Route::get('/local/microsoft/callback', [AuthController::class, 'handleMicrosoftCallback'])
+            ->defaults('target', 'local');
     });
     
     Route::post('/simulate', [AuthController::class, 'simulateLogin']);
@@ -46,6 +50,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles'])->middleware('permission:users.edit');
         Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles'])->middleware('permission:users.edit');
         Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles'])->middleware('permission:users.view');
+        Route::get('/{adminUser}/roles-with-permissions', [AdminUserController::class, 'getRolesWithPermissions'])
+            ->middleware('permission:users.view');
         Route::post('/{adminUser}/permissions', [AdminUserController::class, 'assignPermissions'])->middleware('permission:users.edit');
         Route::delete('/{adminUser}/permissions', [AdminUserController::class, 'revokePermissions'])->middleware('permission:users.edit');
         Route::get('/{adminUser}/permissions', [AdminUserController::class, 'getPermissions'])->middleware('permission:users.view');
@@ -155,7 +161,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     /*
     |--------------------------------------------------------------------------
-    | NEW: Company Management Routes
+    | Admin Management Routes
     |--------------------------------------------------------------------------
     */
     Route::prefix('admin')->group(function () {
@@ -200,6 +206,14 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             Route::delete('/{id}', [RegisterController::class, 'destroy'])
                 ->middleware('role:Super Admin');
+            
+            // =================================================================
+            // DIVIDEND DECLARATION MANAGEMENT (Nested under registers)
+            // =================================================================
+            
+            // Create Dividend Declaration (Draft) for a specific register
+            Route::post('/{register_id}/dividend-declarations', [DividendEntitlementController::class, 'store'])
+                ->middleware('role:Super Admin|Admin');
         });
 
         // Share Class Routes
@@ -218,6 +232,41 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             Route::delete('/{id}', [ShareClassController::class, 'destroy'])
                 ->middleware('role:Super Admin');
+            
+            // Tax calculation endpoint
+            Route::post('/{id}/calculate-tax', [ShareClassController::class, 'calculateTax'])
+                ->middleware('permission:users.view');    
+        });
+
+        // =================================================================
+        // DIVIDEND DECLARATION ROUTES (Standalone operations)
+        // =================================================================
+        
+        Route::prefix('dividend-declarations')->group(function () {
+            
+            // Get Dividend Declaration (Full Context)
+            Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
+                ->middleware('permission:companies.view');
+            
+            // Update Dividend Declaration (Draft Only)
+            Route::put('/{declaration_id}', [DividendEntitlementController::class, 'update'])
+                ->middleware('role:Super Admin|Admin');
+            
+            // Cancel Draft Declaration
+            Route::delete('/{declaration_id}', [DividendEntitlementController::class, 'destroy'])
+                ->middleware('role:Super Admin');
+            
+            // =================================================================
+            // ENTITLEMENT PREVIEW & COMPUTATION
+            // =================================================================
+            
+            // Generate Entitlement Preview (Compute)
+            Route::post('/{declaration_id}/preview', [DividendEntitlementController::class, 'generatePreview'])
+                ->middleware('permission:companies.view');
+            
+            // Fetch Entitlement Preview (Paginated)
+            Route::get('/{declaration_id}/preview', [DividendEntitlementController::class, 'fetchPreview'])
+                ->middleware('permission:companies.view');
         });
     });
 });

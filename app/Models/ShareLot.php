@@ -7,8 +7,6 @@ use Illuminate\Database\Eloquent\Model;
 
 class ShareLot extends Model
 {
-    protected $table = 'share_lots';
-
     use HasFactory;
 
     /**
@@ -26,19 +24,24 @@ class ShareLot extends Model
         'status',
     ];
 
+    /**
+     * The attributes that should be cast.
+     *
+     * @var array<string, string>
+     */
     protected $casts = [
         'quantity' => 'decimal:6',
         'acquired_at' => 'datetime',
+        'created_at' => 'datetime',
+        'updated_at' => 'datetime',
     ];
 
-    public function sra()
-    {
-        return $this->belongsTo(ShareholderRegisterAccount::class, 'sra_id');
-    }
-
+    /**
+     * Get the share class that owns the lot.
+     */
     public function shareClass()
     {
-        return $this->belongsTo(ShareClass::class, 'share_class_id');
+        return $this->belongsTo(ShareClass::class);
     }
 
     /**
