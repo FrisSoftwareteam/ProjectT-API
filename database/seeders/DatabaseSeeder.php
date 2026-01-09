@@ -44,6 +44,7 @@ class DatabaseSeeder extends Seeder
             // Seed additional test admin users
             $this->call([
                 AdminUserSeeder::class,
+                ShareholderSeeder::class,
             ]);
             
             $this->command->info('✓ Test data seeded successfully!');
