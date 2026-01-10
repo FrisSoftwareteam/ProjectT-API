@@ -245,8 +245,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::prefix('dividend-declarations')->group(function () {
             
             // Get Dividend Declaration (Full Context)
-            Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
-                ->middleware('permission:companies.view');
+          Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
+    ->middleware('permission:users.view');
             
             // Update Dividend Declaration (Draft Only)
             Route::put('/{declaration_id}', [DividendEntitlementController::class, 'update'])

@@ -19,7 +19,7 @@ class DividendEntitlement extends Model
         'eligible_shares',
         'gross_amount',
         'tax_amount',
-        'net_amount',
+        'net_amount',x
         'is_payable',
         'ineligibility_reason',
     ];
