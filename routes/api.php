@@ -262,11 +262,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             // Generate Entitlement Preview (Compute)
             Route::post('/{declaration_id}/preview', [DividendEntitlementController::class, 'generatePreview'])
-                ->middleware('permission:companies.view');
+                ->middleware('permission:users.view');
             
             // Fetch Entitlement Preview (Paginated)
             Route::get('/{declaration_id}/preview', [DividendEntitlementController::class, 'fetchPreview'])
-                ->middleware('permission:companies.view');
+                ->middleware('permission:users.view');
         });
     });
 });
