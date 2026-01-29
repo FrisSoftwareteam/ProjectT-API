@@ -24,7 +24,22 @@ class ShareholderController extends Controller
 
     public function index()
     {
-        $shareholders = Shareholder::paginate(20);
+        $query = Shareholder::query();
+
+        $search = trim((string) request()->query('search', ''));
+        if ($search !== '') {
+            $query->where(function ($q) use ($search) {
+                $like = '%' . $search . '%';
+                $q->where('first_name', 'like', $like)
+                    ->orWhere('last_name', 'like', $like)
+                    ->orWhere('middle_name', 'like', $like)
+                    ->orWhere('email', 'like', $like)
+                    ->orWhere('phone', 'like', $like)
+                    ->orWhere('account_no', 'like', $like);
+            });
+        }
+
+        $shareholders = $query->paginate(20);
 
         return response()->json($shareholders);
     }
