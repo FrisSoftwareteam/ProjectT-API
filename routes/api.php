@@ -97,6 +97,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('shareholders')->group(function () {
         Route::get('/', [ShareholderController::class, 'index'])->middleware('permission:shareholders.view');
         Route::post('/', [ShareholderController::class, 'store'])->middleware('permission:shareholders.create');
+        Route::post('/with-details', [ShareholderController::class, 'storeWithDetails'])->middleware('permission:shareholders.create');
         Route::get('/{shareholder}', [ShareholderController::class, 'show'])->middleware('permission:shareholders.view');
         Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit');
         Route::delete('/{shareholder}', [ShareholderController::class, 'destroy'])->middleware('permission:shareholders.delete');

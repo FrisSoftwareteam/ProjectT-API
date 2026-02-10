@@ -14,6 +14,8 @@ use App\Http\Requests\ShareholderIdentityRequest;
 use App\Models\ShareholderIdentity;
 use App\Http\Requests\ShareholderAddressUpdateRequest;
 use App\Models\ShareholderAddress;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
 
 class ShareholderController extends Controller
 {
@@ -54,9 +56,130 @@ class ShareholderController extends Controller
         return response()->json($shareholder, 201);
     }
 
+    public function storeWithDetails(\Illuminate\Http\Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'shareholder' => 'required|array',
+            'shareholder.holder_type' => 'required|in:individual,corporate',
+            'shareholder.first_name' => 'required|string|max:255',
+            'shareholder.last_name' => 'nullable|string|max:100',
+            'shareholder.middle_name' => 'nullable|string|max:100',
+            'shareholder.email' => 'required|email|unique:shareholders,email',
+            'shareholder.phone' => 'required|string|max:32|unique:shareholders,phone',
+            'shareholder.date_of_birth' => 'nullable|date',
+            'shareholder.rc_number' => 'nullable|string|max:50',
+            'shareholder.nin' => 'nullable|string|max:20',
+            'shareholder.bvn' => 'nullable|string|max:20',
+            'shareholder.tax_id' => 'nullable|string|max:50',
+            'shareholder.status' => 'required|in:active,dormant,deceased,closed',
+
+            'addresses' => 'required|array|min:1',
+            'addresses.*.address_line1' => 'required|string|max:255',
+            'addresses.*.address_line2' => 'nullable|string|max:255',
+            'addresses.*.city' => 'nullable|string|max:100',
+            'addresses.*.state' => 'nullable|string|max:100',
+            'addresses.*.postal_code' => 'nullable|string|max:20',
+            'addresses.*.country' => 'nullable|string|max:100',
+            'addresses.*.is_primary' => 'required|boolean',
+            'addresses.*.valid_from' => 'nullable|date',
+            'addresses.*.valid_to' => 'nullable|date',
+
+            'mandates' => 'required|array|min:1',
+            'mandates.*.bank_name' => 'required|string|max:150',
+            'mandates.*.account_name' => 'required|string|max:255',
+            'mandates.*.account_number' => 'required|string|max:20',
+            'mandates.*.bvn' => 'nullable|string|max:20',
+            'mandates.*.status' => 'required|in:pending,verified,active,rejected,revoked',
+            'mandates.*.verified_by' => 'nullable|exists:users,id',
+            'mandates.*.verified_at' => 'nullable|date',
+
+            'identities' => 'required|array|min:1',
+            'identities.*.id_type' => 'required|in:passport,drivers_license,nin,bvn,cac_cert,other',
+            'identities.*.id_value' => 'required|string|max:100',
+            'identities.*.issued_on' => 'nullable|date',
+            'identities.*.expires_on' => 'nullable|date',
+            'identities.*.verified_status' => 'required|in:pending,verified,rejected',
+            'identities.*.verified_by' => 'nullable|exists:admin_users,id',
+            'identities.*.verified_at' => 'nullable|date',
+            'identities.*.file_ref' => 'nullable|string|max:255',
+        ]);
+
+        $validator->after(function ($validator) use ($request) {
+            $addresses = (array) $request->input('addresses', []);
+            $primaryCount = 0;
+            foreach ($addresses as $address) {
+                if (!empty($address['is_primary'])) {
+                    $primaryCount++;
+                }
+            }
+
+            if ($primaryCount > 1) {
+                $validator->errors()->add('addresses', 'Only one primary address is allowed.');
+            }
+            if ($primaryCount === 0) {
+                $validator->errors()->add('addresses', 'At least one address must be marked as primary.');
+            }
+        });
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+
+        DB::beginTransaction();
+
+        try {
+            $shareholderData = $payload['shareholder'];
+            $shareholderData['account_no'] = $this->accountNumberService->generate();
+
+            $shareholder = Shareholder::create($shareholderData);
+
+            $addresses = array_map(function ($row) use ($shareholder) {
+                $row['shareholder_id'] = $shareholder->id;
+                return $row;
+            }, $payload['addresses']);
+            ShareholderAddress::insert($addresses);
+
+            $mandates = array_map(function ($row) use ($shareholder) {
+                $row['shareholder_id'] = $shareholder->id;
+                return $row;
+            }, $payload['mandates']);
+            ShareholderMandate::insert($mandates);
+
+            $identities = array_map(function ($row) use ($shareholder) {
+                $row['shareholder_id'] = $shareholder->id;
+                return $row;
+            }, $payload['identities']);
+            ShareholderIdentity::insert($identities);
+
+            DB::commit();
+
+            $shareholder->load('addresses', 'mandates', 'identities');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Shareholder created successfully',
+                'data' => $shareholder,
+            ], 201);
+        } catch (\Exception $e) {
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error creating shareholder',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
     public function show($id)
     {
-        $shareholder = Shareholder::find($id)::with('addresses','mandates','identities')->get();
+        $shareholder = Shareholder::with('addresses', 'mandates', 'identities')->findOrFail($id);
 
         return response()->json($shareholder);
     }
