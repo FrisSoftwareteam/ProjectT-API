@@ -84,21 +84,21 @@ class ShareholderController extends Controller
             'addresses.*.valid_from' => 'nullable|date',
             'addresses.*.valid_to' => 'nullable|date',
 
-            'mandates' => 'required|array|min:1',
-            'mandates.*.bank_name' => 'required|string|max:150',
-            'mandates.*.account_name' => 'required|string|max:255',
-            'mandates.*.account_number' => 'required|string|max:20',
+            'mandates' => 'nullable|array|min:1',
+            'mandates.*.bank_name' => 'required_with:mandates|string|max:150',
+            'mandates.*.account_name' => 'required_with:mandates|string|max:255',
+            'mandates.*.account_number' => 'required_with:mandates|string|max:20',
             'mandates.*.bvn' => 'nullable|string|max:20',
-            'mandates.*.status' => 'required|in:pending,verified,active,rejected,revoked',
+            'mandates.*.status' => 'required_with:mandates|in:pending,verified,active,rejected,revoked',
             'mandates.*.verified_by' => 'nullable|exists:users,id',
             'mandates.*.verified_at' => 'nullable|date',
 
-            'identities' => 'required|array|min:1',
-            'identities.*.id_type' => 'required|in:passport,drivers_license,nin,bvn,cac_cert,other',
-            'identities.*.id_value' => 'required|string|max:100',
+            'identities' => 'nullable|array|min:1',
+            'identities.*.id_type' => 'required_with:identities|in:passport,drivers_license,nin,bvn,cac_cert,other',
+            'identities.*.id_value' => 'required_with:identities|string|max:100',
             'identities.*.issued_on' => 'nullable|date',
             'identities.*.expires_on' => 'nullable|date',
-            'identities.*.verified_status' => 'required|in:pending,verified,rejected',
+            'identities.*.verified_status' => 'required_with:identities|in:pending,verified,rejected',
             'identities.*.verified_by' => 'nullable|exists:admin_users,id',
             'identities.*.verified_at' => 'nullable|date',
             'identities.*.file_ref' => 'nullable|string|max:255',
@@ -145,17 +145,21 @@ class ShareholderController extends Controller
             }, $payload['addresses']);
             ShareholderAddress::insert($addresses);
 
-            $mandates = array_map(function ($row) use ($shareholder) {
-                $row['shareholder_id'] = $shareholder->id;
-                return $row;
-            }, $payload['mandates']);
-            ShareholderMandate::insert($mandates);
+            if (!empty($payload['mandates'])) {
+                $mandates = array_map(function ($row) use ($shareholder) {
+                    $row['shareholder_id'] = $shareholder->id;
+                    return $row;
+                }, $payload['mandates']);
+                ShareholderMandate::insert($mandates);
+            }
 
-            $identities = array_map(function ($row) use ($shareholder) {
-                $row['shareholder_id'] = $shareholder->id;
-                return $row;
-            }, $payload['identities']);
-            ShareholderIdentity::insert($identities);
+            if (!empty($payload['identities'])) {
+                $identities = array_map(function ($row) use ($shareholder) {
+                    $row['shareholder_id'] = $shareholder->id;
+                    return $row;
+                }, $payload['identities']);
+                ShareholderIdentity::insert($identities);
+            }
 
             DB::commit();
 
