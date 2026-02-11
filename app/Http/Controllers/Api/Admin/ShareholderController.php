@@ -84,7 +84,7 @@ class ShareholderController extends Controller
             'addresses.*.valid_from' => 'nullable|date',
             'addresses.*.valid_to' => 'nullable|date',
 
-            'mandates' => 'nullable|array|min:1',
+            'mandates' => 'nullable|array',
             'mandates.*.bank_name' => 'required_with:mandates|string|max:150',
             'mandates.*.account_name' => 'required_with:mandates|string|max:255',
             'mandates.*.account_number' => 'required_with:mandates|string|max:20',
@@ -93,7 +93,7 @@ class ShareholderController extends Controller
             'mandates.*.verified_by' => 'nullable|exists:users,id',
             'mandates.*.verified_at' => 'nullable|date',
 
-            'identities' => 'nullable|array|min:1',
+            'identities' => 'nullable|array',
             'identities.*.id_type' => 'required_with:identities|in:passport,drivers_license,nin,bvn,cac_cert,other',
             'identities.*.id_value' => 'required_with:identities|string|max:100',
             'identities.*.issued_on' => 'nullable|date',
