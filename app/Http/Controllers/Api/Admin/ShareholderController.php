@@ -163,7 +163,7 @@ class ShareholderController extends Controller
 
             DB::commit();
 
-            $shareholder->load('addresses', 'mandates', 'identities');
+            $shareholder->load('addresses', 'mandates', 'identities', 'holdings', 'certificates');
 
             return response()->json([
                 'success' => true,
@@ -183,7 +183,7 @@ class ShareholderController extends Controller
 
     public function show($id)
     {
-        $shareholder = Shareholder::with('addresses', 'mandates', 'identities')->findOrFail($id);
+        $shareholder = Shareholder::with('addresses', 'mandates', 'identities', 'holdings', 'certificates')->findOrFail($id);
 
         return response()->json($shareholder);
     }
@@ -244,7 +244,7 @@ class ShareholderController extends Controller
 
     public function getAllShareholdersParameters($id)
     {
-        $shareholderMandates = Shareholder::find($id)::with('addresses','mandates','identities')->get();
+        $shareholderMandates = Shareholder::find($id)::with('addresses', 'mandates', 'identities', 'holdings', 'certificates')->get();
         return response()->json($shareholderMandates);
     }
 

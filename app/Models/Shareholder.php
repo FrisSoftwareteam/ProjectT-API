@@ -88,4 +88,34 @@ class Shareholder extends Model
     {
         return $this->hasMany(ShareholderRegisterAccount::class);
     }
+
+    /**
+     * Get holdings for the shareholder across register accounts.
+     */
+    public function holdings()
+    {
+        return $this->hasManyThrough(
+            SharePosition::class,
+            ShareholderRegisterAccount::class,
+            'shareholder_id',
+            'sra_id',
+            'id',
+            'id'
+        );
+    }
+
+    /**
+     * Get certificate lots for the shareholder across register accounts.
+     */
+    public function certificates()
+    {
+        return $this->hasManyThrough(
+            ShareLot::class,
+            ShareholderRegisterAccount::class,
+            'shareholder_id',
+            'sra_id',
+            'id',
+            'id'
+        );
+    }
 }
