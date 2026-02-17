@@ -253,8 +253,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::prefix('dividend-declarations')->group(function () {
             
             // Get Dividend Declaration (Full Context)
-            Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
-                ->middleware('permission:companies.view');
+          Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
+    ->middleware('permission:users.view');
             
             // Update Dividend Declaration (Draft Only)
             Route::put('/{declaration_id}', [DividendEntitlementController::class, 'update'])
@@ -344,11 +344,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             // Generate Entitlement Preview (Compute)
             Route::post('/{declaration_id}/preview', [DividendEntitlementController::class, 'generatePreview'])
-                ->middleware('permission:companies.view');
+                ->middleware('permission:users.view');
             
             // Fetch Entitlement Preview (Paginated)
             Route::get('/{declaration_id}/preview', [DividendEntitlementController::class, 'fetchPreview'])
-                ->middleware('permission:companies.view');
+                ->middleware('permission:users.view');
         });
 
         // Dividend payment actions (standalone)
