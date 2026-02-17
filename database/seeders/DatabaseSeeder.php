@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
         // Always seed roles and permissions (required for production)
         $this->call([
             RolesAndPermissionsSeeder::class,
+            DividendApprovalRolesSeeder::class,
         ]);
 
         // Only seed test data in non-production environments

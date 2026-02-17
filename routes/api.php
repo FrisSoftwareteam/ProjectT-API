@@ -10,6 +10,10 @@ use App\Http\Controllers\Api\Admin\RegisterController;
 use App\Http\Controllers\Api\Admin\ShareClassController;
 use App\Http\Controllers\Api\Admin\ShareholderController;
 use App\Http\Controllers\Api\Admin\DividendEntitlementController;
+use App\Http\Controllers\Api\Admin\DividendExportController;
+use App\Http\Controllers\Api\Admin\DividendPaymentController;
+use App\Http\Controllers\Api\Admin\DividendValidationController;
+use App\Http\Controllers\Api\Admin\DividendAuditController;
 use App\Http\Controllers\Api\UserActivityLogController;
 use App\Http\Controllers\Api\SraGuardianController;
 use App\Http\Controllers\Api\ProbateCaseController;
@@ -188,6 +192,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             Route::get('/statistics/overview', [CompanyController::class, 'statistics'])
                 ->middleware('permission:users.view');
+
+            // Validate dividend period uniqueness
+            Route::get('/{company_id}/dividend-declarations/validate-period', [DividendValidationController::class, 'validatePeriod'])
+                ->middleware('permission:companies.view');
         });
 
         // Register Routes
@@ -255,6 +263,80 @@ Route::middleware(['auth:sanctum'])->group(function () {
             // Cancel Draft Declaration
             Route::delete('/{declaration_id}', [DividendEntitlementController::class, 'destroy'])
                 ->middleware('role:Super Admin');
+
+            // =================================================================
+            // DIVIDEND WORKFLOW (Maker-Checker)
+            // =================================================================
+
+            // Submit Dividend Declaration
+            Route::post('/{declaration_id}/submit', [DividendEntitlementController::class, 'submit'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Verify Dividend Declaration
+            Route::post('/{declaration_id}/verify', [DividendEntitlementController::class, 'verify'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Approve Dividend Declaration
+            Route::post('/{declaration_id}/approve', [DividendEntitlementController::class, 'approve'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Reject Dividend Declaration
+            Route::post('/{declaration_id}/reject', [DividendEntitlementController::class, 'reject'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Raise query at active approval step
+            Route::post('/{declaration_id}/query', [DividendEntitlementController::class, 'raiseQuery'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Respond to query (initiator comment)
+            Route::post('/{declaration_id}/query/respond', [DividendEntitlementController::class, 'respondQuery'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Assign reliever for approval role
+            Route::post('/{declaration_id}/delegations', [DividendEntitlementController::class, 'assignDelegation'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Archive and resume pre-live declarations
+            Route::post('/{declaration_id}/archive', [DividendEntitlementController::class, 'archive'])
+                ->middleware('role:Super Admin|Admin');
+            Route::post('/{declaration_id}/resume', [DividendEntitlementController::class, 'resume'])
+                ->middleware('role:Super Admin|Admin');
+
+            // Go Live action (freeze and generate payment records)
+            Route::post('/{declaration_id}/go-live', [DividendEntitlementController::class, 'goLive'])
+                ->middleware('role:Super Admin|Admin');
+
+            // =================================================================
+            // EXPORTS (Approved Only)
+            // =================================================================
+
+            // Export Entitlement File (CSV)
+            Route::get('/{declaration_id}/exports/entitlements', [DividendExportController::class, 'entitlements'])
+                ->middleware('permission:companies.view');
+
+            // Export Payment File (CSV/XLSX)
+            Route::get('/{declaration_id}/exports/payments', [DividendExportController::class, 'payments'])
+                ->middleware('permission:companies.view');
+
+            // Export Dividend Summary (PDF)
+            Route::get('/{declaration_id}/exports/summary', [DividendExportController::class, 'summary'])
+                ->middleware('permission:companies.view');
+
+            // =================================================================
+            // DIVIDEND AUDIT LOGS
+            // =================================================================
+
+            // Dividend Audit Log
+            Route::get('/{declaration_id}/audit-logs', [DividendAuditController::class, 'index'])
+                ->middleware('permission:companies.view');
+
+            // =================================================================
+            // DIVIDEND PAYMENTS
+            // =================================================================
+
+            // List Dividend Payments
+            Route::get('/{declaration_id}/payments', [DividendPaymentController::class, 'index'])
+                ->middleware('permission:companies.view');
             
             // =================================================================
             // ENTITLEMENT PREVIEW & COMPUTATION
@@ -268,5 +350,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
             Route::get('/{declaration_id}/preview', [DividendEntitlementController::class, 'fetchPreview'])
                 ->middleware('permission:companies.view');
         });
+
+        // Dividend payment actions (standalone)
+        Route::post('/dividend-payments/{payment_id}/reissue', [DividendPaymentController::class, 'reissue'])
+            ->middleware('role:Super Admin|Admin');
     });
 });

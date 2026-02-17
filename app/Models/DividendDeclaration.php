@@ -10,10 +10,13 @@ class DividendDeclaration extends Model
     use HasFactory;
 
     protected $fillable = [
+        'dividend_declaration_no',
         'company_id',
         'register_id',
+        'supplementary_of_declaration_id',
         'period_label',
         'description',
+        'initiator',
         'action_type',
         'declaration_method',
         'rate_per_share',
@@ -23,19 +26,22 @@ class DividendDeclaration extends Model
         'exclude_caution_accounts',
         'require_active_bank_mandate',
         'status',
+        'current_approval_step',
         'total_gross_amount',
         'total_tax_amount',
         'total_net_amount',
         'rounding_residue',
         'eligible_shareholders_count',
+        'is_frozen',
         'submitted_at',
-        'verified_at',
         'approved_at',
+        'live_at',
         'rejected_at',
+        'archived_at',
+        'archived_from_status',
         'rejection_reason',
         'created_by',
         'submitted_by',
-        'verified_by',
         'approved_by',
         'rejected_by',
     ];
@@ -47,14 +53,17 @@ class DividendDeclaration extends Model
         'payment_date' => 'date',
         'exclude_caution_accounts' => 'boolean',
         'require_active_bank_mandate' => 'boolean',
+        'current_approval_step' => 'integer',
         'total_gross_amount' => 'decimal:2',
         'total_tax_amount' => 'decimal:2',
         'total_net_amount' => 'decimal:2',
         'rounding_residue' => 'decimal:6',
+        'is_frozen' => 'boolean',
         'submitted_at' => 'datetime',
-        'verified_at' => 'datetime',
         'approved_at' => 'datetime',
+        'live_at' => 'datetime',
         'rejected_at' => 'datetime',
+        'archived_at' => 'datetime',
     ];
 
     // Relationships
@@ -68,6 +77,16 @@ class DividendDeclaration extends Model
         return $this->belongsTo(Register::class);
     }
 
+    public function supplementaryOf()
+    {
+        return $this->belongsTo(self::class, 'supplementary_of_declaration_id');
+    }
+
+    public function supplementaryDeclarations()
+    {
+        return $this->hasMany(self::class, 'supplementary_of_declaration_id');
+    }
+
     public function shareClasses()
     {
         return $this->belongsToMany(ShareClass::class, 'dividend_declaration_share_classes')
@@ -77,6 +96,16 @@ class DividendDeclaration extends Model
     public function entitlementRuns()
     {
         return $this->hasMany(DividendEntitlementRun::class);
+    }
+
+    public function approvalActions()
+    {
+        return $this->hasMany(DividendApprovalAction::class, 'dividend_declaration_id');
+    }
+
+    public function delegations()
+    {
+        return $this->hasMany(DividendApprovalDelegation::class, 'dividend_declaration_id');
     }
 
     public function workflowEvents()
@@ -122,12 +151,27 @@ class DividendDeclaration extends Model
 
     public function isVerified(): bool
     {
-        return $this->status === 'VERIFIED';
+        return false;
     }
 
     public function isApproved(): bool
     {
         return $this->status === 'APPROVED';
+    }
+
+    public function isLive(): bool
+    {
+        return $this->status === 'LIVE';
+    }
+
+    public function isQueryRaised(): bool
+    {
+        return $this->status === 'QUERY_RAISED';
+    }
+
+    public function isArchived(): bool
+    {
+        return $this->status === 'ARCHIVED';
     }
 
     public function isRejected(): bool
