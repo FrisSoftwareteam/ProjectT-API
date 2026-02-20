@@ -31,10 +31,14 @@ class Shareholder extends Model
         'email',
         'phone',
         'date_of_birth',
+        'sex',
         'rc_number',
         'nin',
         'bvn',
         'tax_id',
+        'next_of_kin_name',
+        'next_of_kin_phone',
+        'next_of_kin_relationship',
         'status',
     ];
 

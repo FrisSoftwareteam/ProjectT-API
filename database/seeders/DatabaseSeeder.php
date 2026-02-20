@@ -46,6 +46,9 @@ class DatabaseSeeder extends Seeder
                 AdminUserSeeder::class,
                 CompanyRegisterSeeder::class,
                 ShareholderSeeder::class,
+                SharePositionLotTransactionSeeder::class,
+                SraGuardianSeeder::class,
+                ProbateSeeder::class,
             ]);
             
             $this->command->info('✓ Test data seeded successfully!');

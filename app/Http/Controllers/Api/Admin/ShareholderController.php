@@ -41,6 +41,18 @@ class ShareholderController extends Controller
             });
         }
 
+        $query->with(['registerAccounts' => function ($q) {
+            $q->select(
+                'id',
+                'shareholder_id',
+                'register_id',
+                'shareholder_no',
+                'chn',
+                'cscs_account_no',
+                'status'
+            );
+        }]);
+
         $shareholders = $query->paginate(20);
 
         return response()->json($shareholders);
@@ -67,10 +79,14 @@ class ShareholderController extends Controller
             'shareholder.email' => 'required|email|unique:shareholders,email',
             'shareholder.phone' => 'required|string|max:32|unique:shareholders,phone',
             'shareholder.date_of_birth' => 'nullable|date',
+            'shareholder.sex' => 'nullable|in:male,female,other',
             'shareholder.rc_number' => 'nullable|string|max:50',
             'shareholder.nin' => 'nullable|string|max:20',
             'shareholder.bvn' => 'nullable|string|max:20',
             'shareholder.tax_id' => 'nullable|string|max:50',
+            'shareholder.next_of_kin_name' => 'nullable|string|max:255',
+            'shareholder.next_of_kin_phone' => 'nullable|string|max:32',
+            'shareholder.next_of_kin_relationship' => 'nullable|string|max:100',
             'shareholder.status' => 'required|in:active,dormant,deceased,closed',
 
             'addresses' => 'required|array|min:1',
@@ -90,7 +106,7 @@ class ShareholderController extends Controller
             'mandates.*.account_number' => 'required_with:mandates|string|max:20',
             'mandates.*.bvn' => 'nullable|string|max:20',
             'mandates.*.status' => 'required_with:mandates|in:pending,verified,active,rejected,revoked',
-            'mandates.*.verified_by' => 'nullable|exists:users,id',
+            'mandates.*.verified_by' => 'nullable|exists:admin_users,id',
             'mandates.*.verified_at' => 'nullable|date',
 
             'identities' => 'nullable|array',
@@ -163,7 +179,7 @@ class ShareholderController extends Controller
 
             DB::commit();
 
-            $shareholder->load('addresses', 'mandates', 'identities', 'holdings', 'certificates');
+            $shareholder->load('addresses', 'mandates', 'identities', 'holdings', 'certificates', 'registerAccounts');
 
             return response()->json([
                 'success' => true,
@@ -183,7 +199,14 @@ class ShareholderController extends Controller
 
     public function show($id)
     {
-        $shareholder = Shareholder::with('addresses', 'mandates', 'identities', 'holdings', 'certificates')->findOrFail($id);
+        $shareholder = Shareholder::with(
+            'addresses',
+            'mandates',
+            'identities',
+            'holdings',
+            'certificates',
+            'registerAccounts'
+        )->findOrFail($id);
 
         return response()->json($shareholder);
     }
@@ -228,7 +251,9 @@ class ShareholderController extends Controller
 
     public function addMandate($id,ShareholderMandateRequest $request)
     {
-        $shareholderMandate = ShareholderMandate::create($request->validated());
+        $payload = $request->validated();
+        $payload['shareholder_id'] = $id;
+        $shareholderMandate = ShareholderMandate::create($payload);
 
         return response()->json($shareholderMandate);
     }
@@ -238,13 +263,22 @@ class ShareholderController extends Controller
         $shareholderMandate = ShareholderMandate::where('id', $mandateId)
             ->where('shareholder_id', $shareholderId)
             ->firstOrFail();
-        $shareholderMandate->update($request->validated());
+        $payload = $request->validated();
+        $payload['shareholder_id'] = $shareholderId;
+        $shareholderMandate->update($payload);
         return response()->json($shareholderMandate);
     }
 
     public function getAllShareholdersParameters($id)
     {
-        $shareholderMandates = Shareholder::find($id)::with('addresses', 'mandates', 'identities', 'holdings', 'certificates')->get();
+        $shareholderMandates = Shareholder::find($id)::with(
+            'addresses',
+            'mandates',
+            'identities',
+            'holdings',
+            'certificates',
+            'registerAccounts'
+        )->get();
         return response()->json($shareholderMandates);
     }
 

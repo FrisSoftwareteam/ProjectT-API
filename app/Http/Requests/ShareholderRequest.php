@@ -30,10 +30,14 @@ class ShareholderRequest extends FormRequest
             'email' => 'required|email|unique:shareholders,email',
             'phone' => 'required|string|max:32|unique:shareholders,phone',
             'date_of_birth' => 'nullable|date',
+            'sex' => 'nullable|in:male,female,other',
             'rc_number' => 'nullable|string|max:50',
             'nin' => 'nullable|string|max:20',
             'bvn' => 'nullable|string|max:20',
             'tax_id' => 'nullable|string|max:50',
+            'next_of_kin_name' => 'nullable|string|max:255',
+            'next_of_kin_phone' => 'nullable|string|max:32',
+            'next_of_kin_relationship' => 'nullable|string|max:100',
             'status' => 'required|in:active,dormant,deceased,closed',
         ];
     }

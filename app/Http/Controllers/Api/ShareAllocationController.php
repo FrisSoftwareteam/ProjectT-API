@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Http\Requests\AddShareRequest;
+use App\Http\Requests\DisposeShareRequest;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
@@ -29,8 +30,8 @@ class ShareAllocationController extends Controller
         return DB::transaction(function () use ($shareholder, $data) {
             // Find or create SRA (shareholder_register_accounts)
             $sra = ShareholderRegisterAccount::firstOrCreate(
-                ['shareholder_id' => $shareholder->id, 'register_id' => $data['register_id'] ?? null],
-                ['shareholder_no' => ShareholderRegisterAccount::generateAccountNumber($shareholder->id)]
+                ['shareholder_id' => $shareholder->id, 'register_id' => $data['register_id']],
+                ['shareholder_no' => $this->generateShareholderNo($shareholder->id)]
             );
 
             // Find or create position for the share class (sra_id)
@@ -79,11 +80,74 @@ class ShareAllocationController extends Controller
             ]);
 
             return response()->json([
+                'direction' => 'inflow',
                 'sra' => $sra,
                 'position' => $position,
                 'lot' => $lot,
                 'transaction' => $tx,
             ], 201);
         });
+    }
+
+    /**
+     * Dispose (outflow) shares from a shareholder's register account.
+     */
+    public function dispose(DisposeShareRequest $request, $shareholderId)
+    {
+        $shareholder = Shareholder::findOrFail($shareholderId);
+        $data = $request->validated();
+
+        return DB::transaction(function () use ($shareholder, $data) {
+            $sra = ShareholderRegisterAccount::where('shareholder_id', $shareholder->id)
+                ->where('register_id', $data['register_id'])
+                ->firstOrFail();
+
+            $position = SharePosition::where('sra_id', $sra->id)
+                ->where('share_class_id', $data['share_class_id'])
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if (bccomp((string) $position->quantity, (string) $data['quantity'], 8) < 0) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Insufficient share balance for this disposal',
+                    'errors' => [
+                        'quantity' => ['Requested disposal quantity exceeds available position quantity.'],
+                    ],
+                ], 422);
+            }
+
+            $newQty = bcsub((string) $position->quantity, (string) $data['quantity'], 8);
+            $closeIfZero = (bool) ($data['close_position_if_zero'] ?? false);
+
+            if (bccomp($newQty, '0', 8) === 0 && $closeIfZero) {
+                $position->delete();
+            } else {
+                $position->quantity = $newQty;
+                $position->save();
+            }
+
+            $tx = ShareTransaction::create([
+                'sra_id' => $sra->id,
+                'share_class_id' => $data['share_class_id'],
+                'tx_type' => $data['tx_type'],
+                'quantity' => $data['quantity'],
+                'tx_ref' => $data['tx_ref'] ?? ('DISP-' . strtoupper(Str::random(8))),
+                'tx_date' => $data['tx_date'] ?? now(),
+                'created_by' => auth()->id(),
+            ]);
+
+            return response()->json([
+                'direction' => 'outflow',
+                'sra' => $sra,
+                'position' => $closeIfZero && bccomp($newQty, '0', 8) === 0 ? null : $position->fresh(),
+                'transaction' => $tx,
+            ], 201);
+        });
+    }
+
+    private function generateShareholderNo(int $shareholderId): string
+    {
+        return 'SRA-' . str_pad((string) $shareholderId, 8, '0', STR_PAD_LEFT) . '-' . strtoupper(Str::random(4));
     }
 }
