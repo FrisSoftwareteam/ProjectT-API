@@ -51,6 +51,10 @@ class DividendEntitlement extends Model
     {
         return $this->belongsTo(ShareClass::class);
     }
-}
 
+    public function payments()
+    {
+        return $this->hasMany(DividendPayment::class, 'entitlement_id');
+    }
+}
 
