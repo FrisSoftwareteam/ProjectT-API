@@ -11,7 +11,23 @@ class SraGuardianController extends Controller
 {
     public function index(Request $request)
     {
-        $data = SraGuardian::with(['sra','guardianShareholder'])->paginate($request->query('per_page', 15));
+        $query = SraGuardian::with(['sra', 'guardianShareholder']);
+
+        if ($request->filled('shareholder_id')) {
+            $query->whereHas('sra', function ($q) use ($request) {
+                $q->where('shareholder_id', $request->query('shareholder_id'));
+            });
+        }
+
+        if ($request->filled('sra_id')) {
+            $query->where('sra_id', $request->query('sra_id'));
+        }
+
+        if ($request->filled('verified_status')) {
+            $query->where('verified_status', $request->query('verified_status'));
+        }
+
+        $data = $query->paginate($request->query('per_page', 15));
         return response()->json($data);
     }
 
