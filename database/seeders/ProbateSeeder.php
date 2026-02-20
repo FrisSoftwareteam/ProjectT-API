@@ -13,7 +13,6 @@ class ProbateSeeder extends Seeder
 {
     public function run(): void
     {
-        $faker = \Faker\Factory::create();
         $executorId = AdminUser::query()->value('id');
 
         $positions = SharePosition::query()
@@ -37,15 +36,15 @@ class ProbateSeeder extends Seeder
 
             $caseId = DB::table('probate_cases')->insertGetId([
                 'shareholder_id' => $sourceSra->shareholder_id,
-                'court_ref' => 'CRT-' . strtoupper($faker->bothify('??#####')),
-                'executor_name' => $faker->name(),
-                'document_ref' => 'PRB-' . strtoupper($faker->bothify('??#####')),
-                'status' => $faker->randomElement(['pending', 'granted']),
-                'opened_at' => now()->subDays($faker->numberBetween(1, 180)),
+                'court_ref' => 'CRT-' . strtoupper(substr(md5((string) ($sourceSra->id . '-crt')), 0, 7)),
+                'executor_name' => 'Executor ' . $sourceSra->id,
+                'document_ref' => 'PRB-' . strtoupper(substr(md5((string) ($sourceSra->id . '-prb')), 0, 7)),
+                'status' => (mt_rand(0, 1) === 1 ? 'pending' : 'granted'),
+                'opened_at' => now()->subDays(mt_rand(1, 180)),
                 'closed_at' => null,
             ]);
 
-            $beneficiaryShareholderId = $faker->optional(0.7)->randomElement($allShareholderIds);
+            $beneficiaryShareholderId = mt_rand(1, 10) <= 7 ? $allShareholderIds[array_rand($allShareholderIds)] : null;
             $beneficiarySraId = null;
             if ($beneficiaryShareholderId) {
                 $beneficiarySraId = DB::table('shareholder_register_accounts')
@@ -54,18 +53,18 @@ class ProbateSeeder extends Seeder
             }
 
             $maxQty = max(1.0, (float) $position->quantity / 2);
-            $qty = $faker->randomFloat(6, 1, $maxQty);
+            $qty = number_format(mt_rand(1000000, (int) max(1000000, floor($maxQty * 1000000))) / 1000000, 6, '.', '');
 
             ProbateBeneficiary::query()->create([
                 'probate_case_id' => $caseId,
                 'beneficiary_shareholder_id' => $beneficiaryShareholderId,
-                'beneficiary_name' => $beneficiaryShareholderId ? null : $faker->name(),
-                'relationship' => $faker->randomElement(['spouse', 'child', 'executor', 'sibling']),
+                'beneficiary_name' => $beneficiaryShareholderId ? null : ('Beneficiary ' . $caseId),
+                'relationship' => ['spouse', 'child', 'executor', 'sibling'][mt_rand(0, 3)],
                 'share_class_id' => $position->share_class_id,
                 'sra_id' => $beneficiarySraId,
                 'quantity' => $qty,
                 'transfer_status' => 'pending',
-                'executed_by' => null,
+                'executed_by' => $executorId ? null : null,
                 'executed_at' => null,
             ]);
         }

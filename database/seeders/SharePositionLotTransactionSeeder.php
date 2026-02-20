@@ -16,7 +16,6 @@ class SharePositionLotTransactionSeeder extends Seeder
 {
     public function run(): void
     {
-        $faker = \Faker\Factory::create();
         $actorId = AdminUser::query()->value('id');
 
         // Ensure each register has at least one share class.
@@ -54,8 +53,8 @@ class SharePositionLotTransactionSeeder extends Seeder
                     'share_class_id' => $class->id,
                 ],
                 [
-                    'quantity' => $faker->randomFloat(6, 100, 10000),
-                    'holding_mode' => $faker->randomElement(['demat', 'paper']),
+                    'quantity' => number_format(mt_rand(10000, 1000000) / 100, 6, '.', ''),
+                    'holding_mode' => (mt_rand(0, 1) === 1 ? 'demat' : 'paper'),
                     'last_updated_at' => now(),
                 ]
             );
@@ -72,9 +71,9 @@ class SharePositionLotTransactionSeeder extends Seeder
                     'sra_id' => $sra->id,
                     'share_class_id' => $class->id,
                     'lot_ref' => $lotRef,
-                    'source_type' => $faker->randomElement(['allotment', 'bonus', 'rights', 'transfer_in', 'demat_in']),
+                    'source_type' => ['allotment', 'bonus', 'rights', 'transfer_in', 'demat_in'][mt_rand(0, 4)],
                     'quantity' => $position->quantity,
-                    'acquired_at' => now()->subDays($faker->numberBetween(30, 900)),
+                    'acquired_at' => now()->subDays(mt_rand(30, 900)),
                     'status' => 'open',
                 ]);
             }
@@ -88,10 +87,10 @@ class SharePositionLotTransactionSeeder extends Seeder
                 ShareTransaction::query()->create([
                     'sra_id' => $sra->id,
                     'share_class_id' => $class->id,
-                    'tx_type' => $faker->randomElement(['allot', 'bonus', 'rights', 'transfer_in', 'demat_in']),
+                    'tx_type' => ['allot', 'bonus', 'rights', 'transfer_in', 'demat_in'][mt_rand(0, 4)],
                     'quantity' => $position->quantity,
                     'tx_ref' => 'TX-' . strtoupper(Str::random(10)),
-                    'tx_date' => now()->subDays($faker->numberBetween(30, 900)),
+                    'tx_date' => now()->subDays(mt_rand(30, 900)),
                     'created_by' => $actorId,
                 ]);
             }
