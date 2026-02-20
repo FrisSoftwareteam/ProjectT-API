@@ -22,10 +22,11 @@ class DatabaseSeeder extends Seeder
         if (!app()->environment('production')) {
             $this->command->info('Seeding test data...');
             
-            // Create test admin user (using AdminUser, not User)
-            $testAdmin = AdminUser::factory()->create([
-                'microsoft_id' => 'test-admin-microsoft-id',
+            // Create or update test admin user (idempotent).
+            $testAdmin = AdminUser::query()->updateOrCreate([
                 'email' => 'test@example.com',
+            ], [
+                'microsoft_id' => 'test-admin-microsoft-id',
                 'first_name' => 'Test',
                 'last_name' => 'Admin',
                 'department' => 'IT',
@@ -39,8 +40,10 @@ class DatabaseSeeder extends Seeder
             ]);
             
             // Assign Super Admin role
-            $testAdmin->assignRole('Super Admin');
-            $this->command->info('✓ Test admin created: test@example.com');
+            if (!$testAdmin->hasRole('Super Admin')) {
+                $testAdmin->assignRole('Super Admin');
+            }
+            $this->command->info('✓ Test admin ready: test@example.com');
 
             // Seed additional test admin users
             $this->call([
