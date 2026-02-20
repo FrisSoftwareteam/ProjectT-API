@@ -50,6 +50,7 @@ class DatabaseSeeder extends Seeder
                 SharePositionLotTransactionSeeder::class,
                 SraGuardianSeeder::class,
                 ProbateSeeder::class,
+                DividendSeeder::class,
             ]);
             
             $this->command->info('✓ Test data seeded successfully!');
