@@ -157,6 +157,50 @@ class CompanyController extends Controller
     }
 
     /**
+     * Display company full context (company + registers + share classes).
+     */
+    public function fullContext(Request $request, $id): JsonResponse
+    {
+        try {
+            $query = Company::query();
+
+            if ($request->boolean('include_deleted')) {
+                $query->withTrashed();
+            }
+
+            $company = $query
+                ->with([
+                    'registers' => function ($q) {
+                        $q->orderBy('name');
+                    },
+                    'registers.shareClasses' => function ($q) {
+                        $q->orderBy('class_code');
+                    },
+                ])
+                ->findOrFail($id);
+
+            return response()->json([
+                'success' => true,
+                'data' => $company,
+                'message' => 'Company full context retrieved successfully',
+            ]);
+        } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Company not found',
+            ], 404);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving company full context: ' . $e->getMessage());
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving company full context',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Update the specified company.
      */
     public function update(Request $request, $id): JsonResponse

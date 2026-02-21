@@ -15,8 +15,8 @@ class SraGuardianRequest extends FormRequest
     {
         return [
             'sra_id' => ['required', 'exists:shareholder_register_accounts,id'],
-            'guardian_shareholder_id' => ['nullable', 'exists:shareholders,id'],
-            'guardian_name' => ['required_without:guardian_shareholder_id', 'string', 'max:255'],
+            'guardian_shareholder_id' => ['required', 'exists:shareholders,id'],
+            'guardian_name' => ['nullable', 'string', 'max:255'],
             'guardian_contact' => ['nullable', 'string', 'max:255'],
             'document_ref' => ['nullable', 'string', 'max:255'],
             'valid_from' => ['nullable', 'date'],

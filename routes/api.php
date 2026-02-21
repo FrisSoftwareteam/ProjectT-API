@@ -111,6 +111,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::put('/{shareholder}/mandates/{mandate}', [ShareholderController::class, 'updateMandate'])->middleware('permission:shareholder_mandates.edit');
         Route::post('/{shareholder}/identities', [ShareholderController::class, 'shareholderIdentityCreate'])->middleware('permission:shareholder_identities.create');
         Route::put('/{shareholder}/identities/{identity}', [ShareholderController::class, 'shareholderIdentityUpdate'])->middleware('permission:shareholder_identities.edit');
+        Route::post('/{shareholder}/register-accounts', [ShareholderController::class, 'addRegisterAccount'])->middleware('permission:shareholders.edit');
 
         // Share posting endpoints (inflow/outflow)
         Route::post('/{shareholder}/shares/allocate', [ShareAllocationController::class, 'allocate'])->middleware('permission:shares.create');
@@ -184,6 +185,9 @@ Route::middleware(['auth:sanctum'])->group(function () {
                 ->middleware('role:Super Admin');
             
             Route::get('/{id}', [CompanyController::class, 'show'])
+                ->middleware('permission:users.view');
+
+            Route::get('/{id}/full-context', [CompanyController::class, 'fullContext'])
                 ->middleware('permission:users.view');
             
             Route::put('/{id}', [CompanyController::class, 'update'])

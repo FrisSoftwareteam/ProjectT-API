@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\CreateShareholderRegisterAccountRequest;
 use App\Http\Requests\ShareholderRequest;
 use App\Models\Shareholder;
 use App\Services\ShareholderAccountNumberService;
@@ -12,10 +13,12 @@ use App\Models\ShareholderMandate;
 use Illuminate\Support\Facades\Log;
 use App\Http\Requests\ShareholderIdentityRequest;
 use App\Models\ShareholderIdentity;
+use App\Models\ShareholderRegisterAccount;
 use App\Http\Requests\ShareholderAddressUpdateRequest;
 use App\Models\ShareholderAddress;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Str;
 
 class ShareholderController extends Controller
 {
@@ -213,10 +216,10 @@ class ShareholderController extends Controller
     
     public function update(ShareholderRequest $request, $id)
     {
-        $shareholder = Shareholder::find($id);
-        $shareholder->update($request->all());
+        $shareholder = Shareholder::findOrFail($id);
+        $shareholder->update($request->validated());
 
-        return response()->json($shareholder);
+        return response()->json($shareholder->fresh());
     }
     
     public function destroy($id)
@@ -296,5 +299,46 @@ class ShareholderController extends Controller
         $shareholderIdentity->update($request->validated());
 
         return response()->json($shareholderIdentity);
+    }
+
+    public function addRegisterAccount(CreateShareholderRegisterAccountRequest $request, $shareholderId)
+    {
+        $shareholder = Shareholder::findOrFail($shareholderId);
+        $payload = $request->validated();
+
+        $existing = ShareholderRegisterAccount::query()
+            ->where('shareholder_id', $shareholder->id)
+            ->where('register_id', $payload['register_id'])
+            ->first();
+
+        if ($existing) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Shareholder already belongs to this register',
+                'data' => $existing,
+            ], 409);
+        }
+
+        $registerAccount = ShareholderRegisterAccount::query()->create([
+            'shareholder_id' => $shareholder->id,
+            'register_id' => $payload['register_id'],
+            'shareholder_no' => $payload['shareholder_no'] ?? $this->generateShareholderNo($shareholder->id),
+            'chn' => $payload['chn'] ?? null,
+            'cscs_account_no' => $payload['cscs_account_no'] ?? null,
+            'residency_status' => $payload['residency_status'] ?? 'resident',
+            'kyc_level' => $payload['kyc_level'] ?? 'basic',
+            'status' => $payload['status'] ?? 'active',
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Shareholder added to register successfully',
+            'data' => $registerAccount,
+        ], 201);
+    }
+
+    private function generateShareholderNo(int $shareholderId): string
+    {
+        return 'SRA-' . str_pad((string) $shareholderId, 8, '0', STR_PAD_LEFT) . '-' . strtoupper(Str::random(4));
     }
 }

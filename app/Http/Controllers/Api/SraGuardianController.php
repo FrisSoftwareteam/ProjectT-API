@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\SraGuardian;
+use App\Models\Shareholder;
 use App\Http\Requests\SraGuardianRequest;
 use Illuminate\Http\Request;
 
@@ -34,6 +35,11 @@ class SraGuardianController extends Controller
     public function store(SraGuardianRequest $request)
     {
         $payload = $request->validated();
+        if (empty($payload['guardian_name']) && !empty($payload['guardian_shareholder_id'])) {
+            $payload['guardian_name'] = Shareholder::query()
+                ->where('id', $payload['guardian_shareholder_id'])
+                ->value('full_name') ?? 'Guardian';
+        }
         $guardian = SraGuardian::create($payload);
         return response()->json($guardian, 201);
     }
@@ -46,7 +52,13 @@ class SraGuardianController extends Controller
 
     public function update(SraGuardianRequest $request, SraGuardian $sraGuardian)
     {
-        $sraGuardian->update($request->validated());
+        $payload = $request->validated();
+        if (empty($payload['guardian_name']) && !empty($payload['guardian_shareholder_id'])) {
+            $payload['guardian_name'] = Shareholder::query()
+                ->where('id', $payload['guardian_shareholder_id'])
+                ->value('full_name') ?? $sraGuardian->guardian_name;
+        }
+        $sraGuardian->update($payload);
         return response()->json($sraGuardian);
     }
 
