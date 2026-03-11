@@ -15,9 +15,12 @@ class ProbateCaseRequest extends FormRequest
     {
         return [
             'shareholder_id' => ['required', 'exists:shareholders,id'],
+            'case_type' => ['required', 'in:probate,letters_of_administration'],
             'court_ref' => ['required', 'string', 'max:100'],
-            'executor_name' => ['required', 'string', 'max:255'],
+            'grant_date' => ['nullable', 'date'],
+            'executor_name' => ['nullable', 'string', 'max:255'],
             'document_ref' => ['nullable', 'string', 'max:255'],
+            'case_status' => ['nullable', 'in:draft,submitted,approved'],
             'status' => ['nullable', 'in:pending,granted,distributed,closed'],
             'opened_at' => ['nullable', 'date'],
             'closed_at' => ['nullable', 'date'],

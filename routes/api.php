@@ -18,6 +18,10 @@ use App\Http\Controllers\Api\UserActivityLogController;
 use App\Http\Controllers\Api\SraGuardianController;
 use App\Http\Controllers\Api\ProbateCaseController;
 use App\Http\Controllers\Api\ShareAllocationController;
+use App\Http\Controllers\Api\CscsUploadController;
+use App\Http\Controllers\Api\ShareTransferController;
+use App\Http\Controllers\Api\ShareholderMergeController;
+use App\Http\Controllers\Api\IpoOfferController;
 
 /*
 |--------------------------------------------------------------------------
@@ -143,6 +147,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
         // beneficiaries under a probate case
         Route::post('/{probateCase}/beneficiaries', [ProbateCaseController::class, 'addBeneficiary'])->middleware('permission:probates.edit');
+        Route::post('/{probateCase}/representatives', [ProbateCaseController::class, 'addRepresentative'])->middleware('permission:probates.edit');
         Route::post('/beneficiaries/{id}/execute', [ProbateCaseController::class, 'executeBeneficiary'])->middleware('permission:probates.edit');
     });
 
@@ -161,6 +166,26 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('share-transactions')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'index'])->middleware('permission:shares.view');
         Route::get('/{shareTransaction}', [\App\Http\Controllers\Api\ShareTransactionController::class, 'show'])->middleware('permission:shares.view');
+    });
+
+    Route::post('/share-transfers', [ShareTransferController::class, 'store'])->middleware('permission:shares.transfer');
+    Route::post('/shareholders/merge', [ShareholderMergeController::class, 'store'])->middleware('permission:shareholders.edit');
+
+    // CSCS upload and operations
+    Route::post('/cscs/import', [CscsUploadController::class, 'import'])->middleware('permission:shares.create');
+    Route::get('/cscs/uploads', [CscsUploadController::class, 'index'])->middleware('permission:shares.view');
+    Route::get('/cscs/uploads/{batchId}', [CscsUploadController::class, 'show'])->middleware('permission:shares.view');
+    Route::get('/cscs/uploads/{batchId}/rows', [CscsUploadController::class, 'rows'])->middleware('permission:shares.view');
+    Route::get('/cscs/uploads/{batchId}/exceptions', [CscsUploadController::class, 'exceptions'])->middleware('permission:shares.view');
+    Route::post('/cscs/uploads/{batchId}/reprocess-failed', [CscsUploadController::class, 'reprocessFailed'])->middleware('permission:shares.edit');
+    Route::get('/cscs/uploads/{batchId}/export', [CscsUploadController::class, 'export'])->middleware('permission:shares.view');
+
+    // IPO / Offer processing
+    Route::prefix('offers')->group(function () {
+        Route::get('/', [IpoOfferController::class, 'index'])->middleware('permission:shares.view');
+        Route::post('/', [IpoOfferController::class, 'store'])->middleware('permission:shares.create');
+        Route::post('/{offer}/allotments', [IpoOfferController::class, 'addAllotment'])->middleware('permission:shares.create');
+        Route::post('/{offer}/finalize', [IpoOfferController::class, 'finalize'])->middleware('permission:shares.edit');
     });
 
     /*
