@@ -21,6 +21,7 @@ class AddShareRequest extends FormRequest
             'acquired_at' => ['nullable', 'date'],
             'holding_mode' => ['nullable', 'in:demat,paper'],
             'register_id' => ['nullable', 'exists:registers,id'],
+            'corporate_action_id' => ['nullable', 'exists:corporate_actions,id'],
         ];
     }
 }

@@ -74,4 +74,21 @@ class ShareholderRegisterAccount extends Model
     {
         return $this->hasMany(ShareTransaction::class, 'sra_id');
     }
+
+    /**
+     * Get the dividend entitlements for this account.
+     */
+    public function dividendEntitlements()
+    {
+        return $this->hasMany(DividendEntitlement::class, 'register_account_id');
+    }
+
+    /**
+     * External identifiers (CHN / CSCS account numbers) mapped to this SRA.
+     */
+    public function externalIdentifiers()
+    {
+        return $this->hasMany(SraExternalIdentifier::class, 'sra_id');
+    }
+
 }

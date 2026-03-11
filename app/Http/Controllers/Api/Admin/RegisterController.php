@@ -30,6 +30,16 @@ class RegisterController extends Controller
                 $query->where('status', $request->input('status'));
             }
 
+            // Filter by instrument type
+            if ($request->has('instrument_type')) {
+                $query->where('instrument_type', $request->input('instrument_type'));
+            }
+
+            // Filter by capital behaviour type
+            if ($request->has('capital_behaviour_type')) {
+                $query->where('capital_behaviour_type', $request->input('capital_behaviour_type'));
+            }
+
             // Filter by is_default
             if ($request->has('is_default')) {
                 $query->where('is_default', $request->boolean('is_default'));
@@ -40,7 +50,8 @@ class RegisterController extends Controller
                 $search = $request->input('search');
                 $query->where(function ($q) use ($search) {
                     $q->where('name', 'like', "%{$search}%")
-                      ->orWhere('register_code', 'like', "%{$search}%");
+                      ->orWhere('register_code', 'like', "%{$search}%")
+                      ->orWhere('narration', 'like', "%{$search}%");
                 });
             }
 
@@ -85,28 +96,24 @@ class RegisterController extends Controller
         try {
             $validated = $request->validate([
                 'company_id' => 'required|exists:companies,id',
-                'register_code' => 'required|string|max:32',
                 'name' => 'required|string|max:255',
+                'instrument_type' => 'required|string|max:100',
+                'capital_behaviour_type' => 'required|in:constant,open_ended,amortising',
+                'paid_up_capital' => 'nullable|numeric|min:0|required_if:capital_behaviour_type,constant',
+                'narration' => 'nullable|string|max:2000',
                 'is_default' => 'nullable|boolean',
                 'status' => 'nullable|in:active,closed',
             ]);
 
-            // Check for unique combination of company_id and register_code
-            $exists = Register::where('company_id', $validated['company_id'])
-                              ->where('register_code', $validated['register_code'])
-                              ->exists();
-
-            if ($exists) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Register code already exists for this company',
-                    'errors' => ['register_code' => ['This register code is already in use for this company']]
-                ], 422);
-            }
+            $company = Company::findOrFail($validated['company_id']);
+            $validated['register_code'] = $this->generateRegisterCode($company);
 
             // Set default values
             $validated['is_default'] = $validated['is_default'] ?? true;
             $validated['status'] = $validated['status'] ?? 'active';
+            if (($validated['capital_behaviour_type'] ?? null) !== 'constant') {
+                $validated['paid_up_capital'] = null;
+            }
 
             // If this is set as default, unset other defaults for this company
             if ($validated['is_default']) {
@@ -197,23 +204,20 @@ class RegisterController extends Controller
             $register = Register::findOrFail($id);
 
             $validated = $request->validate([
-                'register_code' => 'required|string|max:32',
                 'name' => 'required|string|max:255',
+                'instrument_type' => 'required|string|max:100',
+                'capital_behaviour_type' => 'required|in:constant,open_ended,amortising',
+                'paid_up_capital' => 'nullable|numeric|min:0|required_if:capital_behaviour_type,constant',
+                'narration' => 'nullable|string|max:2000',
                 'is_default' => 'nullable|boolean',
                 'status' => 'nullable|in:active,closed',
             ]);
 
-            // Check for unique combination of company_id and register_code
-            $exists = Register::where('company_id', $register->company_id)
-                              ->where('register_code', $validated['register_code'])
-                              ->where('id', '!=', $register->id)
-                              ->exists();
-
-            if ($exists) {
+            if ($request->has('register_code')) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Register code already exists for this company',
-                    'errors' => ['register_code' => ['This register code is already in use for this company']]
+                    'message' => 'register_code is immutable after creation',
+                    'errors' => ['register_code' => ['register_code cannot be edited']]
                 ], 422);
             }
 
@@ -223,6 +227,9 @@ class RegisterController extends Controller
                         ->where('id', '!=', $register->id)
                         ->where('is_default', true)
                         ->update(['is_default' => false]);
+            }
+            if (($validated['capital_behaviour_type'] ?? null) !== 'constant') {
+                $validated['paid_up_capital'] = null;
             }
 
             $register->update($validated);
@@ -303,5 +310,36 @@ class RegisterController extends Controller
                 'error' => $e->getMessage()
             ], 500);
         }
+    }
+
+    private function generateRegisterCode(Company $company): string
+    {
+        $prefixSource = $company->issuer_code ?: 'REG';
+        $prefix = strtoupper((string) preg_replace('/[^A-Z0-9]/', '', $prefixSource));
+        $prefix = substr($prefix, 0, 10);
+        if ($prefix === '') {
+            $prefix = 'REG';
+        }
+
+        $codes = Register::where('company_id', $company->id)
+            ->pluck('register_code')
+            ->all();
+
+        $max = 0;
+        foreach ($codes as $code) {
+            if (preg_match('/^' . preg_quote($prefix, '/') . '-(\d{6})$/', (string) $code, $m)) {
+                $max = max($max, (int) $m[1]);
+            }
+        }
+
+        $next = $max + 1;
+        do {
+            $candidate = sprintf('%s-%06d', $prefix, $next++);
+            $exists = Register::where('company_id', $company->id)
+                ->where('register_code', $candidate)
+                ->exists();
+        } while ($exists);
+
+        return $candidate;
     }
 }

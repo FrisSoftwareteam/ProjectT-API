@@ -16,6 +16,7 @@ class SharePositionUpdateRequest extends FormRequest
         return [
             'quantity' => ['required', 'numeric', 'min:0'],
             'holding_mode' => ['required', 'in:demat,paper'],
+            'corporate_action_id' => ['nullable', 'exists:corporate_actions,id'],
         ];
     }
 }
