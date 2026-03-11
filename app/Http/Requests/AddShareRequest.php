@@ -20,7 +20,8 @@ class AddShareRequest extends FormRequest
             'lot_ref' => ['nullable', 'string', 'max:64'],
             'acquired_at' => ['nullable', 'date'],
             'holding_mode' => ['nullable', 'in:demat,paper'],
-            'register_id' => ['required', 'exists:registers,id'],
+            'register_id' => ['nullable', 'exists:registers,id'],
+            'corporate_action_id' => ['nullable', 'exists:corporate_actions,id'],
         ];
     }
 }

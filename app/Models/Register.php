@@ -15,12 +15,21 @@ class Register extends Model
         'company_id',
         'register_code',
         'name',
+        'instrument_type',
+        'capital_behaviour_type',
+        'paid_up_capital',
+        'total_units_outstanding',
+        'remaining_outstanding_units',
+        'narration',
         'is_default',
         'status',
     ];
 
     protected $casts = [
         'is_default' => 'boolean',
+        'paid_up_capital' => 'decimal:6',
+        'total_units_outstanding' => 'decimal:6',
+        'remaining_outstanding_units' => 'decimal:6',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',

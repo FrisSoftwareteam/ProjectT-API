@@ -89,4 +89,20 @@ class ShareholderRegisterAccount extends Model
     {
         return $this->hasMany(DividendEntitlement::class, 'register_account_id');
     }
+
+    /**
+     * External identifiers (CHN / CSCS account numbers) mapped to this SRA.
+     */
+    public function externalIdentifiers()
+    {
+        return $this->hasMany(SraExternalIdentifier::class, 'sra_id');
+    }
+
+    /**
+     * Generate a deterministic-looking shareholder register account number.
+     */
+    public static function generateAccountNumber(int $shareholderId): string
+    {
+        return 'SRA' . str_pad((string) $shareholderId, 8, '0', STR_PAD_LEFT) . random_int(10, 99);
+    }
 }

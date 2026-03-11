@@ -10,12 +10,18 @@ use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
 use App\Models\ShareLot;
 use App\Models\ShareTransaction;
-use Illuminate\Http\Request;
+use App\Models\ShareClass;
+use App\Services\CapitalValidationService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
 class ShareAllocationController extends Controller
 {
+    public function __construct(
+        private readonly CapitalValidationService $capitalValidationService
+    ) {
+    }
+
     /**
      * Allocate shares to a shareholder.
      * Creates or finds the shareholder register account (SRA), updates/creates a share position,
@@ -24,14 +30,27 @@ class ShareAllocationController extends Controller
     public function allocate(AddShareRequest $request, $shareholderId)
     {
         $shareholder = Shareholder::findOrFail($shareholderId);
-
         $data = $request->validated();
+        $shareClass = ShareClass::findOrFail($data['share_class_id']);
+        $registerId = $data['register_id'] ?? $shareClass->register_id;
 
-        return DB::transaction(function () use ($shareholder, $data) {
+        if ((int) $shareClass->register_id !== (int) $registerId) {
+            return response()->json([
+                'message' => 'share_class_id does not belong to the supplied register_id',
+            ], 422);
+        }
+
+        return DB::transaction(function () use ($shareholder, $data, $registerId) {
+            $this->capitalValidationService->assertChangeAllowed(
+                (int) $registerId,
+                (float) $data['quantity'],
+                isset($data['corporate_action_id']) ? (int) $data['corporate_action_id'] : null
+            );
+
             // Find or create SRA (shareholder_register_accounts)
             $sra = ShareholderRegisterAccount::firstOrCreate(
-                ['shareholder_id' => $shareholder->id, 'register_id' => $data['register_id']],
-                ['shareholder_no' => $this->generateShareholderNo($shareholder->id)]
+                ['shareholder_id' => $shareholder->id, 'register_id' => $registerId],
+                ['shareholder_no' => ShareholderRegisterAccount::generateAccountNumber($shareholder->id)]
             );
 
             // Find or create position for the share class (sra_id)
@@ -78,6 +97,9 @@ class ShareAllocationController extends Controller
                 'tx_date' => $data['acquired_at'] ?? now(),
                 'created_by' => auth()->id(),
             ]);
+
+            $this->capitalValidationService->syncOutstandingUnits((int) $registerId);
+            $this->capitalValidationService->assertConstantBalanced((int) $registerId);
 
             return response()->json([
                 'direction' => 'inflow',
