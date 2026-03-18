@@ -169,6 +169,12 @@ class RolesAndPermissionsSeeder extends Seeder
             'share_transactions.create',
             'share_transactions.edit',
             'share_transactions.delete',
+
+            // User Activity Logs
+            'user_activity_logs.view',
+            'user_activity_logs.create',
+            'user_activity_logs.edit',
+            'user_activity_logs.delete',
         ];
 
         foreach ($permissions as $permission) {
@@ -224,6 +230,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'notifications.view', 'notifications.send',
             'audit.view', 'audit.export',
             'roles.view', 'permissions.view',
+            'user_activity_logs.view', 'user_activity_logs.create', 'user_activity_logs.edit', 'user_activity_logs.delete',
         ]);
     }
 
@@ -386,6 +393,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'reports.view', 'reports.generate', 'reports.audit',
             'audit.view', 'audit.export',
             'system.logs',
+            'user_activity_logs.view',
         ]);
     }
 
