@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\BulkShareholderRequest;
 use App\Http\Requests\CreateShareholderRegisterAccountRequest;
 use App\Http\Requests\ShareholderRequest;
 use App\Models\Shareholder;
@@ -69,6 +70,29 @@ class ShareholderController extends Controller
         $shareholder = Shareholder::create($data);
 
         return response()->json($shareholder, 201);
+    }
+
+    public function bulkStore(BulkShareholderRequest $request)
+    {
+        $payload = $request->validated('shareholders');
+
+        $shareholders = DB::transaction(function () use ($payload) {
+            $created = [];
+
+            foreach ($payload as $shareholderData) {
+                $shareholderData['account_no'] = $this->accountNumberService->generate();
+                $created[] = Shareholder::create($shareholderData);
+            }
+
+            return collect($created);
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Shareholders created successfully',
+            'count' => $shareholders->count(),
+            'data' => $shareholders,
+        ], 201);
     }
 
     public function storeWithDetails(\Illuminate\Http\Request $request)

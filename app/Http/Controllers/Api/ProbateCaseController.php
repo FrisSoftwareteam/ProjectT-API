@@ -17,6 +17,7 @@ use App\Models\ShareTransaction;
 use App\Services\ShareholderAccountNumberService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ProbateCaseController extends Controller
 {
@@ -33,7 +34,7 @@ class ProbateCaseController extends Controller
 
     public function store(ProbateCaseRequest $request)
     {
-        $payload = $request->validated();
+        $payload = $this->validatedPayloadWithDocument($request);
         $payload['case_status'] = $payload['case_status'] ?? 'draft';
         $case = ProbateCase::create($payload);
         return response()->json($case, 201);
@@ -47,7 +48,7 @@ class ProbateCaseController extends Controller
 
     public function update(ProbateCaseRequest $request, ProbateCase $probateCase)
     {
-        $payload = $request->validated();
+        $payload = $this->validatedPayloadWithDocument($request, $probateCase);
         $previousCaseStatus = $probateCase->case_status;
         $probateCase->update($payload);
 
@@ -334,5 +335,22 @@ class ProbateCaseController extends Controller
                 ]);
             }
         });
+    }
+
+    private function validatedPayloadWithDocument(ProbateCaseRequest $request, ?ProbateCase $probateCase = null): array
+    {
+        $payload = $request->safe()->except(['document']);
+
+        if (! $request->hasFile('document')) {
+            return $payload;
+        }
+
+        if ($probateCase?->document_ref) {
+            Storage::disk('local')->delete($probateCase->document_ref);
+        }
+
+        $payload['document_ref'] = $request->file('document')->store('probate_documents', 'local');
+
+        return $payload;
     }
 }
