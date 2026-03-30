@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\CscsUploadController;
 use App\Http\Controllers\Api\ShareTransferController;
 use App\Http\Controllers\Api\ShareholderMergeController;
 use App\Http\Controllers\Api\IpoOfferController;
+use App\Http\Controllers\Api\BankVerificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -52,6 +53,10 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::post('/auth/logout-all', [AuthController::class, 'logoutAll']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
+
+    // Bank Verification Routes
+    Route::get('/banks', [BankVerificationController::class, 'bankList']);
+    Route::post('/banks/verify', [BankVerificationController::class, 'verify']);
     
     // Admin Users API Routes
     Route::prefix('admin/users')->group(function () {
