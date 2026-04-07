@@ -19,7 +19,7 @@ class SharePositionController extends Controller
 
     public function index(Request $request)
     {
-        $query = SharePosition::query();
+        $query = SharePosition::with('shareClass.register.company');
         if ($request->filled('sra_id')) {
             $query->where('sra_id', $request->query('sra_id'));
         }
@@ -31,6 +31,8 @@ class SharePositionController extends Controller
 
     public function show(SharePosition $sharePosition)
     {
+        $sharePosition->loadMissing('shareClass.register.company');
+
         return response()->json($sharePosition);
     }
 
@@ -69,7 +71,7 @@ class SharePositionController extends Controller
             $this->capitalValidationService->syncOutstandingUnits($registerId);
             $this->capitalValidationService->assertConstantBalanced($registerId);
 
-            return response()->json($sharePosition->fresh());
+            return response()->json($sharePosition->fresh()->load('shareClass.register.company'));
         });
     }
 }

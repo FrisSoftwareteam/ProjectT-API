@@ -206,7 +206,7 @@ class ShareholderController extends Controller
 
             DB::commit();
 
-            $shareholder->load('addresses', 'mandates', 'identities', 'holdings', 'certificates', 'registerAccounts');
+            $shareholder->load('addresses', 'mandates', 'identities', 'holdings.shareClass.register.company', 'certificates', 'registerAccounts');
 
             return response()->json([
                 'success' => true,
@@ -230,7 +230,7 @@ class ShareholderController extends Controller
             'addresses',
             'mandates',
             'identities',
-            'holdings',
+            'holdings.shareClass.register.company',
             'certificates',
             'registerAccounts'
         )->findOrFail($id);

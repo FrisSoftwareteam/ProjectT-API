@@ -9,6 +9,10 @@ class SharePosition extends Model
 {
     use HasFactory;
 
+    protected $appends = [
+        'company_name',
+    ];
+
     /**
      * The attributes that are mass assignable.
      *
@@ -57,5 +61,13 @@ class SharePosition extends Model
     public function registerAccount()
     {
         return $this->belongsTo(ShareholderRegisterAccount::class, 'sra_id');
+    }
+
+    /**
+     * Get the company name for this holding.
+     */
+    public function getCompanyNameAttribute(): ?string
+    {
+        return $this->shareClass?->register?->company?->name;
     }
 }
