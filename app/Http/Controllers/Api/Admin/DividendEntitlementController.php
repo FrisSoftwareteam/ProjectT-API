@@ -32,7 +32,7 @@ class DividendEntitlementController extends Controller
         try {
             // Validate request
             $validated = $request->validate([
-                'dividend_declaration_no' => 'required|string|max:100|unique:dividend_declarations,dividend_declaration_no',
+                'dividend_declaration_no' => 'nullable|string|max:100',
                 'period_label' => 'required|string|max:100',
                 'description' => 'nullable|string|max:255',
                 'initiator' => 'required|in:operations,mutual_funds',
@@ -107,9 +107,7 @@ class DividendEntitlementController extends Controller
                     $validated['eligible_shareholders_count']
                 );
 
-                // Create dividend declaration
-                $declaration = DividendDeclaration::create([
-                    'dividend_declaration_no' => $validated['dividend_declaration_no'],
+                $declarationData = [
                     'company_id' => $register->company_id,
                     'register_id' => $register_id,
                     'supplementary_of_declaration_id' => $validated['supplementary_of_declaration_id'] ?? null,
@@ -127,7 +125,14 @@ class DividendEntitlementController extends Controller
                     'status' => 'DRAFT',
                     'is_frozen' => false,
                     'created_by' => $request->user()->id,
-                ]);
+                ];
+
+                if (empty($declarationData['supplementary_of_declaration_id'])) {
+                    $declaration = $this->createDeclarationWithGeneratedNumber($register, $declarationData);
+                } else {
+                    $declarationData['dividend_declaration_no'] = null;
+                    $declaration = DividendDeclaration::create($declarationData);
+                }
 
                 // Attach share classes
                 $declaration->shareClasses()->attach($validated['share_class_ids']);
@@ -1330,6 +1335,67 @@ class DividendEntitlementController extends Controller
     private function generatePaymentNo(): string
     {
         return 'DPN-' . now()->format('YmdHis') . '-' . Str::upper(Str::random(6));
+    }
+
+    private function createDeclarationWithGeneratedNumber(Register $register, array $declarationData): DividendDeclaration
+    {
+        $companyCode = $this->resolveDeclarationCompanyCode($register);
+
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            try {
+                $declarationData['dividend_declaration_no'] = $this->generateDeclarationNumber($companyCode);
+
+                return DividendDeclaration::create($declarationData);
+            } catch (\Illuminate\Database\QueryException $e) {
+                if (!$this->isDuplicateDeclarationNumberException($e)) {
+                    throw $e;
+                }
+            }
+        }
+
+        throw new \RuntimeException('Unable to generate a unique dividend declaration number');
+    }
+
+    private function generateDeclarationNumber(string $companyCode): string
+    {
+        $prefix = 'FRISDIV-' . $companyCode . '-';
+
+        $latestNumber = DividendDeclaration::whereNotNull('dividend_declaration_no')
+            ->where('dividend_declaration_no', 'like', $prefix . '%')
+            ->lockForUpdate()
+            ->orderByDesc('dividend_declaration_no')
+            ->value('dividend_declaration_no');
+
+        $nextSequence = 1;
+        if ($latestNumber && preg_match('/(\d+)$/', $latestNumber, $matches) === 1) {
+            $nextSequence = ((int) $matches[1]) + 1;
+        }
+
+        return $prefix . str_pad((string) $nextSequence, 5, '0', STR_PAD_LEFT);
+    }
+
+    private function resolveDeclarationCompanyCode(Register $register): string
+    {
+        $issuerCode = preg_replace('/[^A-Z0-9]/', '', Str::upper((string) $register->company?->issuer_code));
+        if (!empty($issuerCode)) {
+            return substr($issuerCode, 0, 6);
+        }
+
+        $companyName = preg_replace('/[^A-Z0-9]/', '', Str::upper((string) $register->company?->name));
+        if (empty($companyName)) {
+            return 'GEN';
+        }
+
+        return substr(str_pad($companyName, 3, 'X'), 0, 6);
+    }
+
+    private function isDuplicateDeclarationNumberException(\Illuminate\Database\QueryException $e): bool
+    {
+        $message = $e->getMessage();
+
+        return str_contains($message, 'uq_dividend_declaration_no')
+            || str_contains($message, 'dividend_declarations_dividend_declaration_no_unique')
+            || $e->getCode() === '23000';
     }
 
     private function generatePaymentRef(): string
