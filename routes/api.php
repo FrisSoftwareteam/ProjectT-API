@@ -173,25 +173,25 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // Company Routes
         Route::prefix('companies')->group(function () {
             Route::get('/', [CompanyController::class, 'index'])
-                ->middleware('permission:users.view');
+                ->middleware('permission:companies.view');
             
             Route::post('/', [CompanyController::class, 'store'])
-                ->middleware('role:Super Admin');
+                ->middleware('permission:companies.create');
             
             Route::get('/{id}', [CompanyController::class, 'show'])
-                ->middleware('permission:users.view');
+                ->middleware('permission:companies.view');
             
             Route::put('/{id}', [CompanyController::class, 'update'])
-                ->middleware('permission:users.view');
+                ->middleware('permission:companies.update');
             
             Route::delete('/{id}', [CompanyController::class, 'destroy'])
-                ->middleware('role:Super Admin');
+                ->middleware('permission:companies.delete');
             
             Route::post('/{id}/restore', [CompanyController::class, 'restore'])
-                ->middleware('role:Super Admin');
+                ->middleware('permission:companies.restore');
             
             Route::get('/statistics/overview', [CompanyController::class, 'statistics'])
-                ->middleware('permission:users.view');
+                ->middleware('permission:companies.view');
 
             // Validate dividend period uniqueness
             Route::get('/{company_id}/dividend-declarations/validate-period', [DividendValidationController::class, 'validatePeriod'])
