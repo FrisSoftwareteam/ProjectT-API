@@ -175,6 +175,13 @@ class RolesAndPermissionsSeeder extends Seeder
             'user_activity_logs.create',
             'user_activity_logs.edit',
             'user_activity_logs.delete',
+
+            // Company Management
+            'companies.view',
+            'companies.create',
+            'companies.edit',
+            'companies.delete',
+            'companies.restore',
         ];
 
         foreach ($permissions as $permission) {
