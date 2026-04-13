@@ -18,6 +18,11 @@ class EstateCaseRepresentative extends Model
         'email',
         'phone',
         'address',
+        'is_primary',
+    ];
+
+    protected $casts = [
+        'is_primary' => 'boolean',
     ];
 
     public function probateCase()
@@ -25,4 +30,3 @@ class EstateCaseRepresentative extends Model
         return $this->belongsTo(ProbateCase::class, 'probate_case_id');
     }
 }
-

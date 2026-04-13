@@ -90,8 +90,21 @@ class ProbateCaseController extends Controller
             ], 422);
         }
 
-        $payload['probate_case_id'] = $probateCase->id;
-        $representative = EstateCaseRepresentative::create($payload);
+        $representative = DB::transaction(function () use ($payload, $probateCase) {
+            $payload['probate_case_id'] = $probateCase->id;
+
+            $hasPrimaryRepresentative = $probateCase->representatives()
+                ->where('is_primary', true)
+                ->exists();
+
+            $payload['is_primary'] = $payload['is_primary'] ?? ! $hasPrimaryRepresentative;
+
+            if ($payload['is_primary']) {
+                $probateCase->representatives()->update(['is_primary' => false]);
+            }
+
+            return EstateCaseRepresentative::create($payload);
+        });
 
         return response()->json($representative, 201);
     }
