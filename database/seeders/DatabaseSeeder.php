@@ -23,20 +23,22 @@ class DatabaseSeeder extends Seeder
             $this->command->info('Seeding test data...');
             
             // Create test admin user (using AdminUser, not User)
-            $testAdmin = AdminUser::factory()->create([
-                'microsoft_id' => 'test-admin-microsoft-id',
-                'email' => 'test@example.com',
-                'first_name' => 'Test',
-                'last_name' => 'Admin',
-                'department' => 'IT',
-                'is_active' => true,
-                'microsoft_data' => [
-                    'displayName' => 'Test Admin',
-                    'jobTitle' => 'System Administrator',
-                    'officeLocation' => 'Head Office',
-                    'preferredLanguage' => 'en-US',
-                ],
-            ]);
+            $testAdmin = AdminUser::firstOrCreate(
+                ['email' => 'test@example.com'],
+                [
+                    'microsoft_id' => 'test-admin-microsoft-id',
+                    'first_name' => 'Test',
+                    'last_name' => 'Admin',
+                    'department' => 'IT',
+                    'is_active' => true,
+                    'microsoft_data' => [
+                        'displayName' => 'Test Admin',
+                        'jobTitle' => 'System Administrator',
+                        'officeLocation' => 'Head Office',
+                        'preferredLanguage' => 'en-US',
+                    ],
+                ]
+            );
             
             // Assign Super Admin role
             $testAdmin->assignRole('Super Admin');
