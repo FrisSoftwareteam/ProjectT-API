@@ -3,7 +3,6 @@
 namespace Database\Seeders;
 
 use App\Models\AdminUser;
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
 
 class AdminUserSeeder extends Seeder
@@ -14,7 +13,7 @@ class AdminUserSeeder extends Seeder
     public function run(): void
     {
         // Create a super admin user
-        $superAdmin = AdminUser::firstOrCreate(
+        $superAdmin = AdminUser::query()->updateOrCreate(
             ['email' => 'superadmin@company.com'],
             [
                 'microsoft_id' => 'super-admin-microsoft-id',
@@ -32,7 +31,9 @@ class AdminUserSeeder extends Seeder
         );
 
         // Assign Super Admin role
-        $superAdmin->assignRole('Super Admin');
+        if (!$superAdmin->hasRole('Super Admin')) {
+            $superAdmin->assignRole('Super Admin');
+        }
 
         // Create sample admin users using factory
         $users = AdminUser::factory(10)->create();
