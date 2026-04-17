@@ -46,6 +46,7 @@ class ProbateCaseController extends Controller
 
         $case = DB::transaction(function () use ($payload, $request) {
             $payload['status'] = $payload['status'] ?? 'pending';
+            $payload['executor_name'] = $payload['executor_name'] ?? $this->legacyExecutorName($payload);
 
             $case = ProbateCase::create($payload);
             $this->syncShareholderEstateState($case, $request->user()?->id);
@@ -73,6 +74,9 @@ class ProbateCaseController extends Controller
         $payload = $this->validatedPayloadWithDocument($request, $probateCase);
 
         DB::transaction(function () use ($payload, $probateCase, $request) {
+            $payload['executor_name'] = $payload['executor_name']
+                ?? $probateCase->executor_name
+                ?? $this->legacyExecutorName($payload, $probateCase);
             $probateCase->update($payload);
             $this->syncShareholderEstateState($probateCase->fresh(), $request->user()?->id);
             $this->logActivity($request->user()?->id, 'probate_case_updated', [
@@ -428,6 +432,17 @@ class ProbateCaseController extends Controller
             'beneficiaries.beneficiaryShareholder',
             'representatives.shareholder',
         ];
+    }
+
+    private function legacyExecutorName(array $payload, ?ProbateCase $probateCase = null): string
+    {
+        $caseType = $payload['case_type'] ?? $probateCase?->case_type ?? 'probate';
+        $label = $caseType === 'probate' ? 'Estate Case' : 'Letters Of Administration';
+
+        return $probateCase?->original_full_name
+            ?? $payload['original_full_name']
+            ?? $probateCase?->shareholder?->full_name
+            ?? $label;
     }
 
     private function resolveDistributionAuthorization(ProbateCase $probateCase, int $toShareholderId): array

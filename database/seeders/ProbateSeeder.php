@@ -48,6 +48,7 @@ class ProbateSeeder extends Seeder
                 'shareholder_id' => $sourceSra->shareholder_id,
                 'case_type' => $caseType,
                 'court_ref' => 'CRT-' . strtoupper(substr(md5((string) ($sourceSra->id . '-crt')), 0, 7)),
+                'executor_name' => $shareholder->full_name,
                 'document_ref' => 'PRB-' . strtoupper(substr(md5((string) ($sourceSra->id . '-prb')), 0, 7)),
                 'grant_date' => now()->subDays(mt_rand(1, 365))->toDateString(),
                 'original_first_name' => $shareholder->first_name,
