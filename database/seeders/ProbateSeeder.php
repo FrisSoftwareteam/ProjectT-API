@@ -6,6 +6,7 @@ use App\Models\AdminUser;
 use App\Models\ProbateBeneficiary;
 use App\Models\SharePosition;
 use App\Models\Shareholder;
+use App\Models\ShareholderIdentity;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -34,15 +35,61 @@ class ProbateSeeder extends Seeder
                 continue;
             }
 
+            $shareholder = Shareholder::query()->find($sourceSra->shareholder_id);
+            if (! $shareholder) {
+                continue;
+            }
+
+            $caseType = mt_rand(0, 1) === 1 ? 'probate' : 'letters_of_administration';
+
+            $status = mt_rand(0, 4) === 0 ? 'closed' : 'pending';
+
             $caseId = DB::table('probate_cases')->insertGetId([
                 'shareholder_id' => $sourceSra->shareholder_id,
+                'case_type' => $caseType,
                 'court_ref' => 'CRT-' . strtoupper(substr(md5((string) ($sourceSra->id . '-crt')), 0, 7)),
-                'executor_name' => 'Executor ' . $sourceSra->id,
                 'document_ref' => 'PRB-' . strtoupper(substr(md5((string) ($sourceSra->id . '-prb')), 0, 7)),
-                'status' => (mt_rand(0, 1) === 1 ? 'pending' : 'granted'),
+                'grant_date' => now()->subDays(mt_rand(1, 365))->toDateString(),
+                'original_first_name' => $shareholder->first_name,
+                'original_last_name' => $shareholder->last_name,
+                'original_middle_name' => $shareholder->middle_name,
+                'original_full_name' => $shareholder->full_name,
+                'status' => $status,
                 'opened_at' => now()->subDays(mt_rand(1, 180)),
-                'closed_at' => null,
+                'closed_at' => $status === 'closed' ? now()->subDays(mt_rand(0, 30)) : null,
             ]);
+
+            $repShareholder = Shareholder::query()
+                ->where('id', '!=', $shareholder->id)
+                ->inRandomOrder()
+                ->first();
+
+            if ($repShareholder) {
+                $identity = ShareholderIdentity::query()
+                    ->where('shareholder_id', $repShareholder->id)
+                    ->orderByDesc('verified_at')
+                    ->first();
+
+                $address = DB::table('shareholder_addresses')
+                    ->where('shareholder_id', $repShareholder->id)
+                    ->orderByDesc('is_primary')
+                    ->value('address_line1');
+
+                DB::table('estate_case_representatives')->insert([
+                    'probate_case_id' => $caseId,
+                    'shareholder_id' => $repShareholder->id,
+                    'representative_type' => $caseType === 'probate' ? 'executor' : 'administrator',
+                    'full_name' => $repShareholder->full_name,
+                    'id_type' => $identity?->id_type ?? ($repShareholder->nin ? 'nin' : ($repShareholder->bvn ? 'bvn' : null)),
+                    'id_value' => $identity?->id_value ?? ($repShareholder->nin ?: $repShareholder->bvn),
+                    'email' => $repShareholder->email,
+                    'phone' => $repShareholder->phone,
+                    'address' => $address,
+                    'is_primary' => true,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
 
             $beneficiaryShareholderId = mt_rand(1, 10) <= 7 ? $allShareholderIds[array_rand($allShareholderIds)] : null;
             $beneficiarySraId = null;

@@ -13,10 +13,11 @@ class ProbateCase extends Model
         'case_type',
         'court_ref',
         'grant_date',
-        'executor_name',
         'document_ref',
-        'case_status',
-        'estate_shareholder_id',
+        'original_first_name',
+        'original_last_name',
+        'original_middle_name',
+        'original_full_name',
         'status',
         'opened_at',
         'closed_at',
@@ -36,11 +37,6 @@ class ProbateCase extends Model
     public function beneficiaries()
     {
         return $this->hasMany(ProbateBeneficiary::class, 'probate_case_id');
-    }
-
-    public function estateShareholder()
-    {
-        return $this->belongsTo(Shareholder::class, 'estate_shareholder_id');
     }
 
     public function representatives()

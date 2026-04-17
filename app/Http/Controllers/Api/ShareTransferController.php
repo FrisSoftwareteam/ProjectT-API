@@ -31,7 +31,7 @@ class ShareTransferController extends Controller
 
         if ($fromShareholder->status === 'deceased') {
             return response()->json([
-                'message' => 'Direct transfer is blocked for deceased shareholders. Use approved estate flow.',
+                'message' => 'Direct transfer is blocked for deceased shareholders. Use the estate case flow.',
             ], 422);
         }
 
@@ -135,4 +135,3 @@ class ShareTransferController extends Controller
         });
     }
 }
-

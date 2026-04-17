@@ -18,11 +18,9 @@ class ProbateCaseRequest extends FormRequest
             'case_type' => ['required', 'in:probate,letters_of_administration'],
             'court_ref' => ['required', 'string', 'max:100'],
             'grant_date' => ['nullable', 'date'],
-            'executor_name' => ['nullable', 'string', 'max:255'],
             'document_ref' => ['nullable', 'string', 'max:255'],
             'document' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:10240'],
-            'case_status' => ['nullable', 'in:draft,submitted,approved'],
-            'status' => ['nullable', 'in:pending,granted,distributed,closed'],
+            'status' => ['nullable', 'in:pending,closed'],
             'opened_at' => ['nullable', 'date'],
             'closed_at' => ['nullable', 'date'],
         ];

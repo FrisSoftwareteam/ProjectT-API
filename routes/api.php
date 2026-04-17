@@ -160,7 +160,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         // beneficiaries under a probate case
         Route::post('/{probateCase}/beneficiaries', [ProbateCaseController::class, 'addBeneficiary'])->middleware('permission:probates.edit');
         Route::post('/{probateCase}/representatives', [ProbateCaseController::class, 'addRepresentative'])->middleware('permission:probates.edit');
-        Route::post('/beneficiaries/{id}/execute', [ProbateCaseController::class, 'executeBeneficiary'])->middleware('permission:probates.edit');
+        Route::post('/{probateCase}/distributions', [ProbateCaseController::class, 'distribute'])->middleware('permission:probates.edit');
     });
 
     // Share data endpoints

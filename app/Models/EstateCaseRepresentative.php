@@ -11,6 +11,7 @@ class EstateCaseRepresentative extends Model
 
     protected $fillable = [
         'probate_case_id',
+        'shareholder_id',
         'representative_type',
         'full_name',
         'id_type',
@@ -28,5 +29,10 @@ class EstateCaseRepresentative extends Model
     public function probateCase()
     {
         return $this->belongsTo(ProbateCase::class, 'probate_case_id');
+    }
+
+    public function shareholder()
+    {
+        return $this->belongsTo(Shareholder::class, 'shareholder_id');
     }
 }

@@ -14,13 +14,9 @@ class EstateCaseRepresentativeRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'representative_type' => ['required', 'in:executor,administrator'],
-            'full_name' => ['required', 'string', 'max:255'],
-            'id_type' => ['nullable', 'string', 'max:50'],
-            'id_value' => ['nullable', 'string', 'max:100'],
-            'email' => ['nullable', 'email', 'max:255'],
-            'phone' => ['nullable', 'string', 'max:32'],
-            'address' => ['nullable', 'string', 'max:255'],
+            'shareholder_id' => ['nullable', 'required_without:shareholder_ids', 'exists:shareholders,id'],
+            'shareholder_ids' => ['nullable', 'required_without:shareholder_id', 'array', 'min:1'],
+            'shareholder_ids.*' => ['required', 'integer', 'distinct', 'exists:shareholders,id'],
             'is_primary' => ['nullable', 'boolean'],
         ];
     }
