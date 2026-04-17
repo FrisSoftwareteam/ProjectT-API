@@ -158,7 +158,7 @@ class ProbateCaseController extends Controller
                     'probate_case_id' => $probateCase->id,
                     'shareholder_id' => $representativeShareholder->id,
                     'representative_type' => $representativeType,
-                    'full_name' => $representativeShareholder->full_name,
+                    'full_name' => $this->shareholderDisplayName($representativeShareholder),
                     'id_type' => $this->representativeIdentityType($representativeShareholder),
                     'id_value' => $this->representativeIdentityValue($representativeShareholder),
                     'email' => $representativeShareholder->email,
@@ -423,6 +423,23 @@ class ProbateCaseController extends Controller
         }
 
         return $shareholder->nin ?: $shareholder->bvn;
+    }
+
+    private function shareholderDisplayName(Shareholder $shareholder): string
+    {
+        $name = $shareholder->full_name ?: trim(implode(' ', array_filter([
+            $shareholder->first_name,
+            $shareholder->middle_name,
+            $shareholder->last_name,
+        ])));
+
+        if ($name !== '') {
+            return $name;
+        }
+
+        return $shareholder->email
+            ?: $shareholder->phone
+            ?: ('Shareholder #' . $shareholder->id);
     }
 
     private function caseRelations(): array

@@ -80,7 +80,13 @@ class ProbateSeeder extends Seeder
                     'probate_case_id' => $caseId,
                     'shareholder_id' => $repShareholder->id,
                     'representative_type' => $caseType === 'probate' ? 'executor' : 'administrator',
-                    'full_name' => $repShareholder->full_name,
+                    'full_name' => $repShareholder->full_name
+                        ?: trim(implode(' ', array_filter([
+                            $repShareholder->first_name,
+                            $repShareholder->middle_name,
+                            $repShareholder->last_name,
+                        ])))
+                        ?: ($repShareholder->email ?: ('Shareholder #' . $repShareholder->id)),
                     'id_type' => $identity?->id_type ?? ($repShareholder->nin ? 'nin' : ($repShareholder->bvn ? 'bvn' : null)),
                     'id_value' => $identity?->id_value ?? ($repShareholder->nin ?: $repShareholder->bvn),
                     'email' => $repShareholder->email,
