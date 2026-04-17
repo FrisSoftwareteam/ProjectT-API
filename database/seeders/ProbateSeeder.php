@@ -6,7 +6,6 @@ use App\Models\AdminUser;
 use App\Models\ProbateBeneficiary;
 use App\Models\SharePosition;
 use App\Models\Shareholder;
-use App\Models\ShareholderIdentity;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
 
@@ -48,7 +47,6 @@ class ProbateSeeder extends Seeder
                 'shareholder_id' => $sourceSra->shareholder_id,
                 'case_type' => $caseType,
                 'court_ref' => 'CRT-' . strtoupper(substr(md5((string) ($sourceSra->id . '-crt')), 0, 7)),
-                'executor_name' => $shareholder->full_name,
                 'document_ref' => 'PRB-' . strtoupper(substr(md5((string) ($sourceSra->id . '-prb')), 0, 7)),
                 'grant_date' => now()->subDays(mt_rand(1, 365))->toDateString(),
                 'original_first_name' => $shareholder->first_name,
@@ -66,32 +64,10 @@ class ProbateSeeder extends Seeder
                 ->first();
 
             if ($repShareholder) {
-                $identity = ShareholderIdentity::query()
-                    ->where('shareholder_id', $repShareholder->id)
-                    ->orderByDesc('verified_at')
-                    ->first();
-
-                $address = DB::table('shareholder_addresses')
-                    ->where('shareholder_id', $repShareholder->id)
-                    ->orderByDesc('is_primary')
-                    ->value('address_line1');
-
                 DB::table('estate_case_representatives')->insert([
                     'probate_case_id' => $caseId,
                     'shareholder_id' => $repShareholder->id,
                     'representative_type' => $caseType === 'probate' ? 'executor' : 'administrator',
-                    'full_name' => $repShareholder->full_name
-                        ?: trim(implode(' ', array_filter([
-                            $repShareholder->first_name,
-                            $repShareholder->middle_name,
-                            $repShareholder->last_name,
-                        ])))
-                        ?: ($repShareholder->email ?: ('Shareholder #' . $repShareholder->id)),
-                    'id_type' => $identity?->id_type ?? ($repShareholder->nin ? 'nin' : ($repShareholder->bvn ? 'bvn' : null)),
-                    'id_value' => $identity?->id_value ?? ($repShareholder->nin ?: $repShareholder->bvn),
-                    'email' => $repShareholder->email,
-                    'phone' => $repShareholder->phone,
-                    'address' => $address,
                     'is_primary' => true,
                     'created_at' => now(),
                     'updated_at' => now(),

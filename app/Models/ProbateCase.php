@@ -13,7 +13,6 @@ class ProbateCase extends Model
         'case_type',
         'court_ref',
         'grant_date',
-        'executor_name',
         'document_ref',
         'original_first_name',
         'original_last_name',

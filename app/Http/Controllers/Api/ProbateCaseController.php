@@ -46,7 +46,6 @@ class ProbateCaseController extends Controller
 
         $case = DB::transaction(function () use ($payload, $request) {
             $payload['status'] = $payload['status'] ?? 'pending';
-            $payload['executor_name'] = $payload['executor_name'] ?? $this->legacyExecutorName($payload);
 
             $case = ProbateCase::create($payload);
             $this->syncShareholderEstateState($case, $request->user()?->id);
@@ -74,9 +73,6 @@ class ProbateCaseController extends Controller
         $payload = $this->validatedPayloadWithDocument($request, $probateCase);
 
         DB::transaction(function () use ($payload, $probateCase, $request) {
-            $payload['executor_name'] = $payload['executor_name']
-                ?? $probateCase->executor_name
-                ?? $this->legacyExecutorName($payload, $probateCase);
             $probateCase->update($payload);
             $this->syncShareholderEstateState($probateCase->fresh(), $request->user()?->id);
             $this->logActivity($request->user()?->id, 'probate_case_updated', [
@@ -158,14 +154,6 @@ class ProbateCaseController extends Controller
                     'probate_case_id' => $probateCase->id,
                     'shareholder_id' => $representativeShareholder->id,
                     'representative_type' => $representativeType,
-                    'full_name' => $this->shareholderDisplayName($representativeShareholder),
-                    'id_type' => $this->representativeIdentityType($representativeShareholder),
-                    'id_value' => $this->representativeIdentityValue($representativeShareholder),
-                    'email' => $representativeShareholder->email,
-                    'phone' => $representativeShareholder->phone,
-                    'address' => $representativeShareholder->addresses()
-                        ->where('is_primary', true)
-                        ->value('address_line1') ?? $representativeShareholder->addresses()->value('address_line1'),
                     'is_primary' => $requestedPrimary && $index === 0,
                 ]);
             }
@@ -403,45 +391,6 @@ class ProbateCaseController extends Controller
         ]);
     }
 
-    private function representativeIdentityType(Shareholder $shareholder): ?string
-    {
-        $identity = $shareholder->identities()->orderByDesc('verified_at')->orderBy('id')->first();
-
-        if ($identity) {
-            return $identity->id_type;
-        }
-
-        return $shareholder->nin ? 'nin' : ($shareholder->bvn ? 'bvn' : null);
-    }
-
-    private function representativeIdentityValue(Shareholder $shareholder): ?string
-    {
-        $identity = $shareholder->identities()->orderByDesc('verified_at')->orderBy('id')->first();
-
-        if ($identity) {
-            return $identity->id_value;
-        }
-
-        return $shareholder->nin ?: $shareholder->bvn;
-    }
-
-    private function shareholderDisplayName(Shareholder $shareholder): string
-    {
-        $name = $shareholder->full_name ?: trim(implode(' ', array_filter([
-            $shareholder->first_name,
-            $shareholder->middle_name,
-            $shareholder->last_name,
-        ])));
-
-        if ($name !== '') {
-            return $name;
-        }
-
-        return $shareholder->email
-            ?: $shareholder->phone
-            ?: ('Shareholder #' . $shareholder->id);
-    }
-
     private function caseRelations(): array
     {
         return [
@@ -449,17 +398,6 @@ class ProbateCaseController extends Controller
             'beneficiaries.beneficiaryShareholder',
             'representatives.shareholder',
         ];
-    }
-
-    private function legacyExecutorName(array $payload, ?ProbateCase $probateCase = null): string
-    {
-        $caseType = $payload['case_type'] ?? $probateCase?->case_type ?? 'probate';
-        $label = $caseType === 'probate' ? 'Estate Case' : 'Letters Of Administration';
-
-        return $probateCase?->original_full_name
-            ?? $payload['original_full_name']
-            ?? $probateCase?->shareholder?->full_name
-            ?? $label;
     }
 
     private function resolveDistributionAuthorization(ProbateCase $probateCase, int $toShareholderId): array

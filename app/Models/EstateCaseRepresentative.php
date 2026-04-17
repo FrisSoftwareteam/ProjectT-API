@@ -13,12 +13,6 @@ class EstateCaseRepresentative extends Model
         'probate_case_id',
         'shareholder_id',
         'representative_type',
-        'full_name',
-        'id_type',
-        'id_value',
-        'email',
-        'phone',
-        'address',
         'is_primary',
     ];
 
