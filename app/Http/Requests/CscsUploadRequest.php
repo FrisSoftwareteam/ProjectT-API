@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Validation\Validator;
 
 class CscsUploadRequest extends FormRequest
 {
@@ -20,22 +21,56 @@ class CscsUploadRequest extends FormRequest
     public function validationData(): array
     {
         return array_replace($this->all(), [
-            'files' => $this->normalizedFiles(),
+            'files' => $this->hasUploadedFiles() ? true : null,
         ]);
     }
 
     public function rules(): array
     {
         return [
-            'files' => ['required', 'array', 'min:1', 'max:2'],
-            'files.*' => ['required', 'file', 'mimes:txt,csv'],
+            'files' => ['required'],
             'register_id' => ['nullable', 'exists:registers,id'],
         ];
     }
 
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $files = $this->normalizedFiles();
+
+            if (count($files) < 1) {
+                $validator->errors()->add('files', 'At least one CSCS file is required.');
+
+                return;
+            }
+
+            if (count($files) > 2) {
+                $validator->errors()->add('files', 'The files field must not have more than 2 items.');
+
+                return;
+            }
+
+            foreach ($files as $index => $file) {
+                if (! $file->isValid()) {
+                    $validator->errors()->add("files.$index", 'The uploaded file is invalid.');
+                    continue;
+                }
+
+                if (! in_array(strtolower($file->getClientOriginalExtension()), ['txt', 'csv'], true)) {
+                    $validator->errors()->add("files.$index", 'Each CSCS file must be a txt or csv file.');
+                }
+            }
+        });
+    }
+
     private function normalizedFiles(): array
     {
-        return $this->flattenUploadedFiles($this->allFiles()['files'] ?? $this->file('files'));
+        return $this->flattenUploadedFiles($this->allFiles());
+    }
+
+    private function hasUploadedFiles(): bool
+    {
+        return count($this->normalizedFiles()) > 0;
     }
 
     private function flattenUploadedFiles(mixed $files): array
