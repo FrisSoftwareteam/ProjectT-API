@@ -9,6 +9,7 @@ use App\Models\CscsUploadRow;
 use App\Services\CscsImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -23,7 +24,9 @@ class CscsUploadController extends Controller
     public function import(CscsUploadRequest $request): JsonResponse
     {
         try {
-            $files = $request->uploadedFiles();
+            $files = $this->uploadedFiles($request);
+            $this->validateUploadedFiles($files);
+
             $registerId = $request->input('register_id');
             $result = $this->importService->import(
                 $files,
@@ -53,6 +56,68 @@ class CscsUploadController extends Controller
                 'message' => 'CSCS import failed',
                 'error' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * @return array<int, UploadedFile>
+     */
+    private function uploadedFiles(Request $request): array
+    {
+        return $this->flattenUploadedFiles($request->allFiles());
+    }
+
+    /**
+     * @return array<int, UploadedFile>
+     */
+    private function flattenUploadedFiles(mixed $files): array
+    {
+        if ($files instanceof UploadedFile) {
+            return [$files];
+        }
+
+        if (! is_array($files)) {
+            return [];
+        }
+
+        $flattened = [];
+
+        foreach ($files as $file) {
+            array_push($flattened, ...$this->flattenUploadedFiles($file));
+        }
+
+        return $flattened;
+    }
+
+    /**
+     * @param array<int, UploadedFile> $files
+     */
+    private function validateUploadedFiles(array $files): void
+    {
+        if (count($files) < 1) {
+            throw ValidationException::withMessages([
+                'files' => ['At least one CSCS file is required.'],
+            ]);
+        }
+
+        if (count($files) > 2) {
+            throw ValidationException::withMessages([
+                'files' => ['The files field must not have more than 2 items.'],
+            ]);
+        }
+
+        foreach ($files as $index => $file) {
+            if (! $file->isValid()) {
+                throw ValidationException::withMessages([
+                    "files.$index" => ['The uploaded file is invalid.'],
+                ]);
+            }
+
+            if (! in_array(strtolower($file->getClientOriginalExtension()), ['txt', 'csv'], true)) {
+                throw ValidationException::withMessages([
+                    "files.$index" => ['Each CSCS file must be a txt or csv file.'],
+                ]);
+            }
         }
     }
 
