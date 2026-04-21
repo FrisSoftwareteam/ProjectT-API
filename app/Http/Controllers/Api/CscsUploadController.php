@@ -23,7 +23,7 @@ class CscsUploadController extends Controller
     public function import(CscsUploadRequest $request): JsonResponse
     {
         try {
-            $files = $request->file('files', []);
+            $files = $request->uploadedFiles();
             $registerId = $request->input('register_id');
             $result = $this->importService->import(
                 $files,

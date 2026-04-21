@@ -36,7 +36,7 @@ class CscsUploadRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {
-            $files = $this->normalizedFiles();
+            $files = $this->uploadedFiles();
 
             if (count($files) < 1) {
                 $validator->errors()->add('files', 'At least one CSCS file is required.');
@@ -68,9 +68,14 @@ class CscsUploadRequest extends FormRequest
         return $this->flattenUploadedFiles($this->allFiles());
     }
 
+    public function uploadedFiles(): array
+    {
+        return $this->normalizedFiles();
+    }
+
     private function hasUploadedFiles(): bool
     {
-        return count($this->normalizedFiles()) > 0;
+        return count($this->uploadedFiles()) > 0;
     }
 
     private function flattenUploadedFiles(mixed $files): array
