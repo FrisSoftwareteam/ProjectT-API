@@ -117,6 +117,7 @@ class ProbateCaseController extends Controller
     public function addRepresentative(EstateCaseRepresentativeRequest $request, ProbateCase $probateCase)
     {
         try {
+            $probateCase = $this->resolveProbateCase($request, $probateCase);
             $payload = $request->validated();
             $representativeType = $probateCase->case_type === 'probate' ? 'executor' : 'administrator';
             $shareholderIds = $payload['shareholder_ids'] ?? [$payload['shareholder_id']];
@@ -192,6 +193,29 @@ class ProbateCaseController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    private function resolveProbateCase(Request $request, ProbateCase $probateCase): ProbateCase
+    {
+        if ($probateCase->exists && $probateCase->getKey()) {
+            return $probateCase;
+        }
+
+        $routeValue = $request->route('probateCase') ?? $request->route('id');
+
+        if ($routeValue instanceof ProbateCase) {
+            return $routeValue;
+        }
+
+        $probateCaseId = $routeValue ?: $request->input('probate_case_id');
+
+        if (! $probateCaseId) {
+            throw ValidationException::withMessages([
+                'probate_case_id' => ['A valid probate case id is required.'],
+            ]);
+        }
+
+        return ProbateCase::findOrFail($probateCaseId);
     }
 
     public function distribute(EstateDistributionRequest $request, ProbateCase $probateCase)
