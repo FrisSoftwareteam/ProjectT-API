@@ -158,7 +158,10 @@ class ProbateCaseController extends Controller
                 ]);
             }
 
-            return collect($created);
+            return EstateCaseRepresentative::query()
+                ->whereKey(collect($created)->pluck('id'))
+                ->with('shareholder')
+                ->get();
         });
 
         foreach ($representatives as $representative) {
@@ -171,7 +174,7 @@ class ProbateCaseController extends Controller
             ]);
         }
 
-        return response()->json($representatives->load('shareholder'), 201);
+        return response()->json($representatives, 201);
     }
 
     public function distribute(EstateDistributionRequest $request, ProbateCase $probateCase)
