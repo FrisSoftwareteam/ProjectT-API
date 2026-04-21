@@ -20,7 +20,7 @@ class ProbateCaseRequest extends FormRequest
             'grant_date' => ['nullable', 'date'],
             'document_ref' => ['nullable', 'string', 'max:255'],
             'document' => ['nullable', 'file', 'mimes:pdf,doc,docx,jpg,jpeg,png', 'max:10240'],
-            'status' => ['nullable', 'in:pending,closed'],
+            'status' => ['nullable', 'in:pending,granted,distributed,closed'],
             'opened_at' => ['nullable', 'date'],
             'closed_at' => ['nullable', 'date'],
         ];
