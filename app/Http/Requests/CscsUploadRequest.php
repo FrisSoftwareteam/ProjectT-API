@@ -14,17 +14,14 @@ class CscsUploadRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $files = $this->file('files');
+        $this->files->set('files', $this->normalizedFiles());
+    }
 
-        if ($files instanceof UploadedFile) {
-            $this->files->set('files', [$files]);
-
-            return;
-        }
-
-        if (is_array($files)) {
-            $this->files->set('files', array_values(array_filter($files)));
-        }
+    public function validationData(): array
+    {
+        return array_replace($this->all(), [
+            'files' => $this->normalizedFiles(),
+        ]);
     }
 
     public function rules(): array
@@ -34,5 +31,29 @@ class CscsUploadRequest extends FormRequest
             'files.*' => ['required', 'file', 'mimes:txt,csv'],
             'register_id' => ['nullable', 'exists:registers,id'],
         ];
+    }
+
+    private function normalizedFiles(): array
+    {
+        return $this->flattenUploadedFiles($this->allFiles()['files'] ?? $this->file('files'));
+    }
+
+    private function flattenUploadedFiles(mixed $files): array
+    {
+        if ($files instanceof UploadedFile) {
+            return [$files];
+        }
+
+        if (! is_array($files)) {
+            return [];
+        }
+
+        $flattened = [];
+
+        foreach ($files as $file) {
+            array_push($flattened, ...$this->flattenUploadedFiles($file));
+        }
+
+        return $flattened;
     }
 }
