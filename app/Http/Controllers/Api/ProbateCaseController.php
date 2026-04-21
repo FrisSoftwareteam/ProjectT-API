@@ -20,6 +20,7 @@ use App\Services\CapitalValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class ProbateCaseController extends Controller
@@ -438,12 +439,20 @@ class ProbateCaseController extends Controller
             return;
         }
 
-        DB::table('user_activity_logs')->insert([
-            'user_id' => $userId,
-            'action' => $action,
-            'metadata' => json_encode($metadata),
-            'created_at' => now(),
-        ]);
+        try {
+            DB::table('user_activity_logs')->insert([
+                'user_id' => $userId,
+                'action' => $action,
+                'metadata' => json_encode($metadata),
+                'created_at' => now(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Unable to write probate activity log', [
+                'action' => $action,
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function validatedPayloadWithDocument(ProbateCaseRequest $request, ?ProbateCase $probateCase = null): array
