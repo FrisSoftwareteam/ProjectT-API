@@ -116,66 +116,82 @@ class ProbateCaseController extends Controller
 
     public function addRepresentative(EstateCaseRepresentativeRequest $request, ProbateCase $probateCase)
     {
-        $payload = $request->validated();
-        $representativeType = $probateCase->case_type === 'probate' ? 'executor' : 'administrator';
-        $shareholderIds = $payload['shareholder_ids'] ?? [$payload['shareholder_id']];
-        $representatives = DB::transaction(function () use ($payload, $probateCase, $representativeType, $shareholderIds) {
-            $hasPrimaryRepresentative = $probateCase->representatives()
-                ->where('is_primary', true)
-                ->exists();
+        try {
+            $payload = $request->validated();
+            $representativeType = $probateCase->case_type === 'probate' ? 'executor' : 'administrator';
+            $shareholderIds = $payload['shareholder_ids'] ?? [$payload['shareholder_id']];
+            $representatives = DB::transaction(function () use ($payload, $probateCase, $representativeType, $shareholderIds) {
+                $hasPrimaryRepresentative = $probateCase->representatives()
+                    ->where('is_primary', true)
+                    ->exists();
 
-            $requestedPrimary = $payload['is_primary'] ?? ! $hasPrimaryRepresentative;
+                $requestedPrimary = $payload['is_primary'] ?? ! $hasPrimaryRepresentative;
 
-            if ($requestedPrimary) {
-                $probateCase->representatives()->update(['is_primary' => false]);
-            }
+                if ($requestedPrimary) {
+                    $probateCase->representatives()->update(['is_primary' => false]);
+                }
 
-            $created = [];
+                $created = [];
 
-            foreach (array_values($shareholderIds) as $index => $shareholderId) {
-                $representativeShareholder = Shareholder::findOrFail($shareholderId);
+                foreach (array_values($shareholderIds) as $index => $shareholderId) {
+                    $representativeShareholder = Shareholder::findOrFail($shareholderId);
 
-                if ($representativeShareholder->id === $probateCase->shareholder_id) {
-                    throw ValidationException::withMessages([
-                        'shareholder_ids' => ['The deceased shareholder cannot be attached as an estate representative.'],
+                    if ($representativeShareholder->id === $probateCase->shareholder_id) {
+                        throw ValidationException::withMessages([
+                            'shareholder_ids' => ['The deceased shareholder cannot be attached as an estate representative.'],
+                        ]);
+                    }
+
+                    $existing = $probateCase->representatives()
+                        ->where('shareholder_id', $representativeShareholder->id)
+                        ->first();
+
+                    if ($existing) {
+                        throw ValidationException::withMessages([
+                            'shareholder_ids' => ['One or more shareholders are already attached to the estate case.'],
+                        ]);
+                    }
+
+                    $created[] = EstateCaseRepresentative::create([
+                        'probate_case_id' => $probateCase->id,
+                        'shareholder_id' => $representativeShareholder->id,
+                        'representative_type' => $representativeType,
+                        'is_primary' => $requestedPrimary && $index === 0,
                     ]);
                 }
 
-                $existing = $probateCase->representatives()
-                    ->where('shareholder_id', $representativeShareholder->id)
-                    ->first();
+                return EstateCaseRepresentative::query()
+                    ->whereKey(collect($created)->pluck('id')->all())
+                    ->with('shareholder')
+                    ->get();
+            });
 
-                if ($existing) {
-                    throw ValidationException::withMessages([
-                        'shareholder_ids' => ['One or more shareholders are already attached to the estate case.'],
-                    ]);
-                }
-
-                $created[] = EstateCaseRepresentative::create([
+            foreach ($representatives as $representative) {
+                $this->logActivity($request->user()?->id, 'probate_representative_attached', [
                     'probate_case_id' => $probateCase->id,
-                    'shareholder_id' => $representativeShareholder->id,
-                    'representative_type' => $representativeType,
-                    'is_primary' => $requestedPrimary && $index === 0,
+                    'representative_id' => $representative->id,
+                    'shareholder_id' => $representative->shareholder_id,
+                    'representative_type' => $representative->representative_type,
+                    'is_primary' => $representative->is_primary,
                 ]);
             }
 
-            return EstateCaseRepresentative::query()
-                ->whereKey(collect($created)->pluck('id'))
-                ->with('shareholder')
-                ->get();
-        });
-
-        foreach ($representatives as $representative) {
-            $this->logActivity($request->user()?->id, 'probate_representative_attached', [
+            return response()->json($representatives, 201);
+        } catch (ValidationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            Log::error('Probate representative attachment failed', [
                 'probate_case_id' => $probateCase->id,
-                'representative_id' => $representative->id,
-                'shareholder_id' => $representative->shareholder_id,
-                'representative_type' => $representative->representative_type,
-                'is_primary' => $representative->is_primary,
+                'payload' => $request->except(['password', 'token']),
+                'error' => $e->getMessage(),
             ]);
-        }
 
-        return response()->json($representatives, 201);
+            return response()->json([
+                'success' => false,
+                'message' => 'Probate representative attachment failed',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
     }
 
     public function distribute(EstateDistributionRequest $request, ProbateCase $probateCase)
