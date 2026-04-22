@@ -29,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
         // Force JSON responses for all API routes
         $middleware->group('api', [
             \App\Http\Middleware\ForceJsonResponse::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
