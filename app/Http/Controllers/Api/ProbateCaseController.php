@@ -74,6 +74,7 @@ class ProbateCaseController extends Controller
         $cases = ProbateCase::query()
             ->where('shareholder_id', $shareholder->id)
             ->with([
+                'shareholder',
                 'representatives' => fn ($query) => $query
                     ->with('shareholder')
                     ->orderByDesc('is_primary')
@@ -82,6 +83,18 @@ class ProbateCaseController extends Controller
             ->orderByDesc('opened_at')
             ->orderByDesc('id')
             ->paginate((int) $request->query('per_page', 15));
+
+        $cases->getCollection()->transform(function (ProbateCase $case) {
+            $case->setRelation(
+                'shareholders',
+                $case->representatives
+                    ->pluck('shareholder')
+                    ->filter()
+                    ->values()
+            );
+
+            return $case;
+        });
 
         return response()->json([
             'success' => true,
