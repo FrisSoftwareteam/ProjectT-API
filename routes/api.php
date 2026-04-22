@@ -153,6 +153,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('probates')->group(function () {
         Route::get('/', [ProbateCaseController::class, 'index'])->middleware('permission:probates.view');
         Route::post('/', [ProbateCaseController::class, 'store'])->middleware('permission:probates.create');
+        Route::get('/shareholders/{shareholder}/admins', [ProbateCaseController::class, 'adminsForShareholder'])->middleware('permission:probates.view');
         Route::get('/{probateCase}', [ProbateCaseController::class, 'show'])->middleware('permission:probates.view');
         Route::put('/{probateCase}', [ProbateCaseController::class, 'update'])->middleware('permission:probates.edit');
         Route::delete('/{probateCase}', [ProbateCaseController::class, 'destroy'])->middleware('permission:probates.delete');

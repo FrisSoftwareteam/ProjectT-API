@@ -69,6 +69,39 @@ class ProbateCaseController extends Controller
         return response()->json($probateCase);
     }
 
+    public function adminsForShareholder(Request $request, Shareholder $shareholder)
+    {
+        $admins = EstateCaseRepresentative::query()
+            ->whereHas('probateCase', function ($query) use ($shareholder) {
+                $query->where('shareholder_id', $shareholder->id);
+            })
+            ->with([
+                'shareholder',
+                'probateCase' => function ($query) {
+                    $query->select([
+                        'id',
+                        'shareholder_id',
+                        'case_type',
+                        'court_ref',
+                        'grant_date',
+                        'status',
+                        'opened_at',
+                        'closed_at',
+                    ]);
+                },
+            ])
+            ->orderByDesc('is_primary')
+            ->orderBy('id')
+            ->paginate((int) $request->query('per_page', 15));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Probate admins retrieved',
+            'shareholder' => $shareholder,
+            'data' => $admins,
+        ]);
+    }
+
     public function update(ProbateCaseRequest $request, ProbateCase $probateCase)
     {
         $payload = $this->validatedPayloadWithDocument($request, $probateCase);
