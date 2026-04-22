@@ -82,25 +82,61 @@ class ProbateCaseController extends Controller
             ])
             ->orderByDesc('opened_at')
             ->orderByDesc('id')
-            ->paginate((int) $request->query('per_page', 15));
+            ->get();
 
-        $cases->getCollection()->transform(function (ProbateCase $case) {
-            $case->setRelation(
-                'shareholders',
-                $case->representatives
-                    ->pluck('shareholder')
-                    ->filter()
-                    ->values()
-            );
+        if ($cases->isEmpty()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No probate case found for this shareholder.',
+                'shareholder' => $shareholder,
+                'data' => [
+                    'probate_cases' => [],
+                    'admins' => [],
+                ],
+            ], 404);
+        }
 
-            return $case;
+        $probateCases = $cases->map(function (ProbateCase $case) {
+            $admins = $case->representatives->map(function (EstateCaseRepresentative $representative) {
+                return [
+                    'id' => $representative->id,
+                    'probate_case_id' => $representative->probate_case_id,
+                    'shareholder_id' => $representative->shareholder_id,
+                    'representative_type' => $representative->representative_type,
+                    'is_primary' => $representative->is_primary,
+                    'shareholder' => $representative->shareholder,
+                ];
+            })->values();
+
+            return [
+                'id' => $case->id,
+                'shareholder_id' => $case->shareholder_id,
+                'case_type' => $case->case_type,
+                'court_ref' => $case->court_ref,
+                'grant_date' => $case->grant_date,
+                'status' => $case->status,
+                'opened_at' => $case->opened_at,
+                'closed_at' => $case->closed_at,
+                'deceased_shareholder' => $case->shareholder,
+                'admins' => $admins,
+                'admin_shareholders' => $admins->pluck('shareholder')->filter()->values(),
+            ];
         });
+
+        $admins = $probateCases
+            ->pluck('admins')
+            ->flatten(1)
+            ->values();
 
         return response()->json([
             'success' => true,
             'message' => 'Probate cases and admins retrieved',
             'shareholder' => $shareholder,
-            'data' => $cases,
+            'data' => [
+                'probate_cases' => $probateCases,
+                'admins' => $admins,
+                'admin_shareholders' => $admins->pluck('shareholder')->filter()->values(),
+            ],
         ]);
     }
 
