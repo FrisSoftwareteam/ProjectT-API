@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Register;
 use App\Models\Company;
+use App\Services\CautionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
@@ -12,6 +13,10 @@ use Illuminate\Support\Facades\Log;
 
 class RegisterController extends Controller
 {
+    public function __construct(
+        private readonly CautionService $cautionService,
+    ) {}
+
     /**
      * Display a listing of registers.
      */
@@ -123,6 +128,7 @@ class RegisterController extends Controller
             }
 
             $register = Register::create($validated);
+            $this->cautionService->ensureCautionShareClass($register->id);
             $register->load('company');
 
             Log::info('Register created', [

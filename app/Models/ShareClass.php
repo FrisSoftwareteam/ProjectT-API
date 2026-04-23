@@ -17,15 +17,19 @@ class ShareClass extends Model
         'par_value',
         'description',
         'withholding_tax_rate',
+        'is_caution_class',     // true only for the system caution class
     ];
 
     protected $casts = [
-        'par_value' => 'decimal:6',
+        'par_value'            => 'decimal:6',
         'withholding_tax_rate' => 'decimal:4',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
-        'deleted_at' => 'datetime',
+        'is_caution_class'     => 'boolean',
+        'created_at'           => 'datetime',
+        'updated_at'           => 'datetime',
+        'deleted_at'           => 'datetime',
     ];
+
+    // ── Relationships ─────────────────────────────────────────────────────────
 
     /**
      * Get the register that owns the share class.
@@ -35,30 +39,16 @@ class ShareClass extends Model
         return $this->belongsTo(Register::class);
     }
 
-    // TEMPORARILY COMMENTED OUT - Will enable when we create these models
-    // /**
-    //  * Get the share positions for this share class.
-    //  */
-    // public function sharePositions()
-    // {
-    //     return $this->hasMany(SharePosition::class);
-    // }
+    /**
+     * Get the caution records linked to this share class.
+     * Only relevant when is_caution_class = true.
+     */
+    public function cautions()
+    {
+        return $this->hasMany(ShareholderCaution::class, 'caution_share_class_id');
+    }
 
-    // /**
-    //  * Get the share lots for this share class.
-    //  */
-    // public function shareLots()
-    // {
-    //     return $this->hasMany(ShareLot::class);
-    // }
-
-    // /**
-    //  * Get the share transactions for this share class.
-    //  */
-    // public function shareTransactions()
-    // {
-    //     return $this->hasMany(ShareTransaction::class);
-    // }
+    // ── Scopes ────────────────────────────────────────────────────────────────
 
     /**
      * Scope a query to filter by currency.
@@ -69,26 +59,44 @@ class ShareClass extends Model
     }
 
     /**
-     * Get formatted par value.
+     * Scope a query to return only the caution share class.
      */
-    public function getFormattedParValueAttribute(): string
+    public function scopeCautionClass($query)
     {
-        return number_format((float)$this->par_value, 2) . ' ' . $this->currency;
+        return $query->where('is_caution_class', true);
+    }
+
+    // ── Helpers / Accessors ───────────────────────────────────────────────────
+
+    /**
+     * Check whether this is the system caution class.
+     */
+    public function isCautionClass(): bool
+    {
+        return (bool) $this->is_caution_class;
     }
 
     /**
-     * Get formatted withholding tax rate as percentage.
+     * Get formatted par value with currency symbol.
+     */
+    public function getFormattedParValueAttribute(): string
+    {
+        return number_format((float) $this->par_value, 2) . ' ' . $this->currency;
+    }
+
+    /**
+     * Get formatted withholding tax rate as a percentage string.
      */
     public function getFormattedTaxRateAttribute(): string
     {
         if (is_null($this->withholding_tax_rate)) {
             return '0.00%';
         }
-        return number_format((float)$this->withholding_tax_rate, 2) . '%';
+        return number_format((float) $this->withholding_tax_rate, 2) . '%';
     }
 
     /**
-     * Calculate withholding tax on a given amount.
+     * Calculate withholding tax on a given gross amount.
      *
      * @param float $amount The dividend or income amount
      * @return float The calculated tax amount
@@ -98,12 +106,11 @@ class ShareClass extends Model
         if (is_null($this->withholding_tax_rate) || $this->withholding_tax_rate <= 0) {
             return 0.00;
         }
-        
         return round(($amount * $this->withholding_tax_rate) / 100, 2);
     }
 
     /**
-     * Calculate net amount after withholding tax.
+     * Calculate net amount after withholding tax deduction.
      *
      * @param float $amount The gross dividend or income amount
      * @return float The net amount after tax

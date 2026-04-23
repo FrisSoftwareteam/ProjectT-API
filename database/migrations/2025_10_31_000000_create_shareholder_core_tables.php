@@ -223,33 +223,33 @@ return new class extends Migration {
             $t->foreignId('created_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
         });
 
-        Schema::create('dividend_entitlements', function (Blueprint $t) {
-            $t->id();
-            $t->foreignId('corporate_action_id')->constrained('corporate_actions')->cascadeOnUpdate()->restrictOnDelete();
-            $t->foreignId('sra_id')->constrained('shareholder_register_accounts')->cascadeOnUpdate()->restrictOnDelete();
-            $t->foreignId('share_class_id')->constrained('share_classes')->cascadeOnUpdate()->restrictOnDelete();
-            $t->decimal('shares_eligible', 28, 6);
-            $t->decimal('gross_amount', 28, 6);
-            $t->decimal('tax_amount', 28, 6)->default(0);
-            $t->decimal('net_amount', 28, 6);
-            $t->string('control_no', 40);
-            $t->enum('status', ['pending','approved','paid','reissued','escheated'])->default('pending');
-            $t->timestamps();
-            $t->unique(['corporate_action_id','sra_id','share_class_id'], 'uk_entitlement');
-        });
-
-        Schema::create('dividend_payments', function (Blueprint $t) {
-            $t->id();
-            $t->foreignId('entitlement_id')->constrained('dividend_entitlements')->cascadeOnUpdate()->restrictOnDelete();
-            $t->enum('payout_mode', ['edividend','warrant','bank_transfer']);
-            $t->foreignId('bank_mandate_id')->nullable()->constrained('shareholder_bank_mandates')->cascadeOnUpdate()->restrictOnDelete();
-            $t->timestamp('paid_at')->nullable();
-            $t->string('paid_ref', 64)->nullable();
-            $t->enum('status', ['initiated','paid','failed','reversed'])->default('initiated');
-            $t->timestamps();
-            $t->foreignId('created_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
-        });
-
+//        Schema::create('dividend_entitlements', function (Blueprint $t) {
+//            $t->id();
+//            $t->foreignId('corporate_action_id')->constrained('corporate_actions')->cascadeOnUpdate()->restrictOnDelete();
+//            $t->foreignId('sra_id')->constrained('shareholder_register_accounts')->cascadeOnUpdate()->restrictOnDelete();
+//            $t->foreignId('share_class_id')->constrained('share_classes')->cascadeOnUpdate()->restrictOnDelete();
+//            $t->decimal('shares_eligible', 28, 6);
+//            $t->decimal('gross_amount', 28, 6);
+//            $t->decimal('tax_amount', 28, 6)->default(0);
+//            $t->decimal('net_amount', 28, 6);
+//            $t->string('control_no', 40);
+//            $t->enum('status', ['pending','approved','paid','reissued','escheated'])->default('pending');
+//            $t->timestamps();
+//            $t->unique(['corporate_action_id','sra_id','share_class_id'], 'uk_entitlement');
+//        });
+//
+//        Schema::create('dividend_payments', function (Blueprint $t) {
+//            $t->id();
+//            $t->foreignId('entitlement_id')->constrained('dividend_entitlements')->cascadeOnUpdate()->restrictOnDelete();
+//            $t->enum('payout_mode', ['edividend','warrant','bank_transfer']);
+//            $t->foreignId('bank_mandate_id')->nullable()->constrained('shareholder_bank_mandates')->cascadeOnUpdate()->restrictOnDelete();
+//            $t->timestamp('paid_at')->nullable();
+//            $t->string('paid_ref', 64)->nullable();
+//            $t->enum('status', ['initiated','paid','failed','reversed'])->default('initiated');
+//            $t->timestamps();
+//            $t->foreignId('created_by')->nullable()->constrained('admin_users')->cascadeOnUpdate()->restrictOnDelete();
+//        });
+//
         // ------------------------------
         // 5) RELATIONSHIPS & ESTATES
         // ------------------------------
@@ -348,8 +348,8 @@ return new class extends Migration {
         Schema::dropIfExists('sra_guardians');
         Schema::dropIfExists('sra_joint_holders');
 
-        Schema::dropIfExists('dividend_payments');
-        Schema::dropIfExists('dividend_entitlements');
+//        Schema::dropIfExists('dividend_payments');
+//        Schema::dropIfExists('dividend_entitlements');
         Schema::dropIfExists('corporate_actions');
 
         Schema::dropIfExists('share_transactions');
