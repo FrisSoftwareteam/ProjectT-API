@@ -319,33 +319,35 @@ class RegisterController extends Controller
     }
 
     private function generateRegisterCode(Company $company): string
-    {
-        $prefixSource = $company->issuer_code ?: 'REG';
-        $prefix = strtoupper((string) preg_replace('/[^A-Z0-9]/', '', $prefixSource));
-        $prefix = substr($prefix, 0, 10);
-        if ($prefix === '') {
-            $prefix = 'REG';
-        }
-
-        $codes = Register::where('company_id', $company->id)
-            ->pluck('register_code')
-            ->all();
-
-        $max = 0;
-        foreach ($codes as $code) {
-            if (preg_match('/^' . preg_quote($prefix, '/') . '-(\d{6})$/', (string) $code, $m)) {
-                $max = max($max, (int) $m[1]);
-            }
-        }
-
-        $next = $max + 1;
-        do {
-            $candidate = sprintf('%s-%06d', $prefix, $next++);
-            $exists = Register::where('company_id', $company->id)
-                ->where('register_code', $candidate)
-                ->exists();
-        } while ($exists);
-
-        return $candidate;
+{
+    $prefixSource = $company->issuer_code ?: 'REG';
+    $prefix = strtoupper((string) preg_replace('/[^A-Z0-9]/', '', $prefixSource));
+    $prefix = substr($prefix, 0, 10);
+    if ($prefix === '') {
+        $prefix = 'REG';
     }
+
+    $codes = Register::withTrashed()
+        ->where('company_id', $company->id)
+        ->pluck('register_code')
+        ->all();
+
+    $max = 0;
+    foreach ($codes as $code) {
+        if (preg_match('/^' . preg_quote($prefix, '/') . '-(\d{6})$/', (string) $code, $m)) {
+            $max = max($max, (int) $m[1]);
+        }
+    }
+
+    $next = $max + 1;
+    do {
+        $candidate = sprintf('%s-%06d', $prefix, $next++);
+        $exists = Register::withTrashed()
+            ->where('company_id', $company->id)
+            ->where('register_code', $candidate)
+            ->exists();
+    } while ($exists);
+
+    return $candidate;
+}
 }
