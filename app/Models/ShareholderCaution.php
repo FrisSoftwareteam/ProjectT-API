@@ -24,6 +24,7 @@ class ShareholderCaution extends Model
         'removal_reason',
         'removed_by',
         'created_by',
+        'supporting_document_path',
     ];
 
     protected $casts = [

@@ -116,8 +116,15 @@ class CautionController extends Controller
                     Rule::in(['sec', 'court', 'exchange', 'bank', 'internal']),
                 ],
                 'reason'         => 'required|string|max:500',
+                'supporting_document' => 'nullable|file|max:10240',
                 'effective_date' => 'required|date',
             ]);
+
+            $documentPath = null;
+            if ($request->hasFile('supporting_document')) {
+                $documentPath = $request->file('supporting_document')->store('caution-documents', 'public');
+            }
+            $validated['supporting_document_path'] = $documentPath;
 
             $result = $this->cautionService->apply(
                 $sra,

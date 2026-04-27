@@ -45,6 +45,7 @@ class CautionService
                     'instruction_source'   => $data['instruction_source'],
                     'reason'               => $data['reason'],
                     'effective_date'       => $data['effective_date'],
+                    'supporting_document_path' => $data['supporting_document_path'] ?? null,
                     'created_by'           => $actorId,
                 ]);
 
