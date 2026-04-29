@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Register;
 use App\Models\Company;
+use App\Services\CautionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
@@ -12,6 +13,10 @@ use Illuminate\Support\Facades\Log;
 
 class RegisterController extends Controller
 {
+    public function __construct(
+        private readonly CautionService $cautionService,
+    ) {}
+
     /**
      * Display a listing of registers.
      */
@@ -123,6 +128,7 @@ class RegisterController extends Controller
             }
 
             $register = Register::create($validated);
+            $this->cautionService->ensureCautionShareClass($register->id);
             $register->load('company');
 
             Log::info('Register created', [
@@ -313,33 +319,35 @@ class RegisterController extends Controller
     }
 
     private function generateRegisterCode(Company $company): string
-    {
-        $prefixSource = $company->issuer_code ?: 'REG';
-        $prefix = strtoupper((string) preg_replace('/[^A-Z0-9]/', '', $prefixSource));
-        $prefix = substr($prefix, 0, 10);
-        if ($prefix === '') {
-            $prefix = 'REG';
-        }
-
-        $codes = Register::where('company_id', $company->id)
-            ->pluck('register_code')
-            ->all();
-
-        $max = 0;
-        foreach ($codes as $code) {
-            if (preg_match('/^' . preg_quote($prefix, '/') . '-(\d{6})$/', (string) $code, $m)) {
-                $max = max($max, (int) $m[1]);
-            }
-        }
-
-        $next = $max + 1;
-        do {
-            $candidate = sprintf('%s-%06d', $prefix, $next++);
-            $exists = Register::where('company_id', $company->id)
-                ->where('register_code', $candidate)
-                ->exists();
-        } while ($exists);
-
-        return $candidate;
+{
+    $prefixSource = $company->issuer_code ?: 'REG';
+    $prefix = strtoupper((string) preg_replace('/[^A-Z0-9]/', '', $prefixSource));
+    $prefix = substr($prefix, 0, 10);
+    if ($prefix === '') {
+        $prefix = 'REG';
     }
+
+    $codes = Register::withTrashed()
+        ->where('company_id', $company->id)
+        ->pluck('register_code')
+        ->all();
+
+    $max = 0;
+    foreach ($codes as $code) {
+        if (preg_match('/^' . preg_quote($prefix, '/') . '-(\d{6})$/', (string) $code, $m)) {
+            $max = max($max, (int) $m[1]);
+        }
+    }
+
+    $next = $max + 1;
+    do {
+        $candidate = sprintf('%s-%06d', $prefix, $next++);
+        $exists = Register::withTrashed()
+            ->where('company_id', $company->id)
+            ->where('register_code', $candidate)
+            ->exists();
+    } while ($exists);
+
+    return $candidate;
+}
 }

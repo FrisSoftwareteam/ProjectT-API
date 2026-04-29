@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\ShareTransferController;
 use App\Http\Controllers\Api\ShareholderMergeController;
 use App\Http\Controllers\Api\IpoOfferController;
 use App\Http\Controllers\Api\BankVerificationController;
+use App\Http\Controllers\Api\CautionController;
 
 /*
 |--------------------------------------------------------------------------
@@ -57,6 +58,30 @@ Route::middleware(['auth:sanctum'])->group(function () {
     // Bank Verification Routes
     Route::get('/banks', [BankVerificationController::class, 'bankList']);
     Route::post('/banks/verify', [BankVerificationController::class, 'verify']);
+
+    // =========================================================================
+    // CAUTION ACCOUNT MODULE
+    // =========================================================================
+
+    // Shareholder-level summary — all cautions across all registers
+    Route::get(
+        '/shareholders/{shareholder_id}/caution-summary',
+        [CautionController::class, 'summary']
+    )->middleware('permission:shareholders.view');
+
+    // SRA-level caution operations (register-scoped)
+    Route::prefix('sras/{sra_id}/cautions')->group(function () {
+        Route::get('/',                      [CautionController::class, 'index'])
+            ->middleware('permission:shareholders.view');
+        Route::post('/',                     [CautionController::class, 'store'])
+            ->middleware('permission:shareholders.edit');
+        Route::get('/{caution_id}',          [CautionController::class, 'show'])
+            ->middleware('permission:shareholders.view');
+        Route::delete('/{caution_id}',       [CautionController::class, 'destroy'])
+            ->middleware('permission:shareholders.edit');
+        Route::get('/{caution_id}/logs',     [CautionController::class, 'logs'])
+            ->middleware('permission:shareholders.view');
+    });
     
     // Admin Users API Routes
     Route::prefix('admin/users')->group(function () {
@@ -162,6 +187,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/{probateCase}/beneficiaries', [ProbateCaseController::class, 'addBeneficiary'])->middleware('permission:probates.edit');
         Route::post('/{probateCase}/representatives', [ProbateCaseController::class, 'addRepresentative'])->middleware('permission:probates.edit');
         Route::post('/{probateCase}/distributions', [ProbateCaseController::class, 'distribute'])->middleware('permission:probates.edit');
+        Route::post('/beneficiaries/{id}/execute', [ProbateCaseController::class, 'executeBeneficiary'])->middleware('permission:probates.edit');
     });
 
     // Share data endpoints
@@ -178,6 +204,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
 
     Route::prefix('share-transactions')->group(function () {
         Route::get('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'index'])->middleware('permission:shares.view');
+        Route::post('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'store'])->middleware('permission:shares.edit');
         Route::get('/{shareTransaction}', [\App\Http\Controllers\Api\ShareTransactionController::class, 'show'])->middleware('permission:shares.view');
     });
 
@@ -255,6 +282,12 @@ Route::middleware(['auth:sanctum'])->group(function () {
             
             Route::delete('/{id}', [RegisterController::class, 'destroy'])
                 ->middleware('role:Super Admin');
+
+            Route::get('/{id}/capital-status', [RegisterController::class, 'capitalStatus'])
+                ->middleware('permission:users.view');
+
+            Route::post('/{id}/capital-check', [RegisterController::class, 'capitalCheck'])
+                ->middleware('permission:users.view');
             
             // =================================================================
             // DIVIDEND DECLARATION MANAGEMENT (Nested under registers)
@@ -294,8 +327,8 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::prefix('dividend-declarations')->group(function () {
             
             // Get Dividend Declaration (Full Context)
-          Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
-    ->middleware('permission:users.view');
+            Route::get('/{declaration_id}', [DividendEntitlementController::class, 'show'])
+                ->middleware('permission:users.view');
             
             // Update Dividend Declaration (Draft Only)
             Route::put('/{declaration_id}', [DividendEntitlementController::class, 'update'])

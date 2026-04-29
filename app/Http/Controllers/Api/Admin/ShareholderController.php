@@ -81,6 +81,7 @@ class ShareholderController extends Controller
 
             foreach ($payload as $shareholderData) {
                 $shareholderData['account_no'] = $this->accountNumberService->generate();
+            $shareholderData['full_name'] = trim(($shareholderData['first_name'] ?? '') . ' ' . ($shareholderData['last_name'] ?? ''));
                 $created[] = Shareholder::create($shareholderData);
             }
 
@@ -101,6 +102,7 @@ class ShareholderController extends Controller
             'shareholder' => 'required|array',
             'shareholder.holder_type' => 'required|in:individual,corporate',
             'shareholder.first_name' => 'required|string|max:255',
+            'shareholder.full_name' => 'nullable|string|max:255',
             'shareholder.last_name' => 'nullable|string|max:100',
             'shareholder.middle_name' => 'nullable|string|max:100',
             'shareholder.email' => 'required|email|unique:shareholders,email',
@@ -179,6 +181,7 @@ class ShareholderController extends Controller
         try {
             $shareholderData = $payload['shareholder'];
             $shareholderData['account_no'] = $this->accountNumberService->generate();
+            $shareholderData['full_name'] = trim(($shareholderData['first_name'] ?? '') . ' ' . ($shareholderData['last_name'] ?? ''));
 
             $shareholder = Shareholder::create($shareholderData);
 
