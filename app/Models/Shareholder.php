@@ -9,18 +9,8 @@ class Shareholder extends Model
 {
     use HasFactory;
 
-    /**
-     * The table associated with the model.
-     *
-     * @var string
-     */
     protected $table = 'shareholders';
-    
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var array<int, string>
-     */
+ 
     protected $fillable = [
         'account_no',
         'holder_type',
@@ -41,27 +31,20 @@ class Shareholder extends Model
         'next_of_kin_relationship',
         'status',
     ];
-
-    /**
-     * The attributes that should be cast.
-     *
-     * @var array<string, string>
-     */
     protected $casts = [
         'date_of_birth' => 'date',
     ];
 
-    /**
-     * Get the addresses for the shareholder.
-     */
+    protected $appends = [
+        'is_cautioned',
+        'active_cautions_count',
+    ];
+
     public function addresses()
     {
         return $this->hasMany(ShareholderAddress::class);
     }
 
-    /**
-     * Check if shareholder has an active address.
-     */
     public function hasActiveAddress(): bool
     {
         return $this->addresses()
@@ -69,33 +52,21 @@ class Shareholder extends Model
             ->exists();
     }
 
-    /**
-     * Get the mandates for the shareholder.
-     */
     public function mandates()
     {
         return $this->hasMany(ShareholderMandate::class, 'shareholder_id', 'id');
     }
 
-    /**
-     * Get the identities for the shareholder.
-     */
     public function identities()
     {
         return $this->hasMany(ShareholderIdentity::class, 'shareholder_id', 'id');
     }
 
-    /**
-     * Get the register accounts for the shareholder.
-     */
     public function registerAccounts()
     {
         return $this->hasMany(ShareholderRegisterAccount::class);
     }
 
-    /**
-     * Get holdings for the shareholder across register accounts.
-     */
     public function holdings()
     {
         return $this->hasManyThrough(
@@ -108,9 +79,6 @@ class Shareholder extends Model
         );
     }
 
-    /**
-     * Get certificate lots for the shareholder across register accounts.
-     */
     public function certificates()
     {
         return $this->hasManyThrough(
@@ -121,5 +89,27 @@ class Shareholder extends Model
             'id',
             'id'
         );
+    }
+
+    public function activeCautions()
+    {
+        return $this->hasMany(ShareholderCaution::class, 'shareholder_id')
+                    ->whereNull('removed_at');
+    }
+
+    public function getIsCautionedAttribute(): bool
+    {
+        if ($this->relationLoaded('activeCautions')) {
+            return $this->activeCautions->isNotEmpty();
+        }
+        return $this->activeCautions()->exists();
+    }
+
+    public function getActiveCautionsCountAttribute(): int
+    {
+        if ($this->relationLoaded('activeCautions')) {
+            return $this->activeCautions->count();
+        }
+        return $this->activeCautions()->count();
     }
 }
