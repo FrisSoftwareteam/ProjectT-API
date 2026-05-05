@@ -13,11 +13,12 @@ class ShareClass extends Model
     protected $fillable = [
         'register_id',
         'class_code',
+        'name',               
         'currency',
         'par_value',
         'description',
         'withholding_tax_rate',
-        'is_caution_class',     // true only for the system caution class
+        'is_caution_class',     
     ];
 
     protected $casts = [
@@ -27,6 +28,11 @@ class ShareClass extends Model
         'created_at'           => 'datetime',
         'updated_at'           => 'datetime',
         'deleted_at'           => 'datetime',
+    ];
+
+       protected $appends = [
+        'formatted_par_value',
+        'formatted_tax_rate',
     ];
 
     // ── Relationships ─────────────────────────────────────────────────────────
