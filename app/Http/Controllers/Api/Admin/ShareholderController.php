@@ -235,7 +235,8 @@ class ShareholderController extends Controller
             'identities',
             'holdings.shareClass.register.company',
             'certificates',
-            'registerAccounts'
+            'registerAccounts',
+            'activeCautions'
         )->findOrFail($id);
 
         return response()->json($shareholder);

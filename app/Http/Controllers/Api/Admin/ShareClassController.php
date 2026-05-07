@@ -74,11 +74,12 @@ class ShareClassController extends Controller
     {
         try {
             $validated = $request->validate([
-                'register_id' => 'required|exists:registers,id',
-                'class_code' => 'required|string|max:32',
-                'currency' => 'nullable|string|size:3',
-                'par_value' => 'nullable|numeric|min:0|max:999999999999.999999',
-                'description' => 'nullable|string|max:255',
+                'register_id'          => 'required|exists:registers,id',
+                'class_code'           => 'required|string|max:32',
+                'name'                 => 'nullable|string|max:100',   // ← ADDED
+                'currency'             => 'nullable|string|size:3',
+                'par_value'            => 'nullable|numeric|min:0|max:999999999999.999999',
+                'description'          => 'nullable|string|max:255',
                 'withholding_tax_rate' => 'nullable|numeric|min:0|max:100',
             ]);
 
@@ -96,31 +97,32 @@ class ShareClassController extends Controller
             }
 
             // Set default values
-            $validated['currency'] = $validated['currency'] ?? 'NGN';
-            $validated['par_value'] = $validated['par_value'] ?? 0;
+            $validated['currency']             = $validated['currency'] ?? 'NGN';
+            $validated['par_value']            = $validated['par_value'] ?? 0;
             $validated['withholding_tax_rate'] = $validated['withholding_tax_rate'] ?? 0;
 
             $shareClass = ShareClass::create($validated);
             $shareClass->load('register.company');
 
             Log::info('Share class created', [
-                'share_class_id' => $shareClass->id,
-                'register_id' => $shareClass->register_id,
-                'class_code' => $shareClass->class_code,
+                'share_class_id'       => $shareClass->id,
+                'register_id'          => $shareClass->register_id,
+                'class_code'           => $shareClass->class_code,
+                'name'                 => $shareClass->name,           // ← ADDED
                 'withholding_tax_rate' => $shareClass->withholding_tax_rate,
-                'created_by' => $request->user()->id
+                'created_by'           => $request->user()->id
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Share class created successfully',
-                'data' => $shareClass,
+                'data'    => $shareClass,
             ], 201);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors(),
+                'errors'  => $e->errors(),
             ], 422);
         } catch (\Exception $e) {
             Log::error('Error creating share class: ' . $e->getMessage());
@@ -128,7 +130,7 @@ class ShareClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error creating share class',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ], 500);
         }
     }
@@ -150,7 +152,7 @@ class ShareClassController extends Controller
 
             return response()->json([
                 'success' => true,
-                'data' => $shareClass,
+                'data'    => $shareClass,
                 'message' => 'Share class retrieved successfully'
             ]);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
@@ -164,7 +166,7 @@ class ShareClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error retrieving share class',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ], 500);
         }
     }
@@ -178,14 +180,14 @@ class ShareClassController extends Controller
             $shareClass = ShareClass::findOrFail($id);
 
             $validated = $request->validate([
-                'class_code' => 'required|string|max:32',
-                'currency' => 'nullable|string|size:3',
-                'par_value' => 'nullable|numeric|min:0|max:999999999999.999999',
-                'description' => 'nullable|string|max:255',
+                'class_code'           => 'required|string|max:32',
+                'name'                 => 'nullable|string|max:100',   // ← ADDED
+                'currency'             => 'nullable|string|size:3',
+                'par_value'            => 'nullable|numeric|min:0|max:999999999999.999999',
+                'description'          => 'nullable|string|max:255',
                 'withholding_tax_rate' => 'nullable|numeric|min:0|max:100',
             ]);
 
-            // Check for unique combination of register_id and class_code
             $exists = ShareClass::where('register_id', $shareClass->register_id)
                                 ->where('class_code', $validated['class_code'])
                                 ->where('id', '!=', $shareClass->id)
@@ -195,7 +197,7 @@ class ShareClassController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Class code already exists for this register',
-                    'errors' => ['class_code' => ['This class code is already in use for this register']]
+                    'errors'  => ['class_code' => ['This class code is already in use for this register']]
                 ], 422);
             }
 
@@ -203,22 +205,23 @@ class ShareClassController extends Controller
             $shareClass->load('register.company');
 
             Log::info('Share class updated', [
-                'share_class_id' => $shareClass->id,
-                'register_id' => $shareClass->register_id,
+                'share_class_id'       => $shareClass->id,
+                'register_id'          => $shareClass->register_id,
+                'name'                 => $shareClass->name,           // ← ADDED
                 'withholding_tax_rate' => $shareClass->withholding_tax_rate,
-                'updated_by' => $request->user()->id
+                'updated_by'           => $request->user()->id
             ]);
 
             return response()->json([
                 'success' => true,
                 'message' => 'Share class updated successfully',
-                'data' => $shareClass->fresh(['register.company']),
+                'data'    => $shareClass->fresh(['register.company']),
             ]);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors(),
+                'errors'  => $e->errors(),
             ], 422);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -231,7 +234,7 @@ class ShareClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error updating share class',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ], 500);
         }
     }
@@ -243,6 +246,12 @@ class ShareClassController extends Controller
     {
         try {
             $shareClass = ShareClass::findOrFail($id);
+            if ($shareClass->is_caution_class) {                         
+                return response()->json([                                 
+                    'success' => false,                                    
+                    'message' => 'The system caution share class cannot be deleted.', 
+                ], 422);                                                  
+            }                                                          
 
             // For now, we'll allow deletion since we haven't built the related features yet
             // When you create SharePosition and ShareTransaction models, uncomment the check below:
@@ -258,8 +267,8 @@ class ShareClassController extends Controller
 
             Log::info('Share class deleted', [
                 'share_class_id' => $shareClass->id,
-                'register_id' => $shareClass->register_id,
-                'deleted_by' => $request->user()->id
+                'register_id'    => $shareClass->register_id,
+                'deleted_by'     => $request->user()->id
             ]);
 
             return response()->json([
@@ -277,7 +286,7 @@ class ShareClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error deleting share class',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ], 500);
         }
     }
@@ -294,35 +303,36 @@ class ShareClassController extends Controller
                 'amount' => 'required|numeric|min:0',
             ]);
 
-            $amount = (float) $validated['amount'];
+            $amount    = (float) $validated['amount'];
             $taxAmount = $shareClass->calculateWithholdingTax($amount);
             $netAmount = $shareClass->calculateNetAmount($amount);
 
             Log::info('Tax calculation performed', [
                 'share_class_id' => $shareClass->id,
-                'class_code' => $shareClass->class_code,
-                'gross_amount' => $amount,
-                'tax_rate' => $shareClass->withholding_tax_rate,
-                'tax_amount' => $taxAmount,
-                'net_amount' => $netAmount,
-                'calculated_by' => $request->user()->id
+                'class_code'     => $shareClass->class_code,
+                'gross_amount'   => $amount,
+                'tax_rate'       => $shareClass->withholding_tax_rate,
+                'tax_amount'     => $taxAmount,
+                'net_amount'     => $netAmount,
+                'calculated_by'  => $request->user()->id
             ]);
 
             return response()->json([
                 'success' => true,
-                'data' => [
+                'data'    => [
                     'share_class' => [
-                        'id' => $shareClass->id,
-                        'class_code' => $shareClass->class_code,
+                        'id'                   => $shareClass->id,
+                        'class_code'           => $shareClass->class_code,
+                        'name'                 => $shareClass->name,   // ← ADDED
                         'withholding_tax_rate' => $shareClass->withholding_tax_rate,
-                        'currency' => $shareClass->currency,
+                        'currency'             => $shareClass->currency,
                     ],
                     'calculation' => [
                         'gross_amount' => number_format($amount, 2),
-                        'tax_rate' => number_format((float)$shareClass->withholding_tax_rate, 2) . '%',
-                        'tax_amount' => number_format($taxAmount, 2),
-                        'net_amount' => number_format($netAmount, 2),
-                        'currency' => $shareClass->currency,
+                        'tax_rate'     => number_format((float)$shareClass->withholding_tax_rate, 2) . '%',
+                        'tax_amount'   => number_format($taxAmount, 2),
+                        'net_amount'   => number_format($netAmount, 2),
+                        'currency'     => $shareClass->currency,
                     ]
                 ],
                 'message' => 'Tax calculated successfully'
@@ -331,7 +341,7 @@ class ShareClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Validation failed',
-                'errors' => $e->errors(),
+                'errors'  => $e->errors(),
             ], 422);
         } catch (\Illuminate\Database\Eloquent\ModelNotFoundException $e) {
             return response()->json([
@@ -344,7 +354,7 @@ class ShareClassController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Error calculating tax',
-                'error' => $e->getMessage()
+                'error'   => $e->getMessage()
             ], 500);
         }
     }
