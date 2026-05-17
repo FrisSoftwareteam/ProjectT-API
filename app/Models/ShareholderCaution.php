@@ -5,9 +5,6 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Builder;
 
-/**
- * ShareholderCaution Table Model 
- */
 class ShareholderCaution extends Model
 {
     protected $fillable = [
@@ -34,6 +31,16 @@ class ShareholderCaution extends Model
         'updated_at'     => 'datetime',
     ];
 
+    /**
+     * Append resolved display names to every serialized response.
+     * Resolves PT-91: user ID was exposed instead of username.
+     */
+    protected $appends = [
+        'applied_by_name',
+        'removed_by_name',
+    ];
+
+    // ── Relationships ──────────────────────────────────────────────────────────
 
     public function shareholder()
     {
@@ -70,6 +77,28 @@ class ShareholderCaution extends Model
         return $this->hasMany(ShareholderCautionLog::class, 'caution_id');
     }
 
+    // ── Accessors ──────────────────────────────────────────────────────────────
+
+    /**
+     * Display name of the admin who applied this caution.
+     * Resolves PT-91: returns full_name instead of raw created_by integer.
+     */
+    public function getAppliedByNameAttribute(): ?string
+    {
+        return $this->createdBy?->full_name;
+    }
+
+    /**
+     * Display name of the admin who removed this caution (null if still active).
+     * Resolves PT-91: returns full_name instead of raw removed_by integer.
+     */
+    public function getRemovedByNameAttribute(): ?string
+    {
+        return $this->removedBy?->full_name;
+    }
+
+    // ── Scopes ─────────────────────────────────────────────────────────────────
+
     public function scopeActive(Builder $query): Builder
     {
         return $query->whereNull('removed_at');
@@ -90,6 +119,7 @@ class ShareholderCaution extends Model
         return $query->where('company_id', $companyId);
     }
 
+    // ── Helpers ────────────────────────────────────────────────────────────────
 
     public function isActive(): bool
     {
