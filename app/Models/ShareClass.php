@@ -13,12 +13,12 @@ class ShareClass extends Model
     protected $fillable = [
         'register_id',
         'class_code',
-        'name',               
+        'name',
         'currency',
         'par_value',
         'description',
         'withholding_tax_rate',
-        'is_caution_class',     
+        'is_caution_class',
     ];
 
     protected $casts = [
@@ -30,7 +30,7 @@ class ShareClass extends Model
         'deleted_at'           => 'datetime',
     ];
 
-       protected $appends = [
+    protected $appends = [
         'formatted_par_value',
         'formatted_tax_rate',
     ];
@@ -84,21 +84,20 @@ class ShareClass extends Model
 
     /**
      * Get formatted par value with currency symbol.
+     * Null-safe: defaults par_value to 0 and currency to empty string if not set.
      */
     public function getFormattedParValueAttribute(): string
     {
-        return number_format((float) $this->par_value, 2) . ' ' . $this->currency;
+        return number_format((float) ($this->par_value ?? 0), 2) . ' ' . ($this->currency ?? '');
     }
 
     /**
      * Get formatted withholding tax rate as a percentage string.
+     * Null-safe: defaults withholding_tax_rate to 0 if not set, returning "0.00%".
      */
     public function getFormattedTaxRateAttribute(): string
     {
-        if (is_null($this->withholding_tax_rate)) {
-            return '0.00%';
-        }
-        return number_format((float) $this->withholding_tax_rate, 2) . '%';
+        return number_format((float) ($this->withholding_tax_rate ?? 0), 2) . '%';
     }
 
     /**
