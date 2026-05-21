@@ -9,6 +9,7 @@ use App\Models\ShareTransaction;
 use App\Models\Shareholder;
 use App\Models\ShareholderMergeEvent;
 use App\Models\ShareholderRegisterAccount;
+use App\Services\ActivityLogService;
 use App\Services\CapitalValidationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -16,7 +17,8 @@ use Illuminate\Validation\ValidationException;
 class ShareholderMergeController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly ActivityLogService $activityLogService
     ) {
     }
 
@@ -122,16 +124,11 @@ class ShareholderMergeController extends Controller
                 'created_by' => auth()->id(),
             ]);
 
-            DB::table('user_activity_logs')->insert([
-                'user_id' => auth()->id(),
-                'action' => 'shareholder_merge',
-                'metadata' => json_encode([
-                    'event_id' => $event->id,
-                    'primary_shareholder_id' => $primary->id,
-                    'duplicate_shareholder_id' => $duplicate->id,
-                    'verification_basis' => $data['verification_basis'],
-                ]),
-                'created_at' => now(),
+            $this->activityLogService->log(auth()->id(), 'shareholder_merge', [
+                'event_id' => $event->id,
+                'primary_shareholder_id' => $primary->id,
+                'duplicate_shareholder_id' => $duplicate->id,
+                'verification_basis' => $data['verification_basis'],
             ]);
 
             return response()->json([
@@ -164,4 +161,3 @@ class ShareholderMergeController extends Controller
         return count(array_intersect($primaryChns, $duplicateChns)) > 0;
     }
 }
-

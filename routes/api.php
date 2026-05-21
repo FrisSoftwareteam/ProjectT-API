@@ -46,7 +46,7 @@ Route::prefix('auth')->group(function () {
 });
 
 // Protected Routes (require authentication)
-Route::middleware(['auth:sanctum'])->group(function () {
+Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     // User info
     Route::get('/user', [AuthController::class, 'me']);
     

@@ -10,6 +10,7 @@ use App\Models\ShareTransaction;
 use App\Models\ShareTransferEvent;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
+use App\Services\ActivityLogService;
 use App\Services\CapitalValidationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -17,7 +18,8 @@ use Illuminate\Validation\ValidationException;
 class ShareTransferController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly ActivityLogService $activityLogService
     ) {
     }
 
@@ -115,17 +117,12 @@ class ShareTransferController extends Controller
                 'created_by' => auth()->id(),
             ]);
 
-            DB::table('user_activity_logs')->insert([
-                'user_id' => auth()->id(),
-                'action' => 'share_transfer',
-                'metadata' => json_encode([
-                    'event_id' => $event->id,
-                    'from_shareholder_id' => $fromShareholder->id,
-                    'to_shareholder_id' => $toShareholder->id,
-                    'share_class_id' => $shareClass->id,
-                    'quantity' => $qty,
-                ]),
-                'created_at' => now(),
+            $this->activityLogService->log(auth()->id(), 'share_transfer', [
+                'event_id' => $event->id,
+                'from_shareholder_id' => $fromShareholder->id,
+                'to_shareholder_id' => $toShareholder->id,
+                'share_class_id' => $shareClass->id,
+                'quantity' => $qty,
             ]);
 
             return response()->json([

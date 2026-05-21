@@ -16,6 +16,7 @@ use App\Models\ShareTransaction;
 use App\Models\ShareTransferEvent;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
+use App\Services\ActivityLogService;
 use App\Services\CapitalValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -26,7 +27,8 @@ use Illuminate\Support\Facades\Storage;
 class ProbateCaseController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly ActivityLogService $activityLogService
     ) {
     }
 
@@ -546,24 +548,7 @@ class ProbateCaseController extends Controller
 
     private function logActivity(?int $userId, string $action, array $metadata = []): void
     {
-        if (! $userId) {
-            return;
-        }
-
-        try {
-            DB::table('user_activity_logs')->insert([
-                'user_id' => $userId,
-                'action' => $action,
-                'metadata' => json_encode($metadata),
-                'created_at' => now(),
-            ]);
-        } catch (\Throwable $e) {
-            Log::warning('Unable to write probate activity log', [
-                'action' => $action,
-                'user_id' => $userId,
-                'error' => $e->getMessage(),
-            ]);
-        }
+        $this->activityLogService->log($userId, $action, $metadata);
     }
 
     private function validatedPayloadWithDocument(ProbateCaseRequest $request, ?ProbateCase $probateCase = null): array
