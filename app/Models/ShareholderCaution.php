@@ -38,6 +38,7 @@ class ShareholderCaution extends Model
     protected $appends = [
         'applied_by_name',
         'removed_by_name',
+        'removed_at_formatted' 
     ];
 
     // ── Relationships ──────────────────────────────────────────────────────────
@@ -135,4 +136,13 @@ class ShareholderCaution extends Model
     {
         return $this->scope === 'company';
     }
+
+    /**
+ * Example: Thu, 21 Dec 2000 04:01 PM
+ */
+public function getRemovedAtFormattedAttribute(): ?string
+{
+    return $this->removed_at?->format('D, d M Y h:i A');
+}
+    
 }
