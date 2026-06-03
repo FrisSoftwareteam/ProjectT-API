@@ -18,7 +18,13 @@ class ShareClassController extends Controller
     public function index(Request $request): JsonResponse
     {
         try {
-            $query = ShareClass::with('register.company');
+            $query = ShareClass::with('register.company')
+                ->withCount([
+                    'sharePositions as number_of_holders' => function ($q) {
+                        $q->where('quantity', '>', 0)
+                          ->distinct('sra_id');
+                    }
+                ]);
 
             // Filter by register
             if ($request->has('register_id')) {
@@ -76,7 +82,7 @@ class ShareClassController extends Controller
             $validated = $request->validate([
                 'register_id'          => 'required|exists:registers,id',
                 'class_code'           => 'required|string|max:32',
-                'name'                 => 'nullable|string|max:100',   // ← ADDED
+                'name'                 => 'nullable|string|max:100',
                 'currency'             => 'nullable|string|size:3',
                 'par_value'            => 'nullable|numeric|min:0|max:999999999999.999999',
                 'description'          => 'nullable|string|max:255',
@@ -108,7 +114,7 @@ class ShareClassController extends Controller
                 'share_class_id'       => $shareClass->id,
                 'register_id'          => $shareClass->register_id,
                 'class_code'           => $shareClass->class_code,
-                'name'                 => $shareClass->name,           // ← ADDED
+                'name'                 => $shareClass->name,
                 'withholding_tax_rate' => $shareClass->withholding_tax_rate,
                 'created_by'           => $request->user()->id
             ]);
@@ -141,7 +147,13 @@ class ShareClassController extends Controller
     public function show(Request $request, $id): JsonResponse
     {
         try {
-            $query = ShareClass::with('register.company');
+            $query = ShareClass::with('register.company')
+                ->withCount([
+                    'sharePositions as number_of_holders' => function ($q) {
+                        $q->where('quantity', '>', 0)
+                          ->distinct('sra_id');
+                    }
+                ]);
 
             // Include soft-deleted records if requested
             if ($request->boolean('include_deleted')) {
@@ -181,7 +193,7 @@ class ShareClassController extends Controller
 
             $validated = $request->validate([
                 'class_code'           => 'required|string|max:32',
-                'name'                 => 'nullable|string|max:100',   // ← ADDED
+                'name'                 => 'nullable|string|max:100',
                 'currency'             => 'nullable|string|size:3',
                 'par_value'            => 'nullable|numeric|min:0|max:999999999999.999999',
                 'description'          => 'nullable|string|max:255',
@@ -207,7 +219,7 @@ class ShareClassController extends Controller
             Log::info('Share class updated', [
                 'share_class_id'       => $shareClass->id,
                 'register_id'          => $shareClass->register_id,
-                'name'                 => $shareClass->name,           // ← ADDED
+                'name'                 => $shareClass->name,
                 'withholding_tax_rate' => $shareClass->withholding_tax_rate,
                 'updated_by'           => $request->user()->id
             ]);
@@ -246,15 +258,13 @@ class ShareClassController extends Controller
     {
         try {
             $shareClass = ShareClass::findOrFail($id);
-            if ($shareClass->is_caution_class) {                         
-                return response()->json([                                 
-                    'success' => false,                                    
-                    'message' => 'The system caution share class cannot be deleted.', 
-                ], 422);                                                  
-            }                                                          
+            if ($shareClass->is_caution_class) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'The system caution share class cannot be deleted.',
+                ], 422);
+            }
 
-            // For now, we'll allow deletion since we haven't built the related features yet
-            // When you create SharePosition and ShareTransaction models, uncomment the check below:
             
             // if ($shareClass->sharePositions()->exists() || $shareClass->shareTransactions()->exists()) {
             //     return response()->json([
@@ -323,7 +333,7 @@ class ShareClassController extends Controller
                     'share_class' => [
                         'id'                   => $shareClass->id,
                         'class_code'           => $shareClass->class_code,
-                        'name'                 => $shareClass->name,   // ← ADDED
+                        'name'                 => $shareClass->name,
                         'withholding_tax_rate' => $shareClass->withholding_tax_rate,
                         'currency'             => $shareClass->currency,
                     ],
