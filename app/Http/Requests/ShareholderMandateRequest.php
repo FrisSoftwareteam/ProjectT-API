@@ -25,13 +25,13 @@ class ShareholderMandateRequest extends FormRequest
 
         return [
             'shareholder_id' => $isUpdate ? 'sometimes|exists:shareholders,id' : 'required|exists:shareholders,id',
-            'bank_name' => 'required|string|max:150',
-            'account_name' => 'required|string|max:255',
+            'bank_name'      => 'required|string|max:150',
+            'account_name'   => 'required|string|max:255',
             'account_number' => 'required|string|max:20',
-            'bvn' => 'nullable|string|max:20',
-            'status' => 'required|in:pending,verified,active,rejected,revoked',
-            'verified_by' => 'nullable|exists:admin_users,id',
-            'verified_at' => 'nullable|date',
+            'bvn'            => 'nullable|string|max:20',
+            'status'         => 'required|in:pending,verified,active,rejected,revoked',
+            'verified_by'    => 'nullable|exists:admin_users,id',
+            'verified_at'    => 'nullable|date',
         ];
     }
 
@@ -39,7 +39,22 @@ class ShareholderMandateRequest extends FormRequest
     {
         return [
             'shareholder_id.required' => 'The shareholder ID is required.',
-            'shareholder_id.exists' => 'The shareholder ID is invalid.',
+            'shareholder_id.exists'   => 'The selected shareholder does not exist.',
+            'bank_name.required' => 'Bank name is required.',
+            'bank_name.string'   => 'Bank name must be a valid text value.',
+            'bank_name.max'      => 'Bank name must not exceed 150 characters.',
+            'account_name.required' => 'Account name is required.',
+            'account_name.string'   => 'Account name must be a valid text value.',
+            'account_name.max'      => 'Account name must not exceed 255 characters.',
+            'account_number.required' => 'Account number is required.',
+            'account_number.string'   => 'Account number must be a valid text value.',
+            'account_number.max'      => 'Account number must not exceed 20 characters.',
+            'bvn.string' => 'BVN must be a valid text value.',
+            'bvn.max'    => 'BVN must not exceed 20 characters.',
+            'status.required' => 'Status is required.',
+            'status.in'       => 'Status must be one of: pending, verified, active, rejected, or revoked.',
+            'verified_by.exists' => 'The selected verifying user does not exist.',
+            'verified_at.date' => 'Verified date must be a valid date.',
         ];
     }
 }

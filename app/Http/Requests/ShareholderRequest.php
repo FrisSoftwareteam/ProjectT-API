@@ -56,4 +56,43 @@ class ShareholderRequest extends FormRequest
             'status' => $required . '|in:active,dormant,deceased,closed',
         ];
     }
+    public function messages(): array
+    {
+        return [
+            'holder_type.required' => 'Holder type is required.',
+            'holder_type.in'       => 'Holder type must be either "individual" or "corporate".',
+            'first_name.required' => 'First name is required.',
+            'first_name.string'   => 'First name must be a valid text value.',
+            'first_name.max'      => 'First name must not exceed 255 characters.',
+            'last_name.string' => 'Last name must be a valid text value.',
+            'last_name.max'    => 'Last name must not exceed 100 characters.',
+            'middle_name.string' => 'Middle name must be a valid text value.',
+            'middle_name.max'    => 'Middle name must not exceed 100 characters.',
+            'email.required' => 'Email address is required.',
+            'email.email'    => 'Please enter a valid email address.',
+            'email.unique'   => 'This email address is already registered to another shareholder.',
+            'phone.required' => 'Phone number is required.',
+            'phone.string'   => 'Phone number must be a valid text value.',
+            'phone.max'      => 'Phone number must not exceed 32 characters.',
+            'phone.unique'   => 'This phone number is already registered to another shareholder.',
+            'date_of_birth.date' => 'Date of birth must be a valid date.',
+            'sex.in' => 'Gender must be one of: male, female, or other.',
+            'rc_number.string' => 'RC number must be a valid text value.',
+            'rc_number.max'    => 'RC number must not exceed 50 characters.',
+            'nin.string' => 'NIN must be a valid text value.',
+            'nin.max'    => 'NIN must not exceed 20 characters.',
+            'bvn.string' => 'BVN must be a valid text value.',
+            'bvn.max'    => 'BVN must not exceed 20 characters.',
+            'tax_id.string' => 'Tax ID must be a valid text value.',
+            'tax_id.max'    => 'Tax ID must not exceed 50 characters.',
+            'next_of_kin_name.string'         => 'Next of kin name must be a valid text value.',
+            'next_of_kin_name.max'            => 'Next of kin name must not exceed 255 characters.',
+            'next_of_kin_phone.string'        => 'Next of kin phone must be a valid text value.',
+            'next_of_kin_phone.max'           => 'Next of kin phone must not exceed 32 characters.',
+            'next_of_kin_relationship.string' => 'Next of kin relationship must be a valid text value.',
+            'next_of_kin_relationship.max'    => 'Next of kin relationship must not exceed 100 characters.',
+            'status.required' => 'Status is required.',
+            'status.in'       => 'Status must be one of: active, dormant, deceased, or closed.',
+        ];
+    }
 }

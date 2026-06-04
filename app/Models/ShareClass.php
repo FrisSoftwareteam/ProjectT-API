@@ -35,23 +35,32 @@ class ShareClass extends Model
         'formatted_tax_rate',
     ];
 
-    // ── Relationships ─────────────────────────────────────────────────────────
-
-    /**
-     * Get the register that owns the share class.
-     */
     public function register()
     {
         return $this->belongsTo(Register::class);
     }
 
-    /**
-     * Get the caution records linked to this share class.
-     * Only relevant when is_caution_class = true.
-     */
     public function cautions()
     {
         return $this->hasMany(ShareholderCaution::class, 'caution_share_class_id');
+    }
+
+
+    public function sharePositions()
+    {
+        return $this->hasMany(SharePosition::class);
+    }
+
+    public function holders()
+    {
+        return $this->hasManyThrough(
+            ShareholderRegisterAccount::class,
+            SharePosition::class,
+            'share_class_id',
+            'id',             
+            'id',           
+            'sra_id'         
+        );
     }
 
     // ── Scopes ────────────────────────────────────────────────────────────────
