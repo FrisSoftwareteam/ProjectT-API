@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\ShareholderMergeController;
 use App\Http\Controllers\Api\IpoOfferController;
 use App\Http\Controllers\Api\BankVerificationController;
 use App\Http\Controllers\Api\CautionController;
+use App\Http\Controllers\Api\Admin\NibssController;
 
 /*
 |--------------------------------------------------------------------------
@@ -428,5 +429,25 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         // Dividend payment actions (standalone)
         Route::post('/dividend-payments/{payment_id}/reissue', [DividendPaymentController::class, 'reissue'])
             ->middleware('role:Super Admin|Admin');
+
+        // NIBSS PAY Routes
+        Route::prefix('nibss')->group(function () {
+            Route::get('/accounts', [NibssController::class, 'getAccounts'])
+                ->middleware('permission:nibss_pay.edit');
+
+            Route::get('/bank-list', [NibssController::class, 'getBankList'])
+                ->middleware('permission:nibss_pay.edit');
+
+
+            Route::post('/schedules/create', [NibssController::class, 'createSchedule'])
+                ->middleware('permission:nibss_pay.edit');
+
+            Route::get('/schedules', [NibssController::class, 'getSchedules'])
+                ->middleware('permission:nibss_pay.edit');
+
+            Route::post('/accounts', [NibssController::class, 'postAccounts'])
+                ->middleware('permission:nibss_pay.edit');
+
+        });
     });
 });
