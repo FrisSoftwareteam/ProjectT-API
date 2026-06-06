@@ -51,6 +51,13 @@ class RolesAndPermissionsSeeder extends Seeder
             'shareholder_mandates.delete',
             'shareholder_mandates.export',
 
+            // Shareholder Identity Management
+            'shareholder_identities.view',
+            'shareholder_identities.create',
+            'shareholder_identities.edit',
+            'shareholder_identities.delete',
+            'shareholder_identities.export',
+
             // Certificate Management
             'certificates.view',
             'certificates.create',
@@ -238,6 +245,7 @@ class RolesAndPermissionsSeeder extends Seeder
         $role->syncPermissions([
             'users.view', 'users.create', 'users.edit', 'users.delete', 'users.activate', 'users.deactivate',
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
+            'shareholder_identities.view', 'shareholder_identities.create', 'shareholder_identities.edit', 'shareholder_identities.export',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
             'certificates.view', 'certificates.create', 'certificates.edit', 'certificates.issue',
             'warrants.view', 'warrants.create', 'warrants.edit',
@@ -257,6 +265,7 @@ class RolesAndPermissionsSeeder extends Seeder
         ]);
         $role->syncPermissions([
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
+            'shareholder_identities.view', 'shareholder_identities.create', 'shareholder_identities.edit', 'shareholder_identities.export',
             'shares.view', 'shares.create', 'shares.edit', 'shares.transfer', 'shares.export',
             'reports.view', 'reports.generate',
             'notifications.view', 'notifications.send',
