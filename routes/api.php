@@ -303,7 +303,11 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
             // =================================================================
             // DIVIDEND DECLARATION MANAGEMENT (Nested under registers)
             // =================================================================
-            
+
+            // List Dividend Declarations for a specific register
+            Route::get('/{register_id}/dividend-declarations', [DividendEntitlementController::class, 'indexForRegister'])
+                ->middleware('permission:users.view');
+
             // Create Dividend Declaration (Draft) for a specific register
             Route::post('/{register_id}/dividend-declarations', [DividendEntitlementController::class, 'store'])
                 ->middleware('role:Super Admin|Admin');

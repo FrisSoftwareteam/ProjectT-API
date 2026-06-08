@@ -30,6 +30,77 @@ class DividendEntitlementController extends Controller
     }
 
     /**
+     * List dividend declarations created for a specific register.
+     * GET /admin/registers/{register_id}/dividend-declarations
+     */
+    public function indexForRegister(Request $request, int $register_id): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'status' => 'nullable|string|in:DRAFT,SUBMITTED,VERIFIED,QUERY_RAISED,APPROVED,LIVE,REJECTED,ARCHIVED',
+                'initiator' => 'nullable|string|in:operations,mutual_funds',
+                'search' => 'nullable|string|max:255',
+                'per_page' => 'nullable|integer|min:1|max:100',
+            ]);
+
+            $register = Register::find($register_id);
+            if (! $register) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Register not found',
+                ], 404);
+            }
+
+            $query = DividendDeclaration::query()
+                ->with(['shareClasses', 'creator'])
+                ->byRegister($register_id)
+                ->latest();
+
+            if (! empty($validated['status'])) {
+                $query->where('status', $validated['status']);
+            }
+
+            if (! empty($validated['initiator'])) {
+                $query->where('initiator', $validated['initiator']);
+            }
+
+            if (! empty($validated['search'])) {
+                $search = $validated['search'];
+                $query->where(function ($builder) use ($search) {
+                    $builder->where('dividend_declaration_no', 'like', "%{$search}%")
+                        ->orWhere('period_label', 'like', "%{$search}%")
+                        ->orWhere('description', 'like', "%{$search}%");
+                });
+            }
+
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'register' => $register,
+                    'declarations' => $query->paginate($validated['per_page'] ?? 15),
+                ],
+                'message' => 'Register dividend declarations retrieved successfully',
+            ]);
+        } catch (\Illuminate\Validation\ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error retrieving register dividend declarations: '.$e->getMessage(), [
+                'register_id' => $register_id,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error retrieving register dividend declarations',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * 1.1 Create Dividend Declaration (Draft)
      * POST /admin/registers/{register_id}/dividend-declarations
      */

@@ -116,6 +116,7 @@ $queryExamples = [
     'CompanyController@index' => ['status' => 'active', 'search' => 'Example', 'include_registers' => 'true', 'per_page' => '15'],
     'RegisterController@index' => ['company_id' => '{{company_id}}', 'status' => 'active', 'include_share_classes' => 'true', 'per_page' => '15'],
     'ShareClassController@index' => ['register_id' => '{{register_id}}', 'currency' => 'NGN', 'per_page' => '15'],
+    'DividendEntitlementController@indexForRegister' => ['status' => 'DRAFT', 'initiator' => 'operations', 'search' => 'FY 2026', 'per_page' => '15'],
     'DividendValidationController@validatePeriod' => ['period_label' => 'FY 2026', 'exclude_declaration_id' => '{{declaration_id}}'],
     'DividendPaymentController@index' => ['status' => 'failed', 'per_page' => '50'],
 ];

@@ -1647,6 +1647,55 @@
                     "response": []
                 },
                 {
+                    "name": "GET - Dividend Entitlement - Index For Register",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/admin/registers/{{register_id}}/dividend-declarations?status=DRAFT&initiator=operations&search=FY 2026&per_page=15",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "admin",
+                                "registers",
+                                "{{register_id}}",
+                                "dividend-declarations"
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "DRAFT",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "initiator",
+                                    "value": "operations",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "FY 2026",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "15",
+                                    "disabled": false
+                                }
+                            ]
+                        },
+                        "description": "Backend action: `DividendEntitlementController@indexForRegister`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:users.view"
+                    },
+                    "response": []
+                },
+                {
                     "name": "POST - Dividend Entitlement - Store",
                     "request": {
                         "method": "POST",
