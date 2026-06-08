@@ -25,6 +25,7 @@ use App\Http\Controllers\Api\IpoOfferController;
 use App\Http\Controllers\Api\BankVerificationController;
 use App\Http\Controllers\Api\CautionController;
 use App\Http\Controllers\Api\Admin\NibssController;
+use App\Http\Controllers\Api\NotificationController;
 
 /*
 |--------------------------------------------------------------------------
@@ -50,6 +51,15 @@ Route::prefix('auth')->group(function () {
 Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     // User info
     Route::get('/user', [AuthController::class, 'me']);
+
+    // Personal in-app notifications
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/read-all', [NotificationController::class, 'markAllAsRead']);
+        Route::post('/{notificationId}/read', [NotificationController::class, 'markAsRead']);
+        Route::delete('/{notificationId}', [NotificationController::class, 'destroy']);
+    });
     
     // Auth management
     Route::post('/auth/logout', [AuthController::class, 'logout']);

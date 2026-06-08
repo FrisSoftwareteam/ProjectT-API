@@ -14,6 +14,7 @@ use App\Models\DividendEntitlement;
 use App\Models\DividendPayment;
 use App\Models\DividendApprovalAction;
 use App\Models\DividendApprovalDelegation;
+use App\Services\DividendNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -23,6 +24,11 @@ use Carbon\Carbon;
 
 class DividendEntitlementController extends Controller
 {
+    public function __construct(
+        private readonly DividendNotificationService $dividendNotificationService
+    ) {
+    }
+
     /**
      * 1.1 Create Dividend Declaration (Draft)
      * POST /admin/registers/{register_id}/dividend-declarations
@@ -556,6 +562,8 @@ class DividendEntitlementController extends Controller
 
                 DB::commit();
 
+                $this->dividendNotificationService->submitted($declaration->fresh(), $request->user()->id);
+
                 $declaration->load(['shareClasses', 'register.company', 'creator', 'submitter', 'workflowEvents.actor']);
 
                 return response()->json([
@@ -699,6 +707,8 @@ class DividendEntitlementController extends Controller
 
                 DB::commit();
 
+                $this->dividendNotificationService->approvalRecorded($declaration->fresh(), $request->user()->id);
+
                 $declaration->load(['shareClasses', 'register.company', 'approver', 'workflowEvents.actor', 'approvalActions.actor']);
 
                 return response()->json([
@@ -800,6 +810,12 @@ class DividendEntitlementController extends Controller
 
                 DB::commit();
 
+                $this->dividendNotificationService->rejected(
+                    $declaration->fresh(),
+                    $request->user()->id,
+                    $validated['reason']
+                );
+
                 $declaration->load(['shareClasses', 'register.company', 'rejecter', 'workflowEvents.actor']);
 
                 return response()->json([
@@ -888,6 +904,12 @@ class DividendEntitlementController extends Controller
                 ]);
             });
 
+            $this->dividendNotificationService->queryRaised(
+                $declaration->fresh(),
+                $request->user()->id,
+                $validated['comment']
+            );
+
             $declaration->refresh()->load(['approvalActions.actor', 'workflowEvents.actor']);
 
             return response()->json([
@@ -945,6 +967,8 @@ class DividendEntitlementController extends Controller
                 'actor_id' => $request->user()->id,
                 'note' => $validated['comment'],
             ]);
+
+            $this->dividendNotificationService->queryResponded($declaration->fresh(), $request->user()->id);
 
             return response()->json([
                 'success' => true,
@@ -1155,6 +1179,8 @@ class DividendEntitlementController extends Controller
                 ]);
 
                 DB::commit();
+
+                $this->dividendNotificationService->wentLive($declaration->fresh(), $request->user()->id);
 
                 return response()->json([
                     'success' => true,

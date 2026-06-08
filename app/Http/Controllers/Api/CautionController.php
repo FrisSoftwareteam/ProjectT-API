@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\ShareholderCaution;
 use App\Models\ShareholderRegisterAccount;
 use App\Services\CautionService;
+use App\Services\AdminNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
@@ -27,6 +28,7 @@ class CautionController extends Controller
 {
     public function __construct(
         private readonly CautionService $cautionService,
+        private readonly AdminNotificationService $adminNotificationService,
     ) {}
 
     /**
@@ -139,6 +141,18 @@ class CautionController extends Controller
                 ], 422);
             }
 
+            $this->adminNotificationService->sendToRoles(
+                ['Compliance', 'Internal Audit', 'Super Admin'],
+                'CAUTION_APPLIED',
+                'Shareholder caution applied',
+                "A {$result['caution']->caution_type} caution was applied to register account #{$sra->id}.",
+                'shareholder_caution',
+                $result['caution']->id,
+                "Caution #{$result['caution']->id}",
+                "/sras/{$sra->id}/cautions/{$result['caution']->id}",
+                $request->user()->id
+            );
+
             return response()->json([
                 'success' => true,
                 'message' => $result['message'],
@@ -223,6 +237,18 @@ class CautionController extends Controller
                     'message' => $result['message'],
                 ], 422);
             }
+
+            $this->adminNotificationService->sendToRoles(
+                ['Compliance', 'Internal Audit', 'Super Admin'],
+                'CAUTION_REMOVED',
+                'Shareholder caution removed',
+                "Caution #{$caution->id} was removed from register account #{$sraId}.",
+                'shareholder_caution',
+                $caution->id,
+                "Caution #{$caution->id}",
+                "/sras/{$sraId}/cautions/{$caution->id}",
+                $request->user()->id
+            );
 
             return response()->json([
                 'success' => true,

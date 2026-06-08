@@ -12,6 +12,10 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['api', 'auth:sanctum']],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*', headers: SymfonyRequest::HEADER_X_FORWARDED_FOR
             | SymfonyRequest::HEADER_X_FORWARDED_HOST
@@ -89,7 +93,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Handle general exceptions for API
         $exceptions->render(function (\Throwable $e, $request) {
-            if ($request->is('api/*') && !config('app.debug')) {
+            if ($request->is('api/*') && ! config('app.debug')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'An error occurred processing your request.',

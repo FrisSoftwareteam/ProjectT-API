@@ -17,6 +17,7 @@ use App\Models\ShareTransferEvent;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Services\ActivityLogService;
+use App\Services\AdminNotificationService;
 use App\Services\CapitalValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
@@ -28,7 +29,8 @@ class ProbateCaseController extends Controller
 {
     public function __construct(
         private readonly CapitalValidationService $capitalValidationService,
-        private readonly ActivityLogService $activityLogService
+        private readonly ActivityLogService $activityLogService,
+        private readonly AdminNotificationService $adminNotificationService
     ) {
     }
 
@@ -60,6 +62,14 @@ class ProbateCaseController extends Controller
 
             return $case;
         });
+
+        $this->notifyProbate(
+            $case,
+            $request->user()?->id,
+            'PROBATE_CASE_CREATED',
+            'Probate case created',
+            "Probate case #{$case->id} was created with status {$case->status}."
+        );
 
         return response()->json($case->fresh($this->caseRelations()), 201);
     }
@@ -144,6 +154,7 @@ class ProbateCaseController extends Controller
 
     public function update(ProbateCaseRequest $request, ProbateCase $probateCase)
     {
+        $previousStatus = $probateCase->status;
         $payload = $this->validatedPayloadWithDocument($request, $probateCase);
 
         DB::transaction(function () use ($payload, $probateCase, $request) {
@@ -155,6 +166,16 @@ class ProbateCaseController extends Controller
                 'case_type' => $probateCase->fresh()->case_type,
             ]);
         });
+
+        if ($previousStatus !== $probateCase->fresh()->status) {
+            $this->notifyProbate(
+                $probateCase->fresh(),
+                $request->user()?->id,
+                'PROBATE_STATUS_CHANGED',
+                'Probate case status changed',
+                "Probate case #{$probateCase->id} changed from {$previousStatus} to {$probateCase->fresh()->status}."
+            );
+        }
 
         return response()->json($probateCase->fresh($this->caseRelations()));
     }
@@ -411,6 +432,14 @@ class ProbateCaseController extends Controller
             'authorized_as' => $authorization['type'],
         ]);
 
+        $this->notifyProbate(
+            $probateCase,
+            $request->user()?->id,
+            'ESTATE_DISTRIBUTION_COMPLETED',
+            'Estate distribution completed',
+            "Estate distribution {$event->tx_ref} completed for probate case #{$probateCase->id}."
+        );
+
         return response()->json([
             'message' => 'Estate distribution completed',
             'data' => $event,
@@ -549,6 +578,26 @@ class ProbateCaseController extends Controller
     private function logActivity(?int $userId, string $action, array $metadata = []): void
     {
         $this->activityLogService->log($userId, $action, $metadata);
+    }
+
+    private function notifyProbate(
+        ProbateCase $probateCase,
+        ?int $actorId,
+        string $event,
+        string $title,
+        string $message
+    ): void {
+        $this->adminNotificationService->sendToRoles(
+            ['Compliance', 'Operations Approval Role', 'Internal Audit', 'Super Admin'],
+            $event,
+            $title,
+            $message,
+            'probate_case',
+            $probateCase->id,
+            "Probate case #{$probateCase->id}",
+            "/probates/{$probateCase->id}",
+            $actorId
+        );
     }
 
     private function validatedPayloadWithDocument(ProbateCaseRequest $request, ?ProbateCase $probateCase = null): array
