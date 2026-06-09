@@ -182,6 +182,14 @@ class RolesAndPermissionsSeeder extends Seeder
             'companies.edit',
             'companies.delete',
             'companies.restore',
+
+            // NIBSS PAY Plus integration permissions
+            'nibss_pay.view',
+            'nibss_pay.create',
+            'nibss_pay.edit',
+            'nibss_pay.delete',
+            'nibss_pay.restore',
+
         ];
 
         foreach ($permissions as $permission) {

@@ -52,4 +52,12 @@ return [
         'base_url'   => env('PAYSTACK_BASE_URL', 'https://api.paystack.co'),
     ],
 
+    'nibss_pay' => [
+        'auth_url'         => env('NIBSS_PAY_AUTH_URL'),
+        'client_id'        => env('NIBSS_PAY_CLIENT_ID'),
+        'client_secret'    => env('NIBSS_PAY_CLIENT_SECRET'),
+        'api_url'          => env('NIBSS_PAY_API_URL'),
+        'subscription_key' => env('NIBSS_PAY_SUBSCRIPTION_KEY'),
+    ],
+
 ];
