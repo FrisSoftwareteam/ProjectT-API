@@ -89,16 +89,20 @@ class ShareClassController extends Controller
                 'withholding_tax_rate' => 'nullable|numeric|min:0|max:100',
             ]);
 
-            // Check for unique combination of register_id and class_code
-            $exists = ShareClass::where('register_id', $validated['register_id'])
-                                ->where('class_code', $validated['class_code'])
-                                ->exists();
+            // Check for unique combination of register_id and class_code (including soft-deleted)
+            $existing = ShareClass::withTrashed()
+                                  ->where('register_id', $validated['register_id'])
+                                  ->where('class_code', $validated['class_code'])
+                                  ->first();
 
-            if ($exists) {
+            if ($existing) {
+                $message = $existing->trashed()
+                    ? 'This class code was previously used for this register and has been archived. Please use a different code or contact support to restore the existing one.'
+                    : 'This class code is already in use for this register.';
                 return response()->json([
                     'success' => false,
                     'message' => 'Class code already exists for this register',
-                    'errors' => ['class_code' => ['This class code is already in use for this register']]
+                    'errors'  => ['class_code' => [$message]],
                 ], 422);
             }
 
