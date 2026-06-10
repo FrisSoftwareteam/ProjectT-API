@@ -174,7 +174,13 @@ class CompanyController extends Controller
                         $q->orderBy('name');
                     },
                     'registers.shareClasses' => function ($q) {
-                        $q->orderBy('class_code');
+                        $q->orderBy('class_code')
+                          ->withCount([
+                              'sharePositions as number_of_holders' => function ($sq) {
+                                  $sq->where('quantity', '>', 0)
+                                     ->distinct('sra_id');
+                              },
+                          ]);
                     },
                 ])
                 ->findOrFail($id);
