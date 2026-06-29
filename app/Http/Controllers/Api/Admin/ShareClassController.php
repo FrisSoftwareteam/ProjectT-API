@@ -204,16 +204,22 @@ class ShareClassController extends Controller
                 'withholding_tax_rate' => 'nullable|numeric|min:0|max:100',
             ]);
 
-            $exists = ShareClass::where('register_id', $shareClass->register_id)
-                                ->where('class_code', $validated['class_code'])
-                                ->where('id', '!=', $shareClass->id)
-                                ->exists();
+    
+            $duplicate = ShareClass::withTrashed()
+                                   ->where('register_id', $shareClass->register_id)
+                                   ->where('class_code', $validated['class_code'])
+                                   ->where('id', '!=', $shareClass->id)
+                                   ->first();
 
-            if ($exists) {
+            if ($duplicate) {
+                $message = $duplicate->trashed()
+                    ? 'This class code was previously used for this register and has been archived. Please use a different code or contact support to restore the existing one.'
+                    : 'This class code is already in use for this register.';
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Class code already exists for this register',
-                    'errors'  => ['class_code' => ['This class code is already in use for this register']]
+                    'errors'  => ['class_code' => [$message]],
                 ], 422);
             }
 
@@ -223,6 +229,7 @@ class ShareClassController extends Controller
             Log::info('Share class updated', [
                 'share_class_id'       => $shareClass->id,
                 'register_id'          => $shareClass->register_id,
+                'class_code'           => $shareClass->class_code,
                 'name'                 => $shareClass->name,
                 'withholding_tax_rate' => $shareClass->withholding_tax_rate,
                 'updated_by'           => $request->user()->id
@@ -269,7 +276,6 @@ class ShareClassController extends Controller
                 ], 422);
             }
 
-            
             // if ($shareClass->sharePositions()->exists() || $shareClass->shareTransactions()->exists()) {
             //     return response()->json([
             //         'success' => false,
