@@ -89,11 +89,12 @@ class CautionController extends Controller
      *
      * Body:
      * {
-     *   "scope":              "global" | "company",
-     *   "caution_type":       "regulatory" | "legal" | "operational",
-     *   "instruction_source": "sec" | "court" | "exchange" | "bank" | "internal",
-     *   "reason":             "Fraud investigation pending outcome",
-     *   "effective_date":     "2026-04-01"
+     *   "scope":                      "global" | "company",
+     *   "caution_type":               "regulatory" | "legal" | "operational",
+     *   "instruction_source":         "sec" | "court" | "exchange" | "bank" | "internal" | "other",
+     *   "custom_instruction_source":  "required when instruction_source is 'other'",
+     *   "reason":                     "Fraud investigation pending outcome",
+     *   "effective_date":             "2026-04-01"
      * }
      */
     public function store(Request $request, int $sraId): JsonResponse
@@ -113,7 +114,13 @@ class CautionController extends Controller
                 ],
                 'instruction_source' => [
                     'required',
-                    Rule::in(['sec', 'court', 'exchange', 'bank', 'internal']),
+                    Rule::in(['sec', 'court', 'exchange', 'bank', 'internal', 'other']),
+                ],
+                'custom_instruction_source' => [
+                    'required_if:instruction_source,other',
+                    'nullable',
+                    'string',
+                    'max:255',
                 ],
                 'reason'         => 'required|string|max:500',
                 'supporting_document' => 'nullable|file|max:10240',

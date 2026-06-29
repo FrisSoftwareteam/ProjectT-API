@@ -15,6 +15,7 @@ class ShareholderCaution extends Model
         'company_id',
         'caution_type',
         'instruction_source',
+        'custom_instruction_source',
         'reason',
         'effective_date',
         'removed_at',
@@ -31,17 +32,14 @@ class ShareholderCaution extends Model
         'updated_at'     => 'datetime',
     ];
 
-    /**
-     * Append resolved display names to every serialized response.
-     * Resolves PT-91: user ID was exposed instead of username.
-     */
+   
     protected $appends = [
         'applied_by_name',
         'removed_by_name',
-        'removed_at_formatted' 
+        'removed_at_formatted',
+        'instruction_source_display',
     ];
 
-    // ── Relationships ──────────────────────────────────────────────────────────
 
     public function shareholder()
     {
@@ -78,27 +76,27 @@ class ShareholderCaution extends Model
         return $this->hasMany(ShareholderCautionLog::class, 'caution_id');
     }
 
-    // ── Accessors ──────────────────────────────────────────────────────────────
 
-    /**
-     * Display name of the admin who applied this caution.
-     * Resolves PT-91: returns full_name instead of raw created_by integer.
-     */
     public function getAppliedByNameAttribute(): ?string
     {
         return $this->createdBy?->full_name;
     }
 
-    /**
-     * Display name of the admin who removed this caution (null if still active).
-     * Resolves PT-91: returns full_name instead of raw removed_by integer.
-     */
+
     public function getRemovedByNameAttribute(): ?string
     {
         return $this->removedBy?->full_name;
     }
 
-    // ── Scopes ─────────────────────────────────────────────────────────────────
+
+    public function getInstructionSourceDisplayAttribute(): ?string
+    {
+        if ($this->instruction_source === 'other') {
+            return $this->custom_instruction_source;
+        }
+
+        return $this->instruction_source;
+    }
 
     public function scopeActive(Builder $query): Builder
     {
@@ -120,8 +118,6 @@ class ShareholderCaution extends Model
         return $query->where('company_id', $companyId);
     }
 
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
     public function isActive(): bool
     {
         return is_null($this->removed_at);
@@ -137,12 +133,8 @@ class ShareholderCaution extends Model
         return $this->scope === 'company';
     }
 
-    /**
- * Example: Thu, 21 Dec 2000 04:01 PM
- */
-public function getRemovedAtFormattedAttribute(): ?string
-{
-    return $this->removed_at?->format('D, d M Y h:i A');
-}
-    
+    public function getRemovedAtFormattedAttribute(): ?string
+    {
+        return $this->removed_at?->format('D, d M Y h:i A');
+    }
 }
