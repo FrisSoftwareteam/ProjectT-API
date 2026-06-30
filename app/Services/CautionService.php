@@ -36,31 +36,33 @@ class CautionService
                 $cautionShareClass = $this->ensureCautionShareClass($sra->register_id);
 
                 $caution = ShareholderCaution::create([
-                    'shareholder_id'       => $sra->shareholder_id,
-                    'sra_id'               => $sra->id,
-                    'caution_share_class_id' => $cautionShareClass->id,
-                    'scope'                => $data['scope'],
-                    'company_id'           => $data['scope'] === 'global' ? null : $sra->register->company_id,
-                    'caution_type'         => $data['caution_type'],
-                    'instruction_source'   => $data['instruction_source'],
-                    'reason'               => $data['reason'],
-                    'effective_date'       => $data['effective_date'],
-                    'supporting_document_path' => $data['supporting_document_path'] ?? null,
-                    'created_by'           => $actorId,
+                    'shareholder_id'            => $sra->shareholder_id,
+                    'sra_id'                    => $sra->id,
+                    'caution_share_class_id'    => $cautionShareClass->id,
+                    'scope'                     => $data['scope'],
+                    'company_id'                => $data['scope'] === 'global' ? null : $sra->register->company_id,
+                    'caution_type'              => $data['caution_type'],
+                    'instruction_source'        => $data['instruction_source'],
+                    'custom_instruction_source' => $data['custom_instruction_source'] ?? null,
+                    'reason'                    => $data['reason'],
+                    'effective_date'            => $data['effective_date'],
+                    'supporting_document_path'  => $data['supporting_document_path'] ?? null,
+                    'created_by'                => $actorId,
                 ]);
 
                 ShareholderCautionLog::create([
-                    'caution_id'             => $caution->id,
-                    'shareholder_id'         => $sra->shareholder_id,
-                    'sra_id'                 => $sra->id,
-                    'action'                 => 'applied',
-                    'caution_type'           => $caution->caution_type,
-                    'instruction_source'     => $caution->instruction_source,
-                    'reason'                 => $caution->reason,
-                    'scope'                  => $caution->scope,
-                    'company_id'             => $caution->company_id,
-                    'caution_share_class_id' => $cautionShareClass->id,
-                    'actor_id'               => $actorId,
+                    'caution_id'                => $caution->id,
+                    'shareholder_id'            => $sra->shareholder_id,
+                    'sra_id'                    => $sra->id,
+                    'action'                    => 'applied',
+                    'caution_type'              => $caution->caution_type,
+                    'instruction_source'        => $caution->instruction_source,
+                    'custom_instruction_source' => $caution->custom_instruction_source,
+                    'reason'                    => $caution->reason,
+                    'scope'                     => $caution->scope,
+                    'company_id'                => $caution->company_id,
+                    'caution_share_class_id'    => $cautionShareClass->id,
+                    'actor_id'                  => $actorId,
                 ]);
 
                 return $caution;
@@ -117,17 +119,18 @@ class CautionService
                 ]);
 
                 ShareholderCautionLog::create([
-                    'caution_id'             => $caution->id,
-                    'shareholder_id'         => $caution->shareholder_id,
-                    'sra_id'                 => $caution->sra_id,
-                    'action'                 => 'removed',
-                    'caution_type'           => $caution->caution_type,
-                    'instruction_source'     => $caution->instruction_source,
-                    'reason'                 => $removalReason,
-                    'scope'                  => $caution->scope,
-                    'company_id'             => $caution->company_id,
-                    'caution_share_class_id' => $caution->caution_share_class_id,
-                    'actor_id'               => $actorId,
+                    'caution_id'                => $caution->id,
+                    'shareholder_id'            => $caution->shareholder_id,
+                    'sra_id'                    => $caution->sra_id,
+                    'action'                    => 'removed',
+                    'caution_type'              => $caution->caution_type,
+                    'instruction_source'        => $caution->instruction_source,
+                    'custom_instruction_source' => $caution->custom_instruction_source,
+                    'reason'                    => $removalReason,
+                    'scope'                     => $caution->scope,
+                    'company_id'                => $caution->company_id,
+                    'caution_share_class_id'    => $caution->caution_share_class_id,
+                    'actor_id'                  => $actorId,
                 ]);
             });
 
@@ -176,13 +179,13 @@ class CautionService
         }
 
         $cautionClass = ShareClass::create([
-            'register_id'      => $registerId,
-            'class_code'       => self::CAUTION_CLASS_CODE,
-            'currency'         => 'NGN',
-            'par_value'        => 0,
-            'description'      => self::CAUTION_CLASS_DESCRIPTION,
+            'register_id'          => $registerId,
+            'class_code'           => self::CAUTION_CLASS_CODE,
+            'currency'             => 'NGN',
+            'par_value'            => 0,
+            'description'          => self::CAUTION_CLASS_DESCRIPTION,
             'withholding_tax_rate' => 0,
-            'is_caution_class' => true,
+            'is_caution_class'     => true,
         ]);
 
         Log::info('Caution share class created', [

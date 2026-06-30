@@ -21,6 +21,7 @@ class ShareholderCautionLog extends Model
         'action',
         'caution_type',
         'instruction_source',
+        'custom_instruction_source',
         'reason',
         'scope',
         'company_id',

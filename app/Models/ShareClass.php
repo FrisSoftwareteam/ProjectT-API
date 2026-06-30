@@ -45,21 +45,19 @@ class ShareClass extends Model
         return $this->hasMany(ShareholderCaution::class, 'caution_share_class_id');
     }
 
-
     public function sharePositions()
     {
         return $this->hasMany(SharePosition::class);
     }
-
     public function holders()
     {
         return $this->hasManyThrough(
             ShareholderRegisterAccount::class,
             SharePosition::class,
             'share_class_id',
-            'id',             
-            'id',           
-            'sra_id'         
+            'id',
+            'id',
+            'sra_id'
         );
     }
 
