@@ -34,6 +34,8 @@ They remain in the collection for completeness and are marked with warnings.
 
 ## Notes
 
-- CSCS imports and probate documents use multipart form-data and require selecting local files in Postman.
+- CSCS imports, shareholder bulk imports, and probate documents use multipart form-data and require selecting local files in Postman.
+- Shareholder bulk import uses `POST /api/shareholders/bulk` with a `file` field. A ready sample is available at `docs/postman/shareholder_bulk_import_sample.csv`; update `register_id` and `share_class_id` to match the target environment before uploading.
+- Required shareholder bulk import columns are `holder_type`, `first_name`, `email`, `phone`, `status`, `address_line1`, `register_id`, `share_class_id`, and `quantity`. Mandate columns are optional, but if any mandate field is provided then bank name, account name, and bank account number are required.
 - Empty `{}` bodies indicate actions with no defined request payload or external integrations whose detailed payload validation is not currently implemented.
 - Destructive requests are included but should only be run against appropriate test data.

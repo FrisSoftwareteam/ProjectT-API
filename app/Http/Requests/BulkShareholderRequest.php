@@ -14,7 +14,8 @@ class BulkShareholderRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'shareholders' => ['required', 'array', 'min:1'],
+            'file' => ['required_without:shareholders', 'file', 'mimes:csv,txt', 'max:10240'],
+            'shareholders' => ['required_without:file', 'array', 'min:1'],
             'shareholders.*.holder_type' => ['required', 'in:individual,corporate'],
             'shareholders.*.first_name' => ['required', 'string', 'max:255'],
             'shareholders.*.last_name' => ['sometimes', 'nullable', 'string', 'max:100'],

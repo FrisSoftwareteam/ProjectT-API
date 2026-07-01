@@ -15,6 +15,7 @@ use App\Models\ShareholderAddress;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
+use App\Services\ShareholderBulkImportService;
 use App\Services\ShareholderAccountNumberService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -24,7 +25,8 @@ use Illuminate\Support\Str;
 class ShareholderController extends Controller
 {
     public function __construct(
-        protected ShareholderAccountNumberService $accountNumberService
+        protected ShareholderAccountNumberService $accountNumberService,
+        protected ShareholderBulkImportService $bulkImportService
     ) {}
 
     public function index()
@@ -73,6 +75,19 @@ class ShareholderController extends Controller
 
     public function bulkStore(BulkShareholderRequest $request)
     {
+        if ($request->hasFile('file')) {
+            $result = $this->bulkImportService->import(
+                $request->file('file'),
+                $request->user()?->id
+            );
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Shareholder import processed',
+                'data' => $result,
+            ], 201);
+        }
+
         $payload = $request->validated('shareholders');
 
         $shareholders = DB::transaction(function () use ($payload) {

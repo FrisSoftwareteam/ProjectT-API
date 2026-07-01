@@ -26,7 +26,6 @@ $jsonPayloads = [
     'PermissionController@bulkCreate' => ['permissions' => [['name' => 'example.view', 'module' => 'example', 'action' => 'view', 'description' => 'Example permission']]],
     'ShareholderController@store' => ['holder_type' => 'individual', 'first_name' => 'Ada', 'last_name' => 'Okafor', 'email' => 'ada.okafor@example.com', 'phone' => '08012345678', 'date_of_birth' => '1990-01-15', 'sex' => 'female', 'status' => 'active'],
     'ShareholderController@update' => ['first_name' => 'Ada', 'last_name' => 'Okafor', 'email' => 'ada.okafor@example.com', 'phone' => '08012345678', 'status' => 'active'],
-    'ShareholderController@bulkStore' => ['shareholders' => [['holder_type' => 'individual', 'first_name' => 'Ada', 'last_name' => 'Okafor', 'email' => 'ada.bulk@example.com', 'phone' => '08012345001', 'status' => 'active']]],
     'ShareholderController@storeWithDetails' => ['shareholder' => ['holder_type' => 'individual', 'first_name' => 'Ada', 'last_name' => 'Okafor', 'email' => 'ada.details@example.com', 'phone' => '08012345002', 'status' => 'active'], 'addresses' => [['address_line1' => '1 Marina Road', 'city' => 'Lagos', 'state' => 'Lagos', 'country' => 'Nigeria', 'is_primary' => true]], 'mandates' => [['bank_name' => 'Example Bank', 'account_name' => 'Ada Okafor', 'account_number' => '0123456789', 'status' => 'pending']], 'identities' => [['id_type' => 'nin', 'id_value' => '12345678901', 'verified_status' => 'pending']]],
     'ShareholderController@addAddress' => ['shareholder_id' => '{{shareholder}}', 'address_line1' => '1 Marina Road', 'city' => 'Lagos', 'state' => 'Lagos', 'postal_code' => '100001', 'country' => 'Nigeria', 'is_primary' => true],
     'ShareholderController@updateAddress' => ['address_line1' => '2 Marina Road', 'city' => 'Lagos', 'state' => 'Lagos', 'postal_code' => '100001', 'country' => 'Nigeria', 'is_primary' => true],
@@ -73,6 +72,9 @@ $jsonPayloads = [
 ];
 
 $multipartPayloads = [
+    'ShareholderController@bulkStore' => [
+        ['key' => 'file', 'type' => 'file', 'src' => 'docs/postman/shareholder_bulk_import_sample.csv'],
+    ],
     'CscsUploadController@import' => [
         ['key' => 'register_id', 'value' => '{{register_id}}', 'type' => 'text'],
         ['key' => 'files[]', 'type' => 'file', 'src' => ''],

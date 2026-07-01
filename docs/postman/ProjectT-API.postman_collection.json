@@ -4811,10 +4811,6 @@
                             {
                                 "key": "Accept",
                                 "value": "application/json"
-                            },
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
                             }
                         ],
                         "url": {
@@ -4830,13 +4826,14 @@
                         },
                         "description": "Backend action: `ShareholderController@bulkStore`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.create",
                         "body": {
-                            "mode": "raw",
-                            "raw": "{\n    \"shareholders\": [\n        {\n            \"holder_type\": \"individual\",\n            \"first_name\": \"Ada\",\n            \"last_name\": \"Okafor\",\n            \"email\": \"ada.bulk@example.com\",\n            \"phone\": \"08012345001\",\n            \"status\": \"active\"\n        }\n    ]\n}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "file",
+                                    "type": "file",
+                                    "src": "docs/postman/shareholder_bulk_import_sample.csv"
                                 }
-                            }
+                            ]
                         }
                     },
                     "response": []
