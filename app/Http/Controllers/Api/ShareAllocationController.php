@@ -12,13 +12,15 @@ use App\Models\ShareLot;
 use App\Models\ShareTransaction;
 use App\Models\ShareClass;
 use App\Services\CapitalValidationService;
+use App\Services\UnitPrecisionValidationService;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
 
 class ShareAllocationController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
 
@@ -32,6 +34,10 @@ class ShareAllocationController extends Controller
         $shareholder = Shareholder::findOrFail($shareholderId);
         $data = $request->validated();
         $shareClass = ShareClass::findOrFail($data['share_class_id']);
+        $this->unitPrecisionValidationService->assertValidForShareClass(
+            (int) $data['share_class_id'],
+            $data['quantity']
+        );
         $registerId = $data['register_id'] ?? $shareClass->register_id;
 
         if ((int) $shareClass->register_id !== (int) $registerId) {
@@ -118,6 +124,10 @@ class ShareAllocationController extends Controller
     {
         $shareholder = Shareholder::findOrFail($shareholderId);
         $data = $request->validated();
+        $this->unitPrecisionValidationService->assertValidForShareClass(
+            (int) $data['share_class_id'],
+            $data['quantity']
+        );
 
         return DB::transaction(function () use ($shareholder, $data) {
             $sra = ShareholderRegisterAccount::where('shareholder_id', $shareholder->id)

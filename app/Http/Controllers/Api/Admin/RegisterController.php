@@ -100,15 +100,18 @@ class RegisterController extends Controller
     {
         try {
             $validated = $request->validate([
-                'company_id' => 'required|exists:companies,id',
-                'name' => 'required|string|max:255',
-                'instrument_type' => 'required|string|max:100',
+                'company_id'           => 'required|exists:companies,id',
+                'name'                 => 'required|string|max:255',
+                'instrument_type_id'   => 'required|exists:instrument_types,id',
                 'capital_behaviour_type' => 'required|in:constant,open_ended,amortising',
-                'paid_up_capital' => 'nullable|numeric|min:0|required_if:capital_behaviour_type,constant',
-                'narration' => 'nullable|string|max:2000',
-                'is_default' => 'nullable|boolean',
-                'status' => 'nullable|in:active,closed',
+                'paid_up_capital'      => 'nullable|numeric|min:0|required_if:capital_behaviour_type,constant',
+                'unit_precision_type'  => 'nullable|in:whole_number,decimal',
+                'decimal_precision'    => 'nullable|integer|min:2|max:4',
+                'narration'            => 'nullable|string|max:2000',
+                'is_default'           => 'nullable|boolean',
+                'status'               => 'nullable|in:active,closed',
             ]);
+            $this->applyUnitPrecisionRules($validated);
 
             $company = Company::findOrFail($validated['company_id']);
             $validated['register_code'] = $this->generateRegisterCode($company);
@@ -210,14 +213,17 @@ class RegisterController extends Controller
             $register = Register::findOrFail($id);
 
             $validated = $request->validate([
-                'name' => 'required|string|max:255',
-                'instrument_type' => 'required|string|max:100',
+                'name'                 => 'required|string|max:255',
+                'instrument_type_id'   => 'required|exists:instrument_types,id',
                 'capital_behaviour_type' => 'required|in:constant,open_ended,amortising',
-                'paid_up_capital' => 'nullable|numeric|min:0|required_if:capital_behaviour_type,constant',
-                'narration' => 'nullable|string|max:2000',
-                'is_default' => 'nullable|boolean',
-                'status' => 'nullable|in:active,closed',
+                'paid_up_capital'      => 'nullable|numeric|min:0|required_if:capital_behaviour_type,constant',
+                'unit_precision_type'  => 'nullable|in:whole_number,decimal',
+                'decimal_precision'    => 'nullable|integer|min:2|max:4',
+                'narration'            => 'nullable|string|max:2000',
+                'is_default'           => 'nullable|boolean',
+                'status'               => 'nullable|in:active,closed',
             ]);
+            $this->applyUnitPrecisionRules($validated);
 
             if ($request->has('register_code')) {
                 return response()->json([
@@ -315,6 +321,47 @@ class RegisterController extends Controller
                 'message' => 'Error deleting register',
                 'error' => $e->getMessage()
             ], 500);
+        }
+    }
+
+    /**
+     * Apply and validate unit precision rules based on the instrument type's precision rule.
+     */
+    private function applyUnitPrecisionRules(array &$validated): void
+    {
+        $instrumentType = \App\Models\InstrumentType::findOrFail($validated['instrument_type_id']);
+        if ($instrumentType->requiresWholeNumber()) {
+            // Bond: no decimal allowed, no configuration needed from caller
+            if (! empty($validated['decimal_precision'])) {
+                throw ValidationException::withMessages([
+                    'decimal_precision' => ['decimal_precision is not permitted for whole-number-only instrument types.'],
+                ]);
+            }
+            $validated['unit_precision_type'] = 'whole_number';
+            $validated['decimal_precision']   = null;
+        } elseif ($instrumentType->requiresDecimal()) {
+            // Ordinary Shares: always decimal, caller must supply precision 2-4
+            if (empty($validated['decimal_precision'])) {
+                throw ValidationException::withMessages([
+                    'decimal_precision' => ['decimal_precision (2-4) is required for decimal-only instrument types.'],
+                ]);
+            }
+            $validated['unit_precision_type'] = 'decimal';
+        } elseif ($instrumentType->isConfigurable()) {
+            // Mutual Fund / configurable: caller must choose
+            if (empty($validated['unit_precision_type'])) {
+                throw ValidationException::withMessages([
+                    'unit_precision_type' => ['unit_precision_type (whole_number or decimal) is required for configurable instrument types.'],
+                ]);
+            }
+            if ($validated['unit_precision_type'] === 'decimal' && empty($validated['decimal_precision'])) {
+                throw ValidationException::withMessages([
+                    'decimal_precision' => ['decimal_precision (2-4) is required when unit_precision_type is decimal.'],
+                ]);
+            }
+            if ($validated['unit_precision_type'] === 'whole_number') {
+                $validated['decimal_precision'] = null;
+            }
         }
     }
 

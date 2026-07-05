@@ -13,6 +13,7 @@ use App\Models\SharePosition;
 use App\Models\ShareTransaction;
 use App\Models\ShareholderRegisterAccount;
 use App\Services\CapitalValidationService;
+use App\Services\UnitPrecisionValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -20,7 +21,8 @@ use Illuminate\Validation\ValidationException;
 class IpoOfferController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
 
@@ -107,6 +109,10 @@ class IpoOfferController extends Controller
         }
 
         $payload = $request->validated();
+        $this->unitPrecisionValidationService->assertValidForRegister(
+            (int) $offer->register_id,
+            $payload['quantity']
+        );
         $allotment = IpoOfferAllotment::updateOrCreate(
             ['offer_id' => $offer->id, 'shareholder_id' => $payload['shareholder_id']],
             ['quantity' => $payload['quantity']]
@@ -209,4 +215,3 @@ class IpoOfferController extends Controller
         return sprintf('REG-%d-%06d', $companyId, $existing + 1);
     }
 }
-

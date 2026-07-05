@@ -17,6 +17,7 @@ use App\Models\ShareTransferEvent;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Services\CapitalValidationService;
+use App\Services\UnitPrecisionValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\DB;
@@ -25,7 +26,8 @@ use Illuminate\Support\Facades\Storage;
 class ProbateCaseController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
 
@@ -196,6 +198,10 @@ class ProbateCaseController extends Controller
 
         $authorization = $this->resolveDistributionAuthorization($probateCase, $toShareholder->id);
         $quantity = (float) $data['quantity'];
+        $this->unitPrecisionValidationService->assertValidForShareClass(
+            (int) $shareClass->id,
+            $data['quantity']
+        );
 
         $event = DB::transaction(function () use ($data, $fromShareholder, $toShareholder, $shareClass, $registerId, $probateCase, $authorization, $quantity, $request) {
             $fromSra = ShareholderRegisterAccount::where('shareholder_id', $fromShareholder->id)

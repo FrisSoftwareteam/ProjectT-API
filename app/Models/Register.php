@@ -16,10 +16,13 @@ class Register extends Model
         'register_code',
         'name',
         'instrument_type',
+        'instrument_type_id',
         'capital_behaviour_type',
         'paid_up_capital',
         'total_units_outstanding',
         'remaining_outstanding_units',
+        'unit_precision_type',
+        'decimal_precision',
         'narration',
         'is_default',
         'status',
@@ -30,6 +33,7 @@ class Register extends Model
         'paid_up_capital' => 'decimal:6',
         'total_units_outstanding' => 'decimal:6',
         'remaining_outstanding_units' => 'decimal:6',
+        'decimal_precision'   => 'integer',
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'deleted_at' => 'datetime',
@@ -49,6 +53,14 @@ class Register extends Model
     public function shareClasses()
     {
         return $this->hasMany(ShareClass::class);
+    }
+
+    /**
+     * Get the instrument type for this register.
+     */
+    public function instrumentType()
+    {
+        return $this->belongsTo(InstrumentType::class);
     }
 
     // TEMPORARILY COMMENTED OUT - Will enable when we create this model
@@ -106,5 +118,36 @@ class Register extends Model
     public function isDefault(): bool
     {
         return $this->is_default;
+    }
+
+    /**
+     * Check if this register's units must be whole numbers only.
+     */
+    public function isWholeNumberOnly(): bool
+    {
+        return $this->unit_precision_type === 'whole_number';
+    }
+
+    /**
+     * Get the maximum number of decimal places allowed for units on this register.
+     */
+    public function getMaxDecimalPlaces(): int
+    {
+        return $this->isWholeNumberOnly() ? 0 : (int) ($this->decimal_precision ?? 2);
+    }
+
+    /**
+     * Validate that a given value conforms to this register's unit precision rules.
+     */
+    public function validateUnitPrecision($value): bool
+    {
+        $strValue = (string) $value;
+        $maxDecimals = $this->getMaxDecimalPlaces();
+        if (! str_contains($strValue, '.')) {
+            return true;
+        }
+        $decimalPart = substr($strValue, strpos($strValue, '.') + 1);
+        $decimalPart = rtrim($decimalPart, '0');
+        return strlen($decimalPart) <= $maxDecimals;
     }
 }

@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\Admin\PermissionController;
 use App\Http\Controllers\Api\Admin\CompanyController;
 use App\Http\Controllers\Api\Admin\RegisterController;
 use App\Http\Controllers\Api\Admin\ShareClassController;
+use App\Http\Controllers\Api\Admin\InstrumentTypeController;
 use App\Http\Controllers\Api\Admin\ShareholderController;
 use App\Http\Controllers\Api\Admin\DividendEntitlementController;
 use App\Http\Controllers\Api\Admin\DividendExportController;
@@ -318,6 +319,24 @@ Route::middleware(['auth:sanctum'])->group(function () {
             // Tax calculation endpoint
             Route::post('/{id}/calculate-tax', [ShareClassController::class, 'calculateTax'])
                 ->middleware('permission:users.view');    
+        });
+
+        // Instrument Types
+        Route::prefix('instrument-types')->group(function () {
+            Route::get('/', [InstrumentTypeController::class, 'index'])
+                ->middleware('permission:users.view');
+
+            Route::get('/{instrumentType}', [InstrumentTypeController::class, 'show'])
+                ->middleware('permission:users.view');
+
+            Route::post('/', [InstrumentTypeController::class, 'store'])
+                ->middleware('role:Super Admin');
+
+            Route::put('/{instrumentType}', [InstrumentTypeController::class, 'update'])
+                ->middleware('role:Super Admin');
+
+            Route::patch('/{instrumentType}/deactivate', [InstrumentTypeController::class, 'deactivate'])
+                ->middleware('role:Super Admin');
         });
 
         // =================================================================
