@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\BankVerificationController;
 use App\Http\Controllers\Api\CautionController;
 use App\Http\Controllers\Api\Admin\NibssController;
 use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\AuditReportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -66,6 +67,10 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     Route::post('/auth/logout-all', [AuthController::class, 'logoutAll']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
 
+    // Reporting
+    Route::get('/reports/audit', [AuditReportController::class, 'index'])
+        ->middleware('permission:reports.audit');
+
     // Bank Verification Routes
     Route::get('/banks', [BankVerificationController::class, 'bankList']);
     Route::post('/banks/verify', [BankVerificationController::class, 'verify']);
@@ -96,6 +101,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     
     // Admin Users API Routes
     Route::prefix('admin/users')->group(function () {
+        Route::post('/{adminUser}/profile-picture', [AdminUserController::class, 'uploadProfilePicture'])->middleware('permission:users.edit');
         Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles'])->middleware('permission:users.edit');
         Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles'])->middleware('permission:users.edit');
         Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles'])->middleware('permission:users.view');

@@ -2,7 +2,7 @@
     "info": {
         "_postman_id": "1aa59e6a-c071-48fa-a4cc-projecttapi001",
         "name": "ProjectT API - Complete Collection",
-        "description": "Generated from Laravel's registered API routes. Includes all 163 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
+        "description": "Generated from Laravel's registered API routes. Includes all 166 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "auth": {
@@ -2149,6 +2149,43 @@
                     "response": []
                 },
                 {
+                    "name": "POST - Admin User - Upload Profile Picture",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/admin/users/{{adminUser}}/profile-picture",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "admin",
+                                "users",
+                                "{{adminUser}}",
+                                "profile-picture"
+                            ]
+                        },
+                        "description": "Backend action: `AdminUserController@uploadProfilePicture`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:users.edit",
+                        "body": {
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "profile_picture",
+                                    "type": "file",
+                                    "src": ""
+                                }
+                            ]
+                        }
+                    },
+                    "response": []
+                },
+                {
                     "name": "POST - Admin User - Assign Roles",
                     "request": {
                         "method": "POST",
@@ -4071,6 +4108,73 @@
                                 }
                             }
                         }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
+            "name": "Reporting",
+            "item": [
+                {
+                    "name": "GET - Audit Report - Index",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/reports/audit?user_id={{adminUser}}&role=Operations&shareholder_id={{shareholder}}&activity_category=shareholders&date_from=2026-01-01&date_to=2026-12-31&per_page=15",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "reports",
+                                "audit"
+                            ],
+                            "query": [
+                                {
+                                    "key": "user_id",
+                                    "value": "{{adminUser}}",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "role",
+                                    "value": "Operations",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "shareholder_id",
+                                    "value": "{{shareholder}}",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "activity_category",
+                                    "value": "shareholders",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "date_from",
+                                    "value": "2026-01-01",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "date_to",
+                                    "value": "2026-12-31",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "15",
+                                    "disabled": false
+                                }
+                            ]
+                        },
+                        "description": "Backend action: `AuditReportController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:reports.audit"
                     },
                     "response": []
                 }

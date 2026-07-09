@@ -72,6 +72,9 @@ $jsonPayloads = [
 ];
 
 $multipartPayloads = [
+    'AdminUserController@uploadProfilePicture' => [
+        ['key' => 'profile_picture', 'type' => 'file', 'src' => ''],
+    ],
     'ShareholderController@bulkStore' => [
         ['key' => 'file', 'type' => 'file', 'src' => 'docs/postman/shareholder_bulk_import_sample.csv'],
     ],
@@ -108,6 +111,7 @@ $queryExamples = [
     'CscsUploadController@rows' => ['status' => 'failed', 'identifier' => 'C123', 'per_page' => '50'],
     'CscsUploadController@exceptions' => ['status' => 'failed', 'per_page' => '50'],
     'NotificationController@index' => ['unread_only' => 'true', 'per_page' => '20'],
+    'AuditReportController@index' => ['user_id' => '{{adminUser}}', 'role' => 'Operations', 'shareholder_id' => '{{shareholder}}', 'activity_category' => 'shareholders', 'date_from' => '2026-01-01', 'date_to' => '2026-12-31', 'per_page' => '15'],
     'IpoOfferController@index' => ['status' => 'approved', 'per_page' => '15'],
     'ProbateCaseController@index' => ['per_page' => '15'],
     'SraGuardianController@index' => ['shareholder_id' => '{{shareholder}}', 'sra_id' => '{{sra_id}}', 'verified_status' => 'verified', 'per_page' => '15'],
@@ -221,7 +225,7 @@ $collection = [
     'info' => [
         '_postman_id' => '1aa59e6a-c071-48fa-a4cc-projecttapi001',
         'name' => 'ProjectT API - Complete Collection',
-        'description' => "Generated from Laravel's registered API routes. Includes all 163 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
+        'description' => "Generated from Laravel's registered API routes. Includes all ".count($routes)." API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
         'schema' => 'https://schema.getpostman.com/json/collection/v2.1.0/collection.json',
     ],
     'auth' => [
@@ -276,6 +280,7 @@ function folderFor(string $uri): string
         'auth' => 'Authentication',
         'banks' => 'Bank Verification',
         'notifications' => 'Notifications',
+        'reports' => 'Reporting',
         'shareholders' => 'Shareholders',
         'sras' => 'Cautions',
         'user-activity-logs' => 'User Activity Logs',
