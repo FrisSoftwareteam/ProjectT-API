@@ -7,13 +7,15 @@ use App\Models\SharePosition;
 use App\Models\ShareTransaction;
 use App\Http\Requests\SharePositionUpdateRequest;
 use App\Services\CapitalValidationService;
+use App\Services\UnitPrecisionValidationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 class SharePositionController extends Controller
 {
     public function __construct(
-        private readonly CapitalValidationService $capitalValidationService
+        private readonly CapitalValidationService $capitalValidationService,
+        private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
 
@@ -39,6 +41,10 @@ class SharePositionController extends Controller
     public function update(SharePositionUpdateRequest $request, SharePosition $sharePosition)
     {
         $payload = $request->validated();
+        $this->unitPrecisionValidationService->assertValidForShareClass(
+            (int) $sharePosition->share_class_id,
+            $payload['quantity']
+        );
         $registerId = (int) $sharePosition->shareClass->register_id;
         $before = (float) $sharePosition->quantity;
         $after = (float) $payload['quantity'];

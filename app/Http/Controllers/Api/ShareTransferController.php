@@ -13,6 +13,7 @@ use App\Models\ShareholderRegisterAccount;
 use App\Services\ActivityLogService;
 use App\Services\AdminNotificationService;
 use App\Services\CapitalValidationService;
+use App\Services\UnitPrecisionValidationService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
@@ -21,7 +22,8 @@ class ShareTransferController extends Controller
     public function __construct(
         private readonly CapitalValidationService $capitalValidationService,
         private readonly ActivityLogService $activityLogService,
-        private readonly AdminNotificationService $adminNotificationService
+        private readonly AdminNotificationService $adminNotificationService,
+        private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
 
@@ -31,6 +33,10 @@ class ShareTransferController extends Controller
         $fromShareholder = Shareholder::findOrFail($data['from_shareholder_id']);
         $toShareholder = Shareholder::findOrFail($data['to_shareholder_id']);
         $shareClass = ShareClass::findOrFail($data['share_class_id']);
+        $this->unitPrecisionValidationService->assertValidForShareClass(
+            (int) $shareClass->id,
+            $data['quantity']
+        );
         $registerId = (int) $shareClass->register_id;
 
         if ($fromShareholder->status === 'deceased') {
