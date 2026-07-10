@@ -17,10 +17,14 @@ use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
 use App\Services\ShareholderBulkImportService;
 use App\Services\ShareholderAccountNumberService;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class ShareholderController extends Controller
 {
@@ -371,6 +375,41 @@ class ShareholderController extends Controller
         return response()->json($shareholder->fresh());
     }
 
+    public function uploadProfilePicture(Request $request, Shareholder $shareholder): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'profile_picture' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            ]);
+
+            $previousPath = $this->publicProfilePicturePath($shareholder->profile_picture);
+            $path = $validated['profile_picture']->store(
+                "profile-pictures/shareholders/{$shareholder->id}",
+                'public'
+            );
+
+            $shareholder->update([
+                'profile_picture' => Storage::disk('public')->url($path),
+            ]);
+
+            if ($previousPath !== null && $previousPath !== $path) {
+                Storage::disk('public')->delete($previousPath);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Shareholder profile picture uploaded successfully',
+                'data' => $shareholder->fresh(),
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+    }
+
     public function destroy($id)
     {
         $shareholder = Shareholder::find($id);
@@ -519,5 +558,28 @@ class ShareholderController extends Controller
     private function generateShareholderNo(int $shareholderId): string
     {
         return 'SRA-'.str_pad((string) $shareholderId, 8, '0', STR_PAD_LEFT).'-'.strtoupper(Str::random(4));
+    }
+
+    private function publicProfilePicturePath(?string $profilePicture): ?string
+    {
+        if ($profilePicture === null || $profilePicture === '') {
+            return null;
+        }
+
+        $path = parse_url($profilePicture, PHP_URL_PATH);
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+
+        $path = ltrim($path, '/');
+        if (str_starts_with($path, 'storage/')) {
+            return substr($path, strlen('storage/'));
+        }
+
+        if (str_starts_with($path, 'profile-pictures/')) {
+            return $path;
+        }
+
+        return null;
     }
 }

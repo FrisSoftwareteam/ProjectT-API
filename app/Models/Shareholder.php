@@ -30,6 +30,7 @@ class Shareholder extends Model
         'next_of_kin_phone',
         'next_of_kin_relationship',
         'status',
+        'profile_picture',
     ];
     protected $casts = [
         'date_of_birth' => 'date',
