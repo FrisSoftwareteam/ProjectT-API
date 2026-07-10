@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\DividendDeclaration;
 use App\Models\DividendPayment;
 use App\Models\DividendWorkflowEvent;
+use App\Services\AdminNotificationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -13,6 +14,11 @@ use Illuminate\Support\Str;
 
 class DividendPaymentController extends Controller
 {
+    public function __construct(
+        private readonly AdminNotificationService $adminNotificationService
+    ) {
+    }
+
     /**
      * 5.1 List Dividend Payments
      * GET /admin/dividend-declarations/{declaration_id}/payments
@@ -128,6 +134,18 @@ class DividendPaymentController extends Controller
                 ]);
 
                 DB::commit();
+
+                $this->adminNotificationService->sendToRoles(
+                    ['Finance', 'Accounts', 'Reconciliation', 'Internal Audit', 'Super Admin'],
+                    'DIVIDEND_PAYMENT_REISSUED',
+                    'Dividend payment reissued',
+                    "Dividend payment #{$payment->id} was reissued as payment #{$newPayment->id}.",
+                    'dividend_payment',
+                    $newPayment->id,
+                    $newPayment->dividend_payment_no,
+                    "/admin/dividend-declarations/{$declaration->id}/payments",
+                    $request->user()->id
+                );
 
                 return response()->json([
                     'success' => true,

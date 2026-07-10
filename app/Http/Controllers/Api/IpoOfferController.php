@@ -12,6 +12,7 @@ use App\Models\ShareClass;
 use App\Models\SharePosition;
 use App\Models\ShareTransaction;
 use App\Models\ShareholderRegisterAccount;
+use App\Services\ActivityLogService;
 use App\Services\CapitalValidationService;
 use App\Services\UnitPrecisionValidationService;
 use Illuminate\Http\Request;
@@ -22,6 +23,7 @@ class IpoOfferController extends Controller
 {
     public function __construct(
         private readonly CapitalValidationService $capitalValidationService,
+        private readonly ActivityLogService $activityLogService,
         private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
@@ -86,16 +88,11 @@ class IpoOfferController extends Controller
                 'approved_at' => now(),
             ]);
 
-            DB::table('user_activity_logs')->insert([
-                'user_id' => $request->user()?->id,
-                'action' => 'ipo_offer_created',
-                'metadata' => json_encode([
-                    'offer_id' => $offer->id,
-                    'register_id' => $register->id,
-                    'share_class_id' => $shareClass->id,
-                    'approved_units' => $offer->approved_units,
-                ]),
-                'created_at' => now(),
+            $this->activityLogService->log($request->user()?->id, 'ipo_offer_created', [
+                'offer_id' => $offer->id,
+                'register_id' => $register->id,
+                'share_class_id' => $shareClass->id,
+                'approved_units' => $offer->approved_units,
             ]);
 
             return response()->json($offer, 201);
@@ -193,16 +190,11 @@ class IpoOfferController extends Controller
             $this->capitalValidationService->syncOutstandingUnits((int) $offer->register_id);
             $this->capitalValidationService->assertConstantBalanced((int) $offer->register_id);
 
-            DB::table('user_activity_logs')->insert([
-                'user_id' => $request->user()?->id,
-                'action' => 'ipo_offer_finalized',
-                'metadata' => json_encode([
-                    'offer_id' => $offer->id,
-                    'offer_ref' => $offer->offer_ref,
-                    'allotted_units' => $totalAllotted,
-                    'register_id' => $offer->register_id,
-                ]),
-                'created_at' => now(),
+            $this->activityLogService->log($request->user()?->id, 'ipo_offer_finalized', [
+                'offer_id' => $offer->id,
+                'offer_ref' => $offer->offer_ref,
+                'allotted_units' => $totalAllotted,
+                'register_id' => $offer->register_id,
             ]);
 
             return response()->json($offer->fresh('allotments'));

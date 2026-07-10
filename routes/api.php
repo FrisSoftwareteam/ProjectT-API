@@ -26,6 +26,8 @@ use App\Http\Controllers\Api\IpoOfferController;
 use App\Http\Controllers\Api\BankVerificationController;
 use App\Http\Controllers\Api\CautionController;
 use App\Http\Controllers\Api\Admin\NibssController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\AuditReportController;
 
 /*
 |--------------------------------------------------------------------------
@@ -48,14 +50,27 @@ Route::prefix('auth')->group(function () {
 });
 
 // Protected Routes (require authentication)
-Route::middleware(['auth:sanctum'])->group(function () {
+Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     // User info
     Route::get('/user', [AuthController::class, 'me']);
+
+    // Personal in-app notifications
+    Route::prefix('notifications')->group(function () {
+        Route::get('/', [NotificationController::class, 'index']);
+        Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::post('/read-all', [NotificationController::class, 'markAllAsRead']);
+        Route::post('/{notificationId}/read', [NotificationController::class, 'markAsRead']);
+        Route::delete('/{notificationId}', [NotificationController::class, 'destroy']);
+    });
     
     // Auth management
     Route::post('/auth/logout', [AuthController::class, 'logout']);
     Route::post('/auth/logout-all', [AuthController::class, 'logoutAll']);
     Route::post('/auth/refresh', [AuthController::class, 'refresh']);
+
+    // Reporting
+    Route::get('/reports/audit', [AuditReportController::class, 'index'])
+        ->middleware('permission:reports.audit');
 
     // Bank Verification Routes
     Route::get('/banks', [BankVerificationController::class, 'bankList']);
@@ -87,6 +102,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     
     // Admin Users API Routes
     Route::prefix('admin/users')->group(function () {
+        Route::post('/{adminUser}/profile-picture', [AdminUserController::class, 'uploadProfilePicture'])->middleware('permission:users.edit');
         Route::post('/{adminUser}/roles', [AdminUserController::class, 'assignRoles'])->middleware('permission:users.edit');
         Route::delete('/{adminUser}/roles', [AdminUserController::class, 'revokeRoles'])->middleware('permission:users.edit');
         Route::get('/{adminUser}/roles', [AdminUserController::class, 'getRoles'])->middleware('permission:users.view');
@@ -139,6 +155,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
         Route::post('/', [ShareholderController::class, 'store'])->middleware('permission:shareholders.create');
         Route::post('/bulk', [ShareholderController::class, 'bulkStore'])->middleware('permission:shareholders.create');
         Route::post('/with-details', [ShareholderController::class, 'storeWithDetails'])->middleware('permission:shareholders.create');
+        Route::post('/{shareholder}/profile-picture', [ShareholderController::class, 'uploadProfilePicture'])->middleware('permission:shareholders.edit');
         Route::get('/{shareholder}', [ShareholderController::class, 'show'])->middleware('permission:shareholders.view');
         Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit');
         Route::delete('/{shareholder}', [ShareholderController::class, 'destroy'])->middleware('permission:shareholders.delete');
@@ -180,6 +197,7 @@ Route::middleware(['auth:sanctum'])->group(function () {
     Route::prefix('probates')->group(function () {
         Route::get('/', [ProbateCaseController::class, 'index'])->middleware('permission:probates.view');
         Route::post('/', [ProbateCaseController::class, 'store'])->middleware('permission:probates.create');
+        Route::get('/shareholders/{shareholder}/admins', [ProbateCaseController::class, 'adminsForShareholder'])->middleware('permission:probates.view');
         Route::get('/{probateCase}', [ProbateCaseController::class, 'show'])->middleware('permission:probates.view');
         Route::put('/{probateCase}', [ProbateCaseController::class, 'update'])->middleware('permission:probates.edit');
         Route::delete('/{probateCase}', [ProbateCaseController::class, 'destroy'])->middleware('permission:probates.delete');
@@ -293,7 +311,11 @@ Route::middleware(['auth:sanctum'])->group(function () {
             // =================================================================
             // DIVIDEND DECLARATION MANAGEMENT (Nested under registers)
             // =================================================================
-            
+
+            // List Dividend Declarations for a specific register
+            Route::get('/{register_id}/dividend-declarations', [DividendEntitlementController::class, 'indexForRegister'])
+                ->middleware('permission:users.view');
+
             // Create Dividend Declaration (Draft) for a specific register
             Route::post('/{register_id}/dividend-declarations', [DividendEntitlementController::class, 'store'])
                 ->middleware('role:Super Admin|Admin');

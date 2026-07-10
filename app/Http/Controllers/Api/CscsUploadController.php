@@ -6,9 +6,11 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\CscsUploadRequest;
 use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
+use App\Services\AdminNotificationService;
 use App\Services\CscsImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
@@ -16,20 +18,25 @@ use Illuminate\Validation\ValidationException;
 class CscsUploadController extends Controller
 {
     public function __construct(
-        private readonly CscsImportService $importService
+        private readonly CscsImportService $importService,
+        private readonly AdminNotificationService $adminNotificationService
     ) {
     }
 
     public function import(CscsUploadRequest $request): JsonResponse
     {
         try {
-            $files = $request->file('files', []);
+            $files = $this->uploadedFiles($request);
+            $this->validateUploadedFiles($files);
+
             $registerId = $request->input('register_id');
             $result = $this->importService->import(
                 $files,
                 $registerId ? (int) $registerId : null,
                 $request->user()?->id
             );
+
+            $this->notifyImportResult($result, $request->user()?->id);
 
             return response()->json([
                 'success' => true,
@@ -48,11 +55,87 @@ class CscsUploadController extends Controller
                 'trace' => $e->getTraceAsString(),
             ]);
 
+            $this->adminNotificationService->sendToRoles(
+                ['Reconciliation', 'Internal Audit', 'Admin', 'Super Admin'],
+                'CSCS_IMPORT_FAILED',
+                'CSCS import failed',
+                'A CSCS import failed before processing could complete.',
+                'cscs_upload_batch',
+                0,
+                'CSCS import',
+                '/cscs/uploads',
+                $request->user()?->id,
+                [$request->user()?->id],
+                true
+            );
+
             return response()->json([
                 'success' => false,
                 'message' => 'CSCS import failed',
                 'error' => $e->getMessage(),
             ], 500);
+        }
+    }
+
+    /**
+     * @return array<int, UploadedFile>
+     */
+    private function uploadedFiles(Request $request): array
+    {
+        return $this->flattenUploadedFiles($request->allFiles());
+    }
+
+    /**
+     * @return array<int, UploadedFile>
+     */
+    private function flattenUploadedFiles(mixed $files): array
+    {
+        if ($files instanceof UploadedFile) {
+            return [$files];
+        }
+
+        if (! is_array($files)) {
+            return [];
+        }
+
+        $flattened = [];
+
+        foreach ($files as $file) {
+            array_push($flattened, ...$this->flattenUploadedFiles($file));
+        }
+
+        return $flattened;
+    }
+
+    /**
+     * @param array<int, UploadedFile> $files
+     */
+    private function validateUploadedFiles(array $files): void
+    {
+        if (count($files) < 1) {
+            throw ValidationException::withMessages([
+                'files' => ['At least one CSCS file is required.'],
+            ]);
+        }
+
+        if (count($files) > 2) {
+            throw ValidationException::withMessages([
+                'files' => ['The files field must not have more than 2 items.'],
+            ]);
+        }
+
+        foreach ($files as $index => $file) {
+            if (! $file->isValid()) {
+                throw ValidationException::withMessages([
+                    "files.$index" => ['The uploaded file is invalid.'],
+                ]);
+            }
+
+            if (! in_array(strtolower($file->getClientOriginalExtension()), ['txt', 'csv'], true)) {
+                throw ValidationException::withMessages([
+                    "files.$index" => ['Each CSCS file must be a txt or csv file.'],
+                ]);
+            }
         }
     }
 
@@ -132,6 +215,8 @@ class CscsUploadController extends Controller
     {
         try {
             $result = $this->importService->reprocessFailedRows($batchId, auth()->id());
+            $this->notifyImportResult($result, auth()->id());
+
             return response()->json([
                 'success' => true,
                 'message' => 'Failed rows reprocessed',
@@ -142,6 +227,20 @@ class CscsUploadController extends Controller
                 'batch_id' => $batchId,
                 'error' => $e->getMessage(),
             ]);
+            $this->adminNotificationService->sendToRoles(
+                ['Reconciliation', 'Internal Audit', 'Admin', 'Super Admin'],
+                'CSCS_REPROCESS_FAILED',
+                'CSCS reprocessing failed',
+                "Reprocessing failed for CSCS batch #{$batchId}.",
+                'cscs_upload_batch',
+                $batchId,
+                "CSCS batch #{$batchId}",
+                "/cscs/uploads/{$batchId}",
+                auth()->id(),
+                [auth()->id()],
+                true
+            );
+
             return response()->json([
                 'success' => false,
                 'message' => 'Reprocess failed',
@@ -222,5 +321,27 @@ class CscsUploadController extends Controller
             }
             fclose($out);
         }, 200, $headers);
+    }
+
+    private function notifyImportResult(array $result, ?int $actorId): void
+    {
+        $batchId = (int) $result['batch_id'];
+        $failedRows = (int) ($result['summary']['failed_rows'] ?? 0);
+        $postedRows = (int) ($result['summary']['posted_rows'] ?? 0);
+        $hasErrors = $failedRows > 0 || $result['status'] !== 'completed';
+
+        $this->adminNotificationService->sendToRoles(
+            ['Reconciliation', 'Internal Audit', 'Admin', 'Super Admin'],
+            $hasErrors ? 'CSCS_IMPORT_COMPLETED_WITH_ERRORS' : 'CSCS_IMPORT_COMPLETED',
+            $hasErrors ? 'CSCS import completed with errors' : 'CSCS import completed',
+            "CSCS batch #{$batchId} completed with {$postedRows} posted and {$failedRows} failed rows.",
+            'cscs_upload_batch',
+            $batchId,
+            "CSCS batch #{$batchId}",
+            "/cscs/uploads/{$batchId}",
+            $actorId,
+            [$actorId],
+            true
+        );
     }
 }

@@ -14,8 +14,6 @@ class CscsUploadRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'files' => ['required', 'array', 'min:1', 'max:2'],
-            'files.*' => ['required', 'file', 'mimes:txt,csv'],
             'register_id' => ['nullable', 'exists:registers,id'],
         ];
     }

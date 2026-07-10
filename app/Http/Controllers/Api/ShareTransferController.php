@@ -10,6 +10,8 @@ use App\Models\ShareTransaction;
 use App\Models\ShareTransferEvent;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
+use App\Services\ActivityLogService;
+use App\Services\AdminNotificationService;
 use App\Services\CapitalValidationService;
 use App\Services\UnitPrecisionValidationService;
 use Illuminate\Support\Facades\DB;
@@ -19,6 +21,8 @@ class ShareTransferController extends Controller
 {
     public function __construct(
         private readonly CapitalValidationService $capitalValidationService,
+        private readonly ActivityLogService $activityLogService,
+        private readonly AdminNotificationService $adminNotificationService,
         private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
     ) {
     }
@@ -121,18 +125,27 @@ class ShareTransferController extends Controller
                 'created_by' => auth()->id(),
             ]);
 
-            DB::table('user_activity_logs')->insert([
-                'user_id' => auth()->id(),
-                'action' => 'share_transfer',
-                'metadata' => json_encode([
-                    'event_id' => $event->id,
-                    'from_shareholder_id' => $fromShareholder->id,
-                    'to_shareholder_id' => $toShareholder->id,
-                    'share_class_id' => $shareClass->id,
-                    'quantity' => $qty,
-                ]),
-                'created_at' => now(),
+            $this->activityLogService->log(auth()->id(), 'share_transfer', [
+                'event_id' => $event->id,
+                'from_shareholder_id' => $fromShareholder->id,
+                'to_shareholder_id' => $toShareholder->id,
+                'share_class_id' => $shareClass->id,
+                'quantity' => $qty,
             ]);
+
+            DB::afterCommit(function () use ($event): void {
+                $this->adminNotificationService->sendToRoles(
+                    ['Operations Approval Role', 'Internal Audit', 'Super Admin'],
+                    'SHARE_TRANSFER_COMPLETED',
+                    'Share transfer completed',
+                    "Share transfer {$event->tx_ref} completed for {$event->quantity} units.",
+                    'share_transfer',
+                    $event->id,
+                    $event->tx_ref,
+                    "/share-transfers/{$event->id}",
+                    $event->created_by
+                );
+            });
 
             return response()->json([
                 'message' => 'Share transfer completed',

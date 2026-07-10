@@ -12,6 +12,10 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['api', 'auth:sanctum']],
+    )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*', headers: SymfonyRequest::HEADER_X_FORWARDED_FOR
             | SymfonyRequest::HEADER_X_FORWARDED_HOST
@@ -24,11 +28,13 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
             'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
             'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+            'activity.log' => \App\Http\Middleware\LogApiActivity::class,
         ]);
 
         // Force JSON responses for all API routes
         $middleware->group('api', [
             \App\Http\Middleware\ForceJsonResponse::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
@@ -87,7 +93,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         // Handle general exceptions for API
         $exceptions->render(function (\Throwable $e, $request) {
-            if ($request->is('api/*') && !config('app.debug')) {
+            if ($request->is('api/*') && ! config('app.debug')) {
                 return response()->json([
                     'success' => false,
                     'message' => 'An error occurred processing your request.',

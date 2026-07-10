@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 
 class AdminUserController extends Controller
 {
@@ -182,6 +183,67 @@ class AdminUserController extends Controller
             'success' => true,
             'message' => 'Admin user deleted successfully',
         ]);
+    }
+
+    /**
+     * Upload or replace an admin user's profile picture.
+     */
+    public function uploadProfilePicture(Request $request, AdminUser $adminUser): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'profile_picture' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+            ]);
+
+            $previousPath = $this->publicProfilePicturePath($adminUser->profile_picture);
+            $path = $validated['profile_picture']->store(
+                "profile-pictures/admin-users/{$adminUser->id}",
+                'public'
+            );
+
+            $adminUser->update([
+                'profile_picture' => Storage::disk('public')->url($path),
+            ]);
+
+            if ($previousPath !== null && $previousPath !== $path) {
+                Storage::disk('public')->delete($previousPath);
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Profile picture uploaded successfully',
+                'data' => $adminUser->fresh(),
+            ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+    }
+
+    private function publicProfilePicturePath(?string $profilePicture): ?string
+    {
+        if ($profilePicture === null || $profilePicture === '') {
+            return null;
+        }
+
+        $path = parse_url($profilePicture, PHP_URL_PATH);
+        if (! is_string($path) || $path === '') {
+            return null;
+        }
+
+        $path = ltrim($path, '/');
+        if (str_starts_with($path, 'storage/')) {
+            return substr($path, strlen('storage/'));
+        }
+
+        if (str_starts_with($path, 'profile-pictures/')) {
+            return $path;
+        }
+
+        return null;
     }
 
     /**
@@ -417,4 +479,3 @@ class AdminUserController extends Controller
         ]);
     }
 }
-

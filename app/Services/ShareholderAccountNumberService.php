@@ -2,7 +2,7 @@
 
 namespace App\Services;
 
-use App\Models\ShareHolder;
+use App\Models\Shareholder;
 
 class ShareholderAccountNumberService
 {
@@ -31,8 +31,7 @@ class ShareholderAccountNumberService
      */
     protected function accountNumberExists(string $accountNumber): bool
     {
-        return ShareHolder::where('account_no', $accountNumber)->exists();
+        return Shareholder::where('account_no', $accountNumber)->exists();
     }
 }
-
 
