@@ -2,10 +2,9 @@
 
 namespace Database\Seeders;
 
-use Illuminate\Database\Console\Seeds\WithoutModelEvents;
 use Illuminate\Database\Seeder;
-use Spatie\Permission\Models\Role;
 use Spatie\Permission\Models\Permission;
+use Spatie\Permission\Models\Role;
 
 class RolesAndPermissionsSeeder extends Seeder
 {
@@ -43,6 +42,17 @@ class RolesAndPermissionsSeeder extends Seeder
             'shares.delete',
             'shares.transfer',
             'shares.export',
+
+            // CSCS Reconciliation Workflow
+            'cscs.view',
+            'cscs.upload',
+            'cscs.reconcile',
+            'cscs.submit',
+            'cscs.review',
+            'cscs.approve',
+            'cscs.post',
+            'cscs.export',
+            'cscs.admin',
 
             // Shareholder Mandate Management
             'shareholder_mandates.view',
@@ -206,7 +216,7 @@ class RolesAndPermissionsSeeder extends Seeder
             ]);
         }
 
-        $this->command->info('Created ' . count($permissions) . ' permissions');
+        $this->command->info('Created '.count($permissions).' permissions');
 
         // Create roles and assign permissions
         $this->createSuperAdminRole();
@@ -247,6 +257,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shareholder_identities.view', 'shareholder_identities.create', 'shareholder_identities.edit', 'shareholder_identities.export',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
+            'cscs.view', 'cscs.upload', 'cscs.reconcile', 'cscs.submit', 'cscs.review', 'cscs.approve', 'cscs.post', 'cscs.export', 'cscs.admin',
             'certificates.view', 'certificates.create', 'certificates.edit', 'certificates.issue',
             'warrants.view', 'warrants.create', 'warrants.edit',
             'reports.view', 'reports.generate', 'reports.export',
@@ -375,6 +386,7 @@ class RolesAndPermissionsSeeder extends Seeder
         ]);
         $role->syncPermissions([
             'compliance.view', 'compliance.manage', 'compliance.reports',
+            'cscs.view', 'cscs.review', 'cscs.approve', 'cscs.export',
             'shareholders.view',
             'shares.view',
             'certificates.view',
@@ -393,6 +405,7 @@ class RolesAndPermissionsSeeder extends Seeder
         ]);
         $role->syncPermissions([
             'reconciliation.view', 'reconciliation.process', 'reconciliation.manage',
+            'cscs.view', 'cscs.upload', 'cscs.reconcile', 'cscs.submit', 'cscs.post', 'cscs.export',
             'shareholders.view',
             'shares.view',
             'certificates.view',
@@ -410,6 +423,7 @@ class RolesAndPermissionsSeeder extends Seeder
         ]);
         $role->syncPermissions([
             'audit.internal.view', 'audit.internal.manage', 'audit.internal.reports',
+            'cscs.view', 'cscs.review', 'cscs.approve', 'cscs.export',
             'shareholders.view',
             'shares.view',
             'certificates.view',

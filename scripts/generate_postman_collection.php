@@ -5,7 +5,7 @@ declare(strict_types=1);
 $basePath = dirname(__DIR__);
 require $basePath.'/vendor/autoload.php';
 
-$routeJson = shell_exec('cd '.escapeshellarg($basePath).' && php artisan route:list --path=api --json');
+$routeJson = shell_exec('cd '.escapeshellarg($basePath).' && '.escapeshellarg(PHP_BINARY).' artisan route:list --path=api --json');
 $routes = json_decode((string) $routeJson, true, flags: JSON_THROW_ON_ERROR);
 
 $jsonPayloads = [
@@ -69,6 +69,19 @@ $jsonPayloads = [
     'NibssController@postAccounts' => ['accounts' => [['accountNumber' => '0123456789', 'bankCode' => '058', 'amount' => 1000, 'narration' => 'Dividend payment']]],
     'CautionController@store' => ['scope' => 'company', 'caution_type' => 'legal', 'instruction_source' => 'court', 'reason' => 'Court restriction pending review', 'effective_date' => '2026-06-08'],
     'CautionController@destroy' => ['removal_reason' => 'Court restriction lifted'],
+    'CscsUploadController@storeSecurityMapping' => ['security_code' => 'STANBIC', 'register_id' => '{{register_id}}', 'share_class_id' => '{{share_class_id}}', 'is_active' => true],
+    'CscsUploadController@updateSecurityMapping' => ['security_code' => 'STANBIC', 'register_id' => '{{register_id}}', 'share_class_id' => '{{share_class_id}}', 'is_active' => true],
+    'CscsUploadController@updateApprovalPolicy' => ['name' => 'Default CSCS policy', 'checker_roles' => ['Internal Audit'], 'additional_approval_quantity' => 1000000, 'additional_approval_roles' => ['Internal Audit', 'Compliance'], 'checker_can_post' => true],
+    'CscsUploadController@resolveException' => ['resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => '{{sra_id}}', 'reason' => 'Account mapping confirmed against the shareholder register'],
+    'CscsUploadController@revalidate' => ['comment' => 'All transaction groups and proposed holdings reviewed'],
+    'CscsUploadController@submit' => ['comment' => 'Reconciled batch submitted for independent approval'],
+    'CscsUploadController@raiseQuery' => ['comment' => 'Please confirm the identified account mapping', 'transaction_numbers' => ['2606160005615022'], 'row_ids' => [1]],
+    'CscsUploadController@respondToQuery' => ['comment' => 'The account mapping has been confirmed and corrected'],
+    'CscsUploadController@approve' => ['comment' => 'Balanced transaction groups and proposed holding effects reviewed'],
+    'CscsUploadController@reject' => ['comment' => 'Source movement details require correction before posting'],
+    'CscsUploadController@cancel' => ['comment' => 'Batch cancelled because a replacement CSCS file was supplied'],
+    'CscsUploadController@post' => ['comment' => 'Approved batch released for controlled posting'],
+    'CscsUploadController@createReversal' => ['reason' => 'Correcting an approved CSCS source-file error', 'effective_date' => '2026-07-22', 'transaction_numbers' => []],
 ];
 
 $multipartPayloads = [
@@ -80,6 +93,8 @@ $multipartPayloads = [
     ],
     'CscsUploadController@import' => [
         ['key' => 'register_id', 'value' => '{{register_id}}', 'type' => 'text'],
+        ['key' => 'description', 'value' => 'CSCS daily advice upload', 'type' => 'text'],
+        ['key' => 'business_reference', 'value' => 'CSCS-20260616-STANBIC', 'type' => 'text'],
         ['key' => 'files[]', 'type' => 'file', 'src' => ''],
         ['key' => 'files[]', 'type' => 'file', 'src' => ''],
     ],
@@ -107,9 +122,9 @@ $queryExamples = [
     'ShareholderController@index' => ['search' => 'Ada', 'status' => 'active', 'per_page' => '15'],
     'UserActivityLogController@index' => ['user_id' => '{{adminUser}}', 'action' => 'updated', 'date_from' => '2026-01-01', 'date_to' => '2026-12-31', 'per_page' => '15'],
     'CautionController@index' => ['status' => 'active', 'caution_type' => 'legal'],
-    'CscsUploadController@index' => ['status' => 'completed_with_errors', 'register_id' => '{{register_id}}', 'per_page' => '15'],
-    'CscsUploadController@rows' => ['status' => 'failed', 'identifier' => 'C123', 'per_page' => '50'],
-    'CscsUploadController@exceptions' => ['status' => 'failed', 'per_page' => '50'],
+    'CscsUploadController@index' => ['status' => 'DRAFT_REVIEW', 'register_id' => '{{register_id}}', 'per_page' => '15'],
+    'CscsUploadController@rows' => ['status' => 'UNRESOLVED', 'identifier' => 'C123', 'security_code' => 'STANBIC', 'per_page' => '50'],
+    'CscsUploadController@exceptions' => ['status' => 'UNRESOLVED', 'per_page' => '50'],
     'NotificationController@index' => ['unread_only' => 'true', 'per_page' => '20'],
     'AuditReportController@index' => ['user_id' => '{{adminUser}}', 'role' => 'Operations', 'shareholder_id' => '{{shareholder}}', 'activity_category' => 'shareholders', 'date_from' => '2026-01-01', 'date_to' => '2026-12-31', 'per_page' => '15'],
     'IpoOfferController@index' => ['status' => 'approved', 'per_page' => '15'],
