@@ -63,14 +63,13 @@ class Register extends Model
         return $this->belongsTo(InstrumentType::class);
     }
 
-    // TEMPORARILY COMMENTED OUT - Will enable when we create this model
-    // /**
-    //  * Get the shareholder register accounts for this register.
-    //  */
-    // public function shareholderRegisterAccounts()
-    // {
-    //     return $this->hasMany(ShareholderRegisterAccount::class);
-    // }
+    /**
+     * Get the shareholder register accounts for this register.
+     */
+    public function shareholderRegisterAccounts()
+    {
+        return $this->hasMany(ShareholderRegisterAccount::class);
+    }
 
     /**
      * Scope a query to only include active registers.

@@ -1,0 +1,54 @@
+{
+    "include": [
+        "app",
+        "artisan",
+        "bootstrap/app.php",
+        "bootstrap/providers.php",
+        "composer.json",
+        "composer.lock",
+        "config",
+        "database/migrations",
+        "database/seeders/ShareholderCategorySeeder.php",
+        "public",
+        "resources",
+        "routes"
+    ],
+    "runtime_directories": [
+        "bootstrap/cache",
+        "storage/app/private",
+        "storage/app/public",
+        "storage/framework/cache/data",
+        "storage/framework/sessions",
+        "storage/framework/views",
+        "storage/logs"
+    ],
+    "exclude_prefixes": [
+        "public/hot",
+        "public/storage"
+    ],
+    "exclude_patterns": [
+        ".DS_Store",
+        ".env",
+        ".env.*",
+        "*.log",
+        "*.sqlite",
+        "*.sqlite-*",
+        "*.sqlite3",
+        "*.key",
+        "auth.json"
+    ],
+    "forbidden_prefixes": [
+        ".git",
+        ".github",
+        ".vscode",
+        "build",
+        "docs",
+        "migration-releases",
+        "node_modules",
+        "outputs",
+        "postman",
+        "scripts",
+        "tests",
+        "tools"
+    ]
+}

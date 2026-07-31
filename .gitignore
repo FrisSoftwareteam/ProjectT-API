@@ -19,6 +19,14 @@
 /storage/*.key
 /storage/pail
 /vendor
+/build
+/migration-releases/*
+!/migration-releases/fidelity-bank-register-87-production-v1.tar.gz
+!/migration-releases/fidelity-bank-register-87-production-v1.manifest.json
+!/migration-releases/fidelity-bank-register-87-production-v1.sha256
+/docs/ESTOCK*
+/outputs
+/tools/estock_migration
 Homestead.json
 Homestead.yaml
 Thumbs.db

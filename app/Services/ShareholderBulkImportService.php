@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\ShareClass;
 use App\Models\Shareholder;
 use App\Models\ShareholderAddress;
+use App\Models\ShareholderCategory;
 use App\Models\ShareholderImportBatch;
 use App\Models\ShareholderImportRow;
 use App\Models\ShareholderMandate;
@@ -257,6 +258,9 @@ class ShareholderBulkImportService
                 $sra = ShareholderRegisterAccount::create([
                     'shareholder_id' => $shareholder->id,
                     'register_id' => $registerId,
+                    'shareholder_category_id' => isset($validated['shareholder_category_code'])
+                        ? ShareholderCategory::query()->where('code', $validated['shareholder_category_code'])->value('id')
+                        : null,
                     'shareholder_no' => $validated['shareholder_no'] ?? ShareholderRegisterAccount::generateAccountNumber($shareholder->id),
                     'chn' => $validated['chn'] ?? null,
                     'cscs_account_no' => $validated['cscs_account_no'] ?? null,
@@ -335,6 +339,9 @@ class ShareholderBulkImportService
     private function validateRow(array $row): array
     {
         $row = $this->normalizeEmptyValues($row);
+        if (! empty($row['shareholder_category_code'])) {
+            $row['shareholder_category_code'] = strtoupper((string) $row['shareholder_category_code']);
+        }
         $rules = [
             'holder_type' => ['required', 'in:individual,corporate'],
             'first_name' => ['required', 'string', 'max:255'],
@@ -361,6 +368,14 @@ class ShareholderBulkImportService
             'address_valid_from' => ['nullable', 'date'],
             'address_valid_to' => ['nullable', 'date'],
             'register_id' => ['required', 'integer', 'exists:registers,id'],
+            'shareholder_category_code' => [
+                'nullable',
+                'string',
+                'max:10',
+                Rule::exists('shareholder_categories', 'code')->where(
+                    fn ($query) => $query->where('is_active', true)->whereNull('deleted_at')
+                ),
+            ],
             'shareholder_no' => ['nullable', 'string', 'max:30'],
             'chn' => ['nullable', 'string', 'max:50'],
             'cscs_account_no' => ['nullable', 'string', 'max:50'],
@@ -393,6 +408,18 @@ class ShareholderBulkImportService
         $validator->after(function ($validator) use ($row) {
             if (($row['holder_type'] ?? null) === 'individual' && empty($row['last_name'])) {
                 $validator->errors()->add('last_name', 'Last name is required for individual shareholders.');
+            }
+
+            if (! empty($row['shareholder_category_code']) && ! empty($row['holder_type'])) {
+                $category = ShareholderCategory::query()
+                    ->where('code', $row['shareholder_category_code'])
+                    ->first();
+                if ($category && ! $category->isCompatibleWith($row['holder_type'])) {
+                    $validator->errors()->add(
+                        'shareholder_category_code',
+                        "Category {$category->code} requires holder type {$category->default_holder_type}."
+                    );
+                }
             }
         });
         $validator->validate();

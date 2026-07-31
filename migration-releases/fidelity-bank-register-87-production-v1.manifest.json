@@ -1,0 +1,52 @@
+{
+    "format": "projectt-company-data-release-v1",
+    "bundle_release_id": "1dd3c531727ef54b3d6099f7a47b7045c63e08a1290ace7bcdf269fa61599684",
+    "bundle_name": "fidelity-bank-register-87-production-v1",
+    "artifact_filename": "fidelity-bank-register-87-production-v1.tar.gz",
+    "artifact_sha256": "3f80c5f32d9c04892c7531331a2c14c8b2cac9cd85ce977b44ad3d75c1157220",
+    "artifact_bytes": 98729587,
+    "manifest_sha256": "a0758cf8671acf48c673dfcf491acb2c5b5a4e3604cb3077ddec2f3bec9aa49b",
+    "records_sha256": "1266738feff2be7cda98cf1371b46619c06c1d5ae1d386b8b206e246d8b674c6",
+    "summary": {
+        "rows": 402770,
+        "quantity": "28962585692.000000",
+        "categories": {
+            "A": {
+                "rows": 4742,
+                "quantity": "774983626.000000"
+            },
+            "C": {
+                "rows": 6901,
+                "quantity": "13566434404.000000"
+            },
+            "I": {
+                "rows": 390544,
+                "quantity": "12860992586.000000"
+            },
+            "V": {
+                "rows": 511,
+                "quantity": "35643791.000000"
+            },
+            "Z": {
+                "rows": 72,
+                "quantity": "1724531285.000000"
+            }
+        },
+        "holder_types": {
+            "corporate": {
+                "rows": 6979,
+                "quantity": "15291355289.000000"
+            },
+            "individual": {
+                "rows": 395791,
+                "quantity": "13671230403.000000"
+            }
+        },
+        "holding_modes": {
+            "paper": {
+                "rows": 402770,
+                "quantity": "28962585692.000000"
+            }
+        }
+    }
+}

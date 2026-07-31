@@ -14,16 +14,19 @@ use App\Http\Controllers\Api\Admin\PermissionController;
 use App\Http\Controllers\Api\Admin\RegisterController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\ShareClassController;
+use App\Http\Controllers\Api\Admin\ShareholderCategoryController;
 use App\Http\Controllers\Api\Admin\ShareholderController;
 use App\Http\Controllers\Api\AuditReportController;
 use App\Http\Controllers\Api\BankVerificationController;
 use App\Http\Controllers\Api\CautionController;
 use App\Http\Controllers\Api\CscsUploadController;
 use App\Http\Controllers\Api\IpoOfferController;
+use App\Http\Controllers\Api\LegacyMigrationController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ProbateCaseController;
 use App\Http\Controllers\Api\ShareAllocationController;
 use App\Http\Controllers\Api\ShareholderMergeController;
+use App\Http\Controllers\Api\ShareholderRegisterAccountController;
 use App\Http\Controllers\Api\ShareTransferController;
 use App\Http\Controllers\Api\SraGuardianController;
 use App\Http\Controllers\Api\UserActivityLogController;
@@ -172,6 +175,28 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/{shareholder}/shares/dispose', [ShareAllocationController::class, 'dispose'])->middleware('permission:shares.transfer');
     });
 
+    Route::prefix('shareholder-categories')->group(function () {
+        Route::get('/', [ShareholderCategoryController::class, 'index'])
+            ->middleware('permission:shareholders.view');
+        Route::post('/', [ShareholderCategoryController::class, 'store'])
+            ->middleware('permission:shareholders.edit');
+        Route::get('/{id}', [ShareholderCategoryController::class, 'show'])
+            ->middleware('permission:shareholders.view');
+        Route::put('/{id}', [ShareholderCategoryController::class, 'update'])
+            ->middleware('permission:shareholders.edit');
+        Route::patch('/{id}', [ShareholderCategoryController::class, 'update'])
+            ->middleware('permission:shareholders.edit');
+        Route::delete('/{id}', [ShareholderCategoryController::class, 'destroy'])
+            ->middleware('permission:shareholders.edit');
+        Route::post('/{id}/restore', [ShareholderCategoryController::class, 'restore'])
+            ->middleware('permission:shareholders.edit');
+    });
+
+    Route::patch(
+        '/shareholder-register-accounts/{id}/category',
+        [ShareholderRegisterAccountController::class, 'updateCategory']
+    )->middleware('permission:shareholders.edit');
+
     // User Activity Logs
     Route::prefix('user-activity-logs')->group(function () {
         Route::get('/', [UserActivityLogController::class, 'index'])->middleware('permission:user_activity_logs.view');
@@ -271,6 +296,22 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::get('/uploads/{batchId}/files', [CscsUploadController::class, 'files'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/files/{fileIndex}/download', [CscsUploadController::class, 'downloadFile'])->middleware('permission:cscs.export');
         Route::get('/uploads/{batchId}/export', [CscsUploadController::class, 'export'])->middleware('permission:cscs.export');
+    });
+
+    // Controlled, auditable legacy-data migration workflow
+    Route::prefix('legacy-migrations')->group(function () {
+        Route::get('/packages', [LegacyMigrationController::class, 'packages'])->middleware('permission:legacy_migrations.view');
+        Route::get('/batches', [LegacyMigrationController::class, 'index'])->middleware('permission:legacy_migrations.view');
+        Route::post('/batches', [LegacyMigrationController::class, 'create'])->middleware(['permission:legacy_migrations.create', 'throttle:5,1']);
+        Route::get('/batches/{batchId}', [LegacyMigrationController::class, 'show'])->middleware('permission:legacy_migrations.view');
+        Route::get('/batches/{batchId}/events', [LegacyMigrationController::class, 'events'])->middleware('permission:legacy_migrations.view');
+        Route::post('/batches/{batchId}/stage', [LegacyMigrationController::class, 'stage'])->middleware(['permission:legacy_migrations.stage', 'throttle:5,1']);
+        Route::post('/batches/{batchId}/reconcile', [LegacyMigrationController::class, 'reconcile'])->middleware('permission:legacy_migrations.reconcile');
+        Route::post('/batches/{batchId}/submit', [LegacyMigrationController::class, 'submit'])->middleware('permission:legacy_migrations.submit');
+        Route::post('/batches/{batchId}/approve', [LegacyMigrationController::class, 'approve'])->middleware('permission:legacy_migrations.approve');
+        Route::post('/batches/{batchId}/publish', [LegacyMigrationController::class, 'publish'])->middleware(['permission:legacy_migrations.publish', 'throttle:5,1']);
+        Route::post('/batches/{batchId}/cancel', [LegacyMigrationController::class, 'cancel'])->middleware('permission:legacy_migrations.submit');
+        Route::post('/batches/{batchId}/rollback', [LegacyMigrationController::class, 'rollback'])->middleware(['permission:legacy_migrations.rollback', 'throttle:5,1']);
     });
 
     // IPO / Offer processing

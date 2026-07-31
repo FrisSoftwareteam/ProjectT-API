@@ -12,6 +12,7 @@ use App\Http\Requests\ShareholderMandateRequest;
 use App\Http\Requests\ShareholderRequest;
 use App\Models\Shareholder;
 use App\Models\ShareholderAddress;
+use App\Models\ShareholderCategory;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
@@ -55,11 +56,12 @@ class ShareholderController extends Controller
                 'id',
                 'shareholder_id',
                 'register_id',
+                'shareholder_category_id',
                 'shareholder_no',
                 'chn',
                 'cscs_account_no',
                 'status'
-            );
+            )->with('category');
         }]);
 
         $shareholders = $query->paginate(20);
@@ -334,7 +336,7 @@ class ShareholderController extends Controller
 
             DB::commit();
 
-            $shareholder->load('addresses', 'mandates', 'identities', 'holdings.shareClass.register.company', 'certificates', 'registerAccounts');
+            $shareholder->load('addresses', 'mandates', 'identities', 'holdings.shareClass.register.company', 'certificates', 'registerAccounts.category');
 
             return response()->json([
                 'success' => true,
@@ -360,7 +362,7 @@ class ShareholderController extends Controller
             'identities',
             'holdings.shareClass.register.company',
             'certificates',
-            'registerAccounts',
+            'registerAccounts.category',
             'activeCautions'
         )->findOrFail($id);
 
@@ -469,7 +471,7 @@ class ShareholderController extends Controller
             'identities',
             'holdings',
             'certificates',
-            'registerAccounts'
+            'registerAccounts.category'
         )->get();
 
         return response()->json($shareholderMandates);
@@ -524,6 +526,18 @@ class ShareholderController extends Controller
         $shareholder = Shareholder::findOrFail($shareholderId);
         $payload = $request->validated();
 
+        $category = null;
+        if (! empty($payload['shareholder_category_id'])) {
+            $category = ShareholderCategory::query()->findOrFail($payload['shareholder_category_id']);
+            if (! $category->isCompatibleWith($shareholder->holder_type)) {
+                throw ValidationException::withMessages([
+                    'shareholder_category_id' => [
+                        "Category {$category->code} requires holder type {$category->default_holder_type}.",
+                    ],
+                ]);
+            }
+        }
+
         $existing = ShareholderRegisterAccount::query()
             ->where('shareholder_id', $shareholder->id)
             ->where('register_id', $payload['register_id'])
@@ -540,6 +554,7 @@ class ShareholderController extends Controller
         $registerAccount = ShareholderRegisterAccount::query()->create([
             'shareholder_id' => $shareholder->id,
             'register_id' => $payload['register_id'],
+            'shareholder_category_id' => $category?->id,
             'shareholder_no' => $payload['shareholder_no'] ?? $this->generateShareholderNo($shareholder->id),
             'chn' => $payload['chn'] ?? null,
             'cscs_account_no' => $payload['cscs_account_no'] ?? null,
@@ -551,7 +566,7 @@ class ShareholderController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Shareholder added to register successfully',
-            'data' => $registerAccount,
+            'data' => $registerAccount->load('category'),
         ], 201);
     }
 

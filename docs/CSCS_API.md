@@ -2,6 +2,8 @@
 
 This document describes the implemented CSCS staging, reconciliation, maker-checker approval, and controlled posting API.
 
+Frontend developers should also use the step-by-step [CSCS frontend integration guide](CSCS_FRONTEND_INTEGRATION_GUIDE.md).
+
 Base URL:
 
 ```text
@@ -272,17 +274,3 @@ This requires `cscs.upload`, accepts only a `POSTED` source batch, and creates a
 - `500`: sanitized technical error; internal details are written only to secured logs with a reference.
 
 Never build frontend authorization solely from button visibility. The API enforces every permission, actor-separation rule, and state transition server-side.
-
-## Deployment checklist
-
-1. Back up the database.
-2. Run `php artisan migrate`.
-3. Run `php artisan db:seed --class=RolesAndPermissionsSeeder`.
-4. Assign the new permissions to any custom roles.
-5. Create and verify every production `SEC_CODE` mapping.
-6. Configure and review the CSCS approval policy.
-7. Set `CSCS_MAX_UPLOAD_KB` and `CSCS_RETENTION_DAYS`.
-8. Ensure private storage is not web-accessible.
-9. Start and monitor the `cscs` queue worker.
-10. Run the CSCS workflow tests and UAT with anonymized production-format files.
-11. Confirm the official CSCS field layout and sequence semantics before production release.

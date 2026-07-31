@@ -19,7 +19,10 @@ class Shareholder extends Model
         'middle_name',
         'full_name',
         'email',
+        'email_is_verified',
         'phone',
+        'phone_is_verified',
+        'contact_suppressed',
         'date_of_birth',
         'sex',
         'rc_number',
@@ -34,6 +37,9 @@ class Shareholder extends Model
     ];
     protected $casts = [
         'date_of_birth' => 'date',
+        'email_is_verified' => 'boolean',
+        'phone_is_verified' => 'boolean',
+        'contact_suppressed' => 'boolean',
     ];
 
     protected $appends = [

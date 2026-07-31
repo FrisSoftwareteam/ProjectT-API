@@ -5,7 +5,24 @@
 *.html diff=html
 *.md diff=markdown
 *.php diff=php
+/migration-releases/*.tar.gz binary
 
 /.github export-ignore
+/build export-ignore
+/deploy export-ignore
+/docs export-ignore
+/migration-releases export-ignore
+/outputs export-ignore
+/postman export-ignore
+/scripts export-ignore
+/tests export-ignore
+/tools export-ignore
+/.editorconfig export-ignore
+/.env.example export-ignore
+/.phpunit.result.cache export-ignore
+/package.json export-ignore
+/package-lock.json export-ignore
+/phpunit.xml export-ignore
+/vite.config.js export-ignore
 CHANGELOG.md export-ignore
 .styleci.yml export-ignore
