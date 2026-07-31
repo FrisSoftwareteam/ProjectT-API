@@ -64,6 +64,55 @@ class CompanyDataReleaseService
                     throw new RuntimeException('This bundle release ID is already registered with a different artifact checksum.');
                 }
 
+                if (! hash_equals((string) $existing->approval_snapshot_hash, $this->approvalSnapshot($existing))) {
+                    if ($existing->status !== CompanyDataRelease::PENDING_APPROVAL) {
+                        throw new RuntimeException("Release re-verification is not allowed while status is {$existing->status}.");
+                    }
+                    if ((int) $existing->verified_by !== $actorId) {
+                        throw new RuntimeException('Only the original maker may re-verify this pending production bundle.');
+                    }
+
+                    [$company, $register, $shareClass] = $this->resolveTarget($manifest);
+                    $checks = $this->preflight($bundle, $register, $shareClass, $existing->id);
+                    if (in_array(false, $checks, true)) {
+                        throw new RuntimeException('Company release production preflight failed: '.json_encode($checks));
+                    }
+                    $verification = $bundle['inspection'] + ['checks' => $checks, 'result' => 'PASS'];
+
+                    return DB::transaction(function () use ($existing, $bundle, $manifest, $company, $register, $shareClass, $actorId, $comment, $verification): CompanyDataRelease {
+                        $release = CompanyDataRelease::lockForUpdate()->findOrFail($existing->id);
+                        if ($release->status !== CompanyDataRelease::PENDING_APPROVAL || (int) $release->verified_by !== $actorId) {
+                            throw new RuntimeException('The pending production release changed during re-verification.');
+                        }
+                        $release->fill([
+                            'artifact_filename' => basename($bundle['archive_path']),
+                            'artifact_size' => $bundle['artifact_size'],
+                            'artifact_path' => $bundle['archive_path'],
+                            'company_id' => $company->id,
+                            'register_id' => $register->id,
+                            'share_class_id' => $shareClass->id,
+                            'expected_rows' => $manifest['summary']['rows'],
+                            'expected_quantity' => $manifest['summary']['quantity'],
+                            'manifest' => $manifest,
+                            'verification' => $verification,
+                            'verified_at' => now(),
+                        ]);
+                        $snapshot = $this->approvalSnapshot($release);
+                        $release->approval_snapshot_hash = $snapshot;
+                        $release->save();
+                        CompanyDataReleaseApproval::create([
+                            'release_id' => $release->id,
+                            'decision' => 'SUBMITTED',
+                            'actor_id' => $actorId,
+                            'comment' => $comment,
+                            'snapshot_hash' => $snapshot,
+                        ]);
+                        $this->event($release, 'REVERIFIED_AND_SUBMITTED', CompanyDataRelease::PENDING_APPROVAL, CompanyDataRelease::PENDING_APPROVAL, $actorId, $comment, $verification);
+
+                        return $release->fresh();
+                    });
+                }
+
                 return $existing;
             }
 
@@ -342,7 +391,7 @@ class CompanyDataReleaseService
     }
 
     /** @param array<string,mixed> $bundle @return array<string,bool> */
-    private function preflight(array $bundle, Register $register, ShareClass $shareClass): array
+    private function preflight(array $bundle, Register $register, ShareClass $shareClass, ?int $exceptReleaseId = null): array
     {
         $manifest = $bundle['manifest'];
         $categoryCodes = array_keys($manifest['summary']['categories']);
@@ -362,9 +411,12 @@ class CompanyDataReleaseService
         $targetEmpty = DB::table('share_positions')->where('share_class_id', $shareClass->id)->doesntExist();
         $capitalMatches = $register->capital_behaviour_type !== 'constant'
             || FixedScaleDecimal::equals((string) ($register->paid_up_capital ?? 0), $manifest['summary']['quantity']);
-        $noActiveRelease = CompanyDataRelease::where('share_class_id', $shareClass->id)
-            ->whereIn('status', [CompanyDataRelease::PENDING_APPROVAL, CompanyDataRelease::APPROVED, CompanyDataRelease::IMPORTING, CompanyDataRelease::IMPORTED])
-            ->doesntExist();
+        $activeReleaseQuery = CompanyDataRelease::where('share_class_id', $shareClass->id)
+            ->whereIn('status', [CompanyDataRelease::PENDING_APPROVAL, CompanyDataRelease::APPROVED, CompanyDataRelease::IMPORTING, CompanyDataRelease::IMPORTED]);
+        if ($exceptReleaseId !== null) {
+            $activeReleaseQuery->whereKeyNot($exceptReleaseId);
+        }
+        $noActiveRelease = $activeReleaseQuery->doesntExist();
 
         return [
             'artifact_checksum_verified' => true,

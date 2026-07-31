@@ -84,7 +84,16 @@ class CompanyDataReleaseWorkflowTest extends TestCase
         DB::table('company_data_releases')->where('id', $release->id)->update([
             'manifest' => json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
             'verification' => json_encode($verification, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'approval_snapshot_hash' => str_repeat('0', 64),
         ]);
+        $release = $service->verify(
+            $bundle['archive_path'],
+            $bundle['artifact_sha256'],
+            $maker->id,
+            'Re-verified after upgrading legacy snapshot canonicalization'
+        );
+        $this->assertNotSame(str_repeat('0', 64), $release->approval_snapshot_hash);
+        $this->assertDatabaseHas('company_data_release_events', ['release_id' => $release->id, 'event_type' => 'REVERIFIED_AND_SUBMITTED']);
 
         try {
             $service->approve($release, $maker->id, 'Maker self approval must be rejected');
@@ -127,7 +136,7 @@ class CompanyDataReleaseWorkflowTest extends TestCase
         $this->assertDatabaseCount('share_positions', 0);
         $this->assertDatabaseCount('company_data_release_records', 2);
         $this->assertDatabaseHas('company_data_release_records', ['status' => 'ROLLED_BACK']);
-        $this->assertDatabaseCount('company_data_release_approvals', 2);
+        $this->assertDatabaseCount('company_data_release_approvals', 3);
         $this->assertGreaterThanOrEqual(5, $release->events()->count());
     }
 
