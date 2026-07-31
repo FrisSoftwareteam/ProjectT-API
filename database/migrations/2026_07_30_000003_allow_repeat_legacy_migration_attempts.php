@@ -13,14 +13,26 @@ return new class extends Migration
             return;
         }
 
-        Schema::table('legacy_migration_batches', function (Blueprint $table) {
-            $table->unsignedInteger('attempt_no')->default(1)->after('revision');
-            $table->dropUnique('uk_legacy_batch_register_source');
-            $table->unique(
-                ['register_id', 'source_sha256', 'attempt_no'],
-                'uk_legacy_batch_register_source_attempt'
-            );
-        });
+        if (! Schema::hasColumn('legacy_migration_batches', 'attempt_no')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->unsignedInteger('attempt_no')->default(1)->after('revision');
+            });
+        }
+
+        if (Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->dropUnique('uk_legacy_batch_register_source');
+            });
+        }
+
+        if (! Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source_attempt')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->unique(
+                    ['register_id', 'source_sha256', 'attempt_no'],
+                    'uk_legacy_batch_register_source_attempt'
+                );
+            });
+        }
     }
 
     public function down(): void
@@ -39,10 +51,22 @@ return new class extends Migration
             throw new RuntimeException('Cannot remove migration attempt support while repeated batches exist.');
         }
 
-        Schema::table('legacy_migration_batches', function (Blueprint $table) {
-            $table->dropUnique('uk_legacy_batch_register_source_attempt');
-            $table->dropColumn('attempt_no');
-            $table->unique(['register_id', 'source_sha256'], 'uk_legacy_batch_register_source');
-        });
+        if (Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source_attempt')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->dropUnique('uk_legacy_batch_register_source_attempt');
+            });
+        }
+
+        if (Schema::hasColumn('legacy_migration_batches', 'attempt_no')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->dropColumn('attempt_no');
+            });
+        }
+
+        if (! Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->unique(['register_id', 'source_sha256'], 'uk_legacy_batch_register_source');
+            });
+        }
     }
 };
