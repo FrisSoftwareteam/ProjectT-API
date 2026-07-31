@@ -19,9 +19,9 @@ return new class extends Migration
             });
         }
 
-        if (Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source')) {
+        if (! Schema::hasIndex('legacy_migration_batches', 'idx_legacy_batch_register_fk')) {
             Schema::table('legacy_migration_batches', function (Blueprint $table) {
-                $table->dropUnique('uk_legacy_batch_register_source');
+                $table->index('register_id', 'idx_legacy_batch_register_fk');
             });
         }
 
@@ -31,6 +31,12 @@ return new class extends Migration
                     ['register_id', 'source_sha256', 'attempt_no'],
                     'uk_legacy_batch_register_source_attempt'
                 );
+            });
+        }
+
+        if (Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->dropUnique('uk_legacy_batch_register_source');
             });
         }
     }
@@ -66,6 +72,12 @@ return new class extends Migration
         if (! Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source')) {
             Schema::table('legacy_migration_batches', function (Blueprint $table) {
                 $table->unique(['register_id', 'source_sha256'], 'uk_legacy_batch_register_source');
+            });
+        }
+
+        if (Schema::hasIndex('legacy_migration_batches', 'idx_legacy_batch_register_fk')) {
+            Schema::table('legacy_migration_batches', function (Blueprint $table) {
+                $table->dropIndex('idx_legacy_batch_register_fk');
             });
         }
     }

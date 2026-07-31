@@ -31,6 +31,7 @@ class RepeatLegacyMigrationAttemptMigrationTest extends TestCase
         $migration->up();
 
         $this->assertTrue(Schema::hasColumn('legacy_migration_batches', 'attempt_no'));
+        $this->assertTrue(Schema::hasIndex('legacy_migration_batches', 'idx_legacy_batch_register_fk'));
         $this->assertFalse(Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source'));
         $this->assertTrue(Schema::hasIndex('legacy_migration_batches', 'uk_legacy_batch_register_source_attempt'));
     }
