@@ -578,7 +578,7 @@ class CompanyDataReleaseService
     {
         if (! hash_equals($release->artifact_sha256, $bundle['artifact_sha256'])
             || ! hash_equals($release->bundle_release_id, $bundle['manifest']['bundle_release_id'])
-            || $release->manifest !== $bundle['manifest']
+            || $this->canonicalizeSnapshotValue($release->manifest) !== $this->canonicalizeSnapshotValue($bundle['manifest'])
             || ! hash_equals((string) $release->approval_snapshot_hash, $this->approvalSnapshot($release))) {
             throw new RuntimeException('The approved production bundle changed before import.');
         }
@@ -595,7 +595,33 @@ class CompanyDataReleaseService
 
     private function approvalSnapshot(CompanyDataRelease $release): string
     {
-        return hash('sha256', $release->artifact_sha256.'|'.json_encode($release->manifest).'|'.json_encode($release->verification));
+        $snapshot = [
+            'artifact_sha256' => $release->artifact_sha256,
+            'manifest' => $release->manifest,
+            'verification' => $release->verification,
+        ];
+
+        return hash('sha256', json_encode(
+            $this->canonicalizeSnapshotValue($snapshot),
+            JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+        ));
+    }
+
+    private function canonicalizeSnapshotValue(mixed $value): mixed
+    {
+        if (! is_array($value)) {
+            return $value;
+        }
+
+        if (! array_is_list($value)) {
+            ksort($value, SORT_STRING);
+        }
+
+        foreach ($value as $key => $item) {
+            $value[$key] = $this->canonicalizeSnapshotValue($item);
+        }
+
+        return $value;
     }
 
     /** @param array<string,mixed>|null $metadata */

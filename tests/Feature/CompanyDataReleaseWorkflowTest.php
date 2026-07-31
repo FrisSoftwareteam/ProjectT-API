@@ -75,6 +75,17 @@ class CompanyDataReleaseWorkflowTest extends TestCase
         );
         $this->assertSame(CompanyDataRelease::PENDING_APPROVAL, $release->status);
 
+        // MySQL may normalize the key order of JSON columns. Equivalent JSON must
+        // retain the same approval snapshot when it is loaded back from storage.
+        $manifest = $release->manifest;
+        $verification = $release->verification;
+        ksort($manifest, SORT_STRING);
+        ksort($verification, SORT_STRING);
+        DB::table('company_data_releases')->where('id', $release->id)->update([
+            'manifest' => json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            'verification' => json_encode($verification, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+        ]);
+
         try {
             $service->approve($release, $maker->id, 'Maker self approval must be rejected');
             $this->fail('The release maker approved their own bundle.');
