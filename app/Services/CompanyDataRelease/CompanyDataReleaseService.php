@@ -267,7 +267,7 @@ class CompanyDataReleaseService
             $release->update([
                 'status' => CompanyDataRelease::IMPORT_FAILED,
                 'imported_rows' => $importedRows,
-                'failure_reason' => $exception->getMessage(),
+                'failure_reason' => $this->safeFailureReason($exception),
             ]);
             $this->event($release, 'IMPORT_FAILED', CompanyDataRelease::IMPORTING, CompanyDataRelease::IMPORT_FAILED, $actorId, null, ['imported_rows' => $importedRows]);
             throw $exception;
@@ -365,7 +365,7 @@ class CompanyDataReleaseService
 
             return $release->fresh();
         } catch (Throwable $exception) {
-            $release->update(['status' => CompanyDataRelease::ROLLBACK_BLOCKED, 'failure_reason' => $exception->getMessage()]);
+            $release->update(['status' => CompanyDataRelease::ROLLBACK_BLOCKED, 'failure_reason' => $this->safeFailureReason($exception)]);
             $this->event($release, 'ROLLBACK_BLOCKED', CompanyDataRelease::ROLLING_BACK, CompanyDataRelease::ROLLBACK_BLOCKED, $actorId, $comment);
             throw $exception;
         }
@@ -463,6 +463,9 @@ class CompanyDataReleaseService
             DB::table('shareholders')->insert($records->map(fn (array $record): array => [
                 'account_no' => $record['target_account_no'],
                 'holder_type' => $record['holder_type'],
+                // Preserve the authoritative legacy name in full_name while
+                // satisfying production schemas that still require first_name.
+                'first_name' => mb_substr($record['full_name'], 0, 100),
                 'full_name' => $record['full_name'],
                 'email' => $record['target_email'],
                 'email_is_verified' => false,
@@ -674,6 +677,14 @@ class CompanyDataReleaseService
         }
 
         return $value;
+    }
+
+    private function safeFailureReason(Throwable $exception): string
+    {
+        $message = trim($exception->getMessage());
+        $message = preg_replace('/\s+\(Connection:.*\z/s', '', $message) ?? $message;
+
+        return Str::limit($message, 1997, '...');
     }
 
     /** @param array<string,mixed>|null $metadata */

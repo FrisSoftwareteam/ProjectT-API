@@ -111,6 +111,8 @@ class CompanyDataReleaseWorkflowTest extends TestCase
         $this->assertDatabaseCount('shareholder_register_accounts', 2);
         $this->assertDatabaseCount('share_positions', 2);
         $this->assertDatabaseHas('shareholders', [
+            'first_name' => 'Release Holder 1',
+            'full_name' => 'Release Holder 1',
             'contact_suppressed' => true,
             'email_is_verified' => false,
             'phone_is_verified' => false,
@@ -138,6 +140,18 @@ class CompanyDataReleaseWorkflowTest extends TestCase
         $this->assertDatabaseHas('company_data_release_records', ['status' => 'ROLLED_BACK']);
         $this->assertDatabaseCount('company_data_release_approvals', 3);
         $this->assertGreaterThanOrEqual(5, $release->events()->count());
+    }
+
+    public function test_failure_reason_is_bounded_and_does_not_store_interpolated_sql(): void
+    {
+        $method = new \ReflectionMethod(CompanyDataReleaseService::class, 'safeFailureReason');
+        $reason = $method->invoke(
+            app(CompanyDataReleaseService::class),
+            new RuntimeException(str_repeat('x', 3000).' (Connection: mysql, SQL: insert private shareholder data)')
+        );
+
+        $this->assertLessThanOrEqual(2000, strlen($reason));
+        $this->assertStringNotContainsString('private shareholder data', $reason);
     }
 
     /** @return array{0:AdminUser,1:AdminUser,2:LegacyMigrationBatch} */
@@ -254,6 +268,7 @@ class CompanyDataReleaseWorkflowTest extends TestCase
             $t->id();
             $t->string('account_no')->unique();
             $t->string('holder_type');
+            $t->string('first_name', 100);
             $t->string('full_name');
             $t->string('email')->unique();
             $t->boolean('email_is_verified');
