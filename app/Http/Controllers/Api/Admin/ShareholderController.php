@@ -16,8 +16,8 @@ use App\Models\ShareholderCategory;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
-use App\Services\ShareholderBulkImportService;
 use App\Services\ShareholderAccountNumberService;
+use App\Services\ShareholderBulkImportService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -34,11 +34,16 @@ class ShareholderController extends Controller
         protected ShareholderBulkImportService $bulkImportService
     ) {}
 
-    public function index()
+    public function index(Request $request)
     {
+        $validated = $request->validate([
+            'register_id' => ['nullable', 'integer', 'exists:registers,id'],
+            'share_class_id' => ['nullable', 'integer', 'exists:share_classes,id'],
+        ]);
+
         $query = Shareholder::query();
 
-        $search = trim((string) request()->query('search', ''));
+        $search = trim((string) $request->query('search', ''));
         if ($search !== '') {
             $query->where(function ($q) use ($search) {
                 $like = '%'.$search.'%';
@@ -48,6 +53,23 @@ class ShareholderController extends Controller
                     ->orWhere('email', 'like', $like)
                     ->orWhere('phone', 'like', $like)
                     ->orWhere('account_no', 'like', $like);
+            });
+        }
+
+        $registerId = $validated['register_id'] ?? null;
+        $shareClassId = $validated['share_class_id'] ?? null;
+
+        if ($registerId !== null || $shareClassId !== null) {
+            $query->whereHas('registerAccounts', function ($accountQuery) use ($registerId, $shareClassId) {
+                if ($registerId !== null) {
+                    $accountQuery->where('register_id', $registerId);
+                }
+
+                if ($shareClassId !== null) {
+                    $accountQuery->whereHas('sharePositions', function ($positionQuery) use ($shareClassId) {
+                        $positionQuery->where('share_class_id', $shareClassId);
+                    });
+                }
             });
         }
 

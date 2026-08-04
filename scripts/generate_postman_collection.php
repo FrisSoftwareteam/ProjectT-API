@@ -119,7 +119,11 @@ $queryExamples = [
     'AdminUserController@index' => ['search' => 'Jane', 'is_active' => 'true', 'department' => 'Operations', 'per_page' => '15'],
     'RoleController@index' => ['search' => 'Admin', 'per_page' => '15'],
     'PermissionController@index' => ['module' => 'shareholders', 'action' => 'view', 'per_page' => '15'],
-    'ShareholderController@index' => ['search' => 'Ada', 'status' => 'active', 'per_page' => '15'],
+    'ShareholderController@index' => [
+        'search' => 'Ada',
+        'register_id' => '{{register_id}}',
+        'share_class_id' => '{{share_class_id}}',
+    ],
     'UserActivityLogController@index' => ['user_id' => '{{adminUser}}', 'action' => 'updated', 'date_from' => '2026-01-01', 'date_to' => '2026-12-31', 'per_page' => '15'],
     'CautionController@index' => ['status' => 'active', 'caution_type' => 'legal'],
     'CscsUploadController@index' => ['status' => 'DRAFT_REVIEW', 'register_id' => '{{register_id}}', 'per_page' => '15'],
