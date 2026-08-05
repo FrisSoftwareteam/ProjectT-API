@@ -98,7 +98,8 @@ class ShareholderFilterApiTest extends TestCase
             ->getJson("/api/shareholders?register_id={$firstRegister}")
             ->assertOk()
             ->assertJsonPath('total', 1)
-            ->assertJsonPath('data.0.id', $first);
+            ->assertJsonPath('data.0.id', $first)
+            ->assertJsonPath('data.0.total_holdings', '0.000000');
     }
 
     public function test_shareholders_can_be_filtered_by_share_class(): void
@@ -133,6 +134,35 @@ class ShareholderFilterApiTest extends TestCase
             ->getJson("/api/shareholders?register_id={$firstRegister}&share_class_id={$secondClass}")
             ->assertOk()
             ->assertJsonPath('total', 0);
+    }
+
+    public function test_total_holdings_respects_register_and_share_class_filters(): void
+    {
+        [$firstRegister, $secondRegister] = $this->createRegisters();
+        $ordinaryClass = $this->createShareClass($firstRegister, 'ORD');
+        $preferenceClass = $this->createShareClass($firstRegister, 'PREF');
+        $otherRegisterClass = $this->createShareClass($secondRegister, 'OTHER');
+        $shareholder = $this->createShareholder('holdings-total');
+        $firstAccount = $this->createRegisterAccount($shareholder, $firstRegister);
+        $secondAccount = $this->createRegisterAccount($shareholder, $secondRegister);
+        $this->createPosition($firstAccount, $ordinaryClass, 125);
+        $this->createPosition($firstAccount, $preferenceClass, 75);
+        $this->createPosition($secondAccount, $otherRegisterClass, 500);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?register_id={$firstRegister}&share_class_id={$ordinaryClass}")
+            ->assertOk()
+            ->assertJsonPath('data.0.total_holdings', '125.000000');
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?register_id={$firstRegister}")
+            ->assertOk()
+            ->assertJsonPath('data.0.total_holdings', '200.000000');
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders')
+            ->assertOk()
+            ->assertJsonPath('data.0.total_holdings', '700.000000');
     }
 
     public function test_filter_ids_are_validated(): void
@@ -181,12 +211,12 @@ class ShareholderFilterApiTest extends TestCase
         ]);
     }
 
-    private function createPosition(int $accountId, int $shareClassId): void
+    private function createPosition(int $accountId, int $shareClassId, int|float $quantity = 100): void
     {
         DB::table('share_positions')->insert([
             'sra_id' => $accountId,
             'share_class_id' => $shareClassId,
-            'quantity' => 100,
+            'quantity' => $quantity,
             'holding_mode' => 'demat',
         ]);
     }

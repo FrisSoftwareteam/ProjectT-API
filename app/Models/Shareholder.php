@@ -40,6 +40,7 @@ class Shareholder extends Model
         'email_is_verified' => 'boolean',
         'phone_is_verified' => 'boolean',
         'contact_suppressed' => 'boolean',
+        'total_holdings' => 'decimal:6',
     ];
 
     protected $appends = [

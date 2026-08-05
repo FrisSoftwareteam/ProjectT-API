@@ -73,6 +73,16 @@ class ShareholderController extends Controller
             });
         }
 
+        $query->withSum(['holdings as total_holdings' => function ($holdingQuery) use ($registerId, $shareClassId) {
+            if ($registerId !== null) {
+                $holdingQuery->where('shareholder_register_accounts.register_id', $registerId);
+            }
+
+            if ($shareClassId !== null) {
+                $holdingQuery->where('share_positions.share_class_id', $shareClassId);
+            }
+        }], 'quantity');
+
         $query->with(['registerAccounts' => function ($q) {
             $q->select(
                 'id',
@@ -87,6 +97,10 @@ class ShareholderController extends Controller
         }]);
 
         $shareholders = $query->paginate(20);
+
+        $shareholders->getCollection()->each(function (Shareholder $shareholder) {
+            $shareholder->total_holdings ??= '0.000000';
+        });
 
         return response()->json($shareholders);
     }
