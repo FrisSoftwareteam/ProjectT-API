@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CscsUploadRequest;
 use App\Jobs\PostCscsBatchJob;
+use App\Jobs\ProcessCscsImportJob;
 use App\Models\CscsApprovalPolicy;
 use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
@@ -29,15 +30,16 @@ class CscsUploadController extends Controller
     public function import(CscsUploadRequest $request): JsonResponse
     {
         try {
-            $result = $this->service->import(
+            $result = $this->service->stageImport(
                 $request->file('files'),
                 (int) $request->validated('register_id'),
                 $request->user()?->id,
                 $request->validated('description'),
                 $request->validated('business_reference')
             );
+            ProcessCscsImportJob::dispatch((int) $result['batch_id']);
 
-            return $this->success('CSCS files staged for review', $result, 201);
+            return $this->success('CSCS files accepted for processing', $result, 202);
         } catch (ValidationException $e) {
             throw $e;
         } catch (\Throwable $e) {

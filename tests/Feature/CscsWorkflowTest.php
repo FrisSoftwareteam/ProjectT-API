@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\ProcessCscsImportJob;
 use App\Models\AdminUser;
 use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
@@ -105,6 +106,30 @@ class CscsWorkflowTest extends TestCase
         $this->assertDatabaseHas('cscs_upload_batches', ['id' => $reversal['batch_id'], 'batch_type' => 'REVERSAL', 'source_batch_id' => $result['batch_id']]);
         $this->assertDatabaseHas('cscs_upload_rows', ['batch_id' => $reversal['batch_id'], 'tran_seq' => '0', 'sign' => '+']);
         $this->assertDatabaseCount('share_transactions', 2);
+    }
+
+    public function test_import_can_be_staged_and_processed_by_the_queue_job(): void
+    {
+        $staged = $this->service->stageImport(
+            $this->files(),
+            $this->register->id,
+            $this->maker->id,
+            'Queued CSCS batch',
+            'TEST-CSCS-QUEUED'
+        );
+
+        $this->assertSame('PROCESSING', $staged['status']);
+        $this->assertDatabaseCount('cscs_upload_rows', 0);
+
+        $job = new ProcessCscsImportJob($staged['batch_id']);
+        $job->handle($this->service);
+
+        $this->assertSame('DRAFT_REVIEW', CscsUploadBatch::findOrFail($staged['batch_id'])->workflow_status);
+        $this->assertDatabaseHas('cscs_upload_rows', [
+            'batch_id' => $staged['batch_id'],
+            'tran_seq' => '0',
+            'resolution_status' => 'READY',
+        ]);
     }
 
     public function test_maker_cannot_approve_their_own_batch(): void

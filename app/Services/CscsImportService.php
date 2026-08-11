@@ -44,6 +44,24 @@ class CscsImportService
         ?string $description = null,
         ?string $businessReference = null
     ): array {
+        $staged = $this->stageImport($files, $registerId, $uploadedBy, $description, $businessReference);
+
+        return $this->processStagedImport((int) $staged['batch_id']);
+    }
+
+    /**
+     * Persist the source files and return immediately so processing can be queued.
+     *
+     * @param  array<int, UploadedFile>  $files
+     * @return array<string, mixed>
+     */
+    public function stageImport(
+        array $files,
+        int $registerId,
+        ?int $uploadedBy,
+        ?string $description = null,
+        ?string $businessReference = null
+    ): array {
         $batch = CscsUploadBatch::create([
             'uploaded_by' => $uploadedBy,
             'register_id' => $registerId,
@@ -56,9 +74,7 @@ class CscsImportService
 
         $this->event($batch, 'UPLOADED', null, 'PROCESSING', $uploadedBy);
 
-        $masterProfiles = [];
         $storedFiles = [];
-        $counts = ['master_rows' => 0, 'movement_rows' => 0, 'invalid_rows' => 0];
 
         try {
             usort($files, fn (UploadedFile $left, UploadedFile $right) => ($this->detectFileType($left) === 'master' ? 0 : 1)
@@ -83,6 +99,33 @@ class CscsImportService
                     'size' => $file->getSize(),
                     'sha256' => $hash,
                 ];
+            }
+
+            $batch->update(['uploaded_files' => $storedFiles]);
+
+            return $this->batchResult($batch->fresh());
+        } catch (\Throwable $e) {
+            $this->failImport($batch, $storedFiles, [], $e);
+        }
+    }
+
+    /** @return array<string, mixed> */
+    public function processStagedImport(int $batchId): array
+    {
+        $batch = CscsUploadBatch::findOrFail($batchId);
+        if ($batch->workflow_status !== 'PROCESSING') {
+            return $this->batchResult($batch);
+        }
+
+        $storedFiles = $batch->uploaded_files ?? [];
+        $masterProfiles = [];
+        $counts = ['master_rows' => 0, 'movement_rows' => 0, 'invalid_rows' => 0];
+
+        try {
+            foreach ($storedFiles as $storedFile) {
+                $type = (string) $storedFile['type'];
+                $safeName = (string) $storedFile['name'];
+                $path = (string) $storedFile['path'];
 
                 $lines = preg_split('/\r\n|\n|\r/', (string) Storage::get($path)) ?: [];
                 if ($type === 'master') {
@@ -142,27 +185,43 @@ class CscsImportService
 
             $batch->update([
                 'status' => 'completed',
-                'workflow_status' => 'DRAFT_REVIEW',
                 'uploaded_files' => $storedFiles,
                 'summary' => $counts,
             ]);
-            $this->event($batch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $uploadedBy, null, $counts);
-            $this->validateDraft($batch, $uploadedBy, false);
+            $this->validateDraft($batch, $batch->uploaded_by, false);
+            $this->event($batch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $batch->uploaded_by, null, $counts);
 
             return $this->batchResult($batch->fresh());
         } catch (\Throwable $e) {
-            $reference = (string) Str::uuid();
-            Log::error('CSCS staging failed', ['batch_id' => $batch->id, 'reference' => $reference, 'error' => $e->getMessage()]);
-            $batch->update([
-                'status' => 'failed',
-                'workflow_status' => 'PROCESSING_FAILED',
-                'uploaded_files' => $storedFiles,
-                'summary' => array_merge($counts, ['failure_reference' => $reference]),
-                'failure_reason' => "CSCS processing failed. Reference: {$reference}",
-            ]);
-            $this->event($batch, 'PROCESSING_FAILED', 'PROCESSING', 'PROCESSING_FAILED', $uploadedBy, "Processing failed. Reference: {$reference}");
-            throw $e;
+            $this->failImport($batch, $storedFiles, $counts, $e);
         }
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $storedFiles
+     * @param  array<string, int>  $counts
+     */
+    private function failImport(CscsUploadBatch $batch, array $storedFiles, array $counts, \Throwable $exception): never
+    {
+        $reference = (string) Str::uuid();
+        Log::error('CSCS staging failed', ['batch_id' => $batch->id, 'reference' => $reference, 'error' => $exception->getMessage()]);
+        $batch->update([
+            'status' => 'failed',
+            'workflow_status' => 'PROCESSING_FAILED',
+            'uploaded_files' => $storedFiles,
+            'summary' => array_merge($counts, ['failure_reference' => $reference]),
+            'failure_reason' => "CSCS processing failed. Reference: {$reference}",
+        ]);
+        $this->event(
+            $batch,
+            'PROCESSING_FAILED',
+            'PROCESSING',
+            'PROCESSING_FAILED',
+            $batch->uploaded_by,
+            "Processing failed. Reference: {$reference}"
+        );
+
+        throw $exception;
     }
 
     /** @return array<string, mixed> */
