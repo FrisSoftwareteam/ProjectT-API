@@ -68,7 +68,7 @@
             @foreach ($byShareClass as $row)
                 <tr>
                     <td>{{ $row->shareClass?->class_code ?? $row->share_class_id }}</td>
-                    <td class="right">{{ number_format((float) $row->total_shares, 6) }}</td>
+                    <td class="right">{{ $unitDisplay->format((string) $row->total_shares, $declaration->register) }}</td>
                     <td class="right">{{ number_format((float) $row->gross_amount, 2) }}</td>
                     <td class="right">{{ number_format((float) $row->tax_amount, 2) }}</td>
                     <td class="right">{{ number_format((float) $row->net_amount, 2) }}</td>

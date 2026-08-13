@@ -16,6 +16,7 @@ use App\Models\ShareholderCategory;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
+use App\Models\Register;
 use App\Services\ShareholderAccountNumberService;
 use App\Services\ShareholderBulkImportService;
 use Illuminate\Http\JsonResponse;
@@ -93,7 +94,7 @@ class ShareholderController extends Controller
                 'chn',
                 'cscs_account_no',
                 'status'
-            )->with('category');
+            )->with(['category', 'register']);
         }]);
 
         $shareholders = $query->paginate(20);
@@ -102,7 +103,14 @@ class ShareholderController extends Controller
             $shareholder->total_holdings ??= '0.000000';
         });
 
-        return response()->json($shareholders);
+        $response = $shareholders->toArray();
+        if ($registerId !== null) {
+            $response['meta'] = [
+                'unit_precision' => Register::findOrFail($registerId)->unit_precision,
+            ];
+        }
+
+        return response()->json($response);
     }
 
     public function store(ShareholderRequest $request)

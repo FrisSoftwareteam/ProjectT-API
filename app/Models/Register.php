@@ -11,6 +11,10 @@ class Register extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected $appends = [
+        'unit_precision',
+    ];
+
     protected $fillable = [
         'company_id',
         'register_code',
@@ -133,6 +137,17 @@ class Register extends Model
     public function getMaxDecimalPlaces(): int
     {
         return $this->isWholeNumberOnly() ? 0 : (int) ($this->decimal_precision ?? 2);
+    }
+
+    /**
+     * @return array{type: string, decimal_places: int}
+     */
+    public function getUnitPrecisionAttribute(): array
+    {
+        return [
+            'type' => $this->isWholeNumberOnly() ? 'whole_number' : 'decimal',
+            'decimal_places' => $this->getMaxDecimalPlaces(),
+        ];
     }
 
     /**

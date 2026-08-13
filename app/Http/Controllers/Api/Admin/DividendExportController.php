@@ -9,6 +9,7 @@ use App\Models\DividendDeclaration;
 use App\Models\DividendEntitlement;
 use App\Models\DividendEntitlementRun;
 use App\Models\DividendWorkflowEvent;
+use App\Services\UnitDisplayService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Maatwebsite\Excel\Facades\Excel;
@@ -16,6 +17,10 @@ use Barryvdh\DomPDF\Facade\Pdf;
 
 class DividendExportController extends Controller
 {
+    public function __construct(private readonly UnitDisplayService $unitDisplayService)
+    {
+    }
+
     /**
      * 4.1 Export Entitlement File (CSV)
      * GET /admin/dividend-declarations/{declaration_id}/exports/entitlements
@@ -105,6 +110,7 @@ class DividendExportController extends Controller
         $pdf = Pdf::loadView('exports.dividend-summary', [
             'declaration' => $declaration->load(['register.company']),
             'byShareClass' => $byShareClass,
+            'unitDisplay' => $this->unitDisplayService,
         ]);
 
         DividendWorkflowEvent::create([

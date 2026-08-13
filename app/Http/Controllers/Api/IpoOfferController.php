@@ -30,7 +30,7 @@ class IpoOfferController extends Controller
 
     public function index(Request $request)
     {
-        $query = IpoOffer::with('allotments');
+        $query = IpoOffer::with(['allotments', 'register']);
         if ($request->filled('company_id')) {
             $query->where('company_id', $request->query('company_id'));
         }
@@ -95,7 +95,7 @@ class IpoOfferController extends Controller
                 'approved_units' => $offer->approved_units,
             ]);
 
-            return response()->json($offer, 201);
+            return response()->json($offer->load('register'), 201);
         });
     }
 
@@ -118,7 +118,7 @@ class IpoOfferController extends Controller
         $offer->allotted_units = (float) IpoOfferAllotment::where('offer_id', $offer->id)->sum('quantity');
         $offer->save();
 
-        return response()->json($allotment, 201);
+        return response()->json($allotment->load('offer.register'), 201);
     }
 
     public function finalize(Request $request, IpoOffer $offer)
@@ -197,7 +197,7 @@ class IpoOfferController extends Controller
                 'register_id' => $offer->register_id,
             ]);
 
-            return response()->json($offer->fresh('allotments'));
+            return response()->json($offer->fresh(['allotments', 'register']));
         });
     }
 

@@ -52,8 +52,13 @@ $jsonPayloads = [
     'IpoOfferController@addAllotment' => ['shareholder_id' => '{{shareholder}}', 'quantity' => 1000],
     'CompanyController@store' => ['issuer_code' => 'EXMPL', 'name' => 'Example Plc', 'rc_number' => 'RC123456', 'tin' => 'TIN123456', 'status' => 'active'],
     'CompanyController@update' => ['issuer_code' => 'EXMPL', 'name' => 'Example Plc Updated', 'rc_number' => 'RC123456', 'tin' => 'TIN123456', 'status' => 'active'],
-    'RegisterController@store' => ['company_id' => '{{company_id}}', 'name' => 'Ordinary Share Register', 'instrument_type' => 'equity', 'capital_behaviour_type' => 'constant', 'paid_up_capital' => 1000000, 'narration' => 'Primary register', 'is_default' => true, 'status' => 'active'],
-    'RegisterController@update' => ['name' => 'Ordinary Share Register', 'instrument_type' => 'equity', 'capital_behaviour_type' => 'constant', 'paid_up_capital' => 1000000, 'narration' => 'Updated register', 'is_default' => true, 'status' => 'active'],
+    'RegisterController@store' => ['company_id' => '{{company_id}}', 'name' => 'Ordinary Share Register', 'instrument_type_id' => '{{instrumentType}}', 'capital_behaviour_type' => 'constant', 'paid_up_capital' => 1000000, 'unit_precision_type' => 'decimal', 'decimal_precision' => 2, 'narration' => 'Primary register', 'is_default' => true, 'status' => 'active'],
+    'RegisterController@update' => ['name' => 'Ordinary Share Register', 'instrument_type_id' => '{{instrumentType}}', 'capital_behaviour_type' => 'constant', 'paid_up_capital' => 1000000, 'unit_precision_type' => 'decimal', 'decimal_precision' => 2, 'narration' => 'Updated register', 'is_default' => true, 'status' => 'active'],
+    'InstrumentTypeController@store' => ['name' => 'Custom Unit Trust', 'code' => 'custom_unit_trust', 'category' => 'fund', 'precision_rule' => 'configurable', 'description' => 'Custom instrument with register-level unit precision.'],
+    'InstrumentTypeController@update' => ['name' => 'Custom Unit Trust', 'category' => 'fund', 'precision_rule' => 'configurable', 'description' => 'Updated custom instrument type. Built-in types accept description only.'],
+    'ShareholderCategoryController@store' => ['code' => 'IND', 'name' => 'Individual', 'default_holder_type' => 'individual', 'requires_joint_holders' => false, 'requires_review' => false, 'is_active' => true, 'source_system' => 'ProjectT', 'description' => 'Individual shareholder category'],
+    'ShareholderCategoryController@update' => ['name' => 'Individual', 'default_holder_type' => 'individual', 'requires_joint_holders' => false, 'requires_review' => false, 'is_active' => true, 'description' => 'Updated individual shareholder category'],
+    'ShareholderRegisterAccountController@updateCategory' => ['shareholder_category_id' => '{{shareholder_category_id}}'],
     'ShareClassController@store' => ['register_id' => '{{register_id}}', 'class_code' => 'ORD', 'name' => 'Ordinary Shares', 'currency' => 'NGN', 'par_value' => 0.5, 'description' => 'Ordinary share class', 'withholding_tax_rate' => 10],
     'ShareClassController@update' => ['class_code' => 'ORD', 'name' => 'Ordinary Shares', 'currency' => 'NGN', 'par_value' => 0.5, 'description' => 'Ordinary share class', 'withholding_tax_rate' => 10],
     'ShareClassController@calculateTax' => ['amount' => 10000],
@@ -82,10 +87,19 @@ $jsonPayloads = [
     'CscsUploadController@cancel' => ['comment' => 'Batch cancelled because a replacement CSCS file was supplied'],
     'CscsUploadController@post' => ['comment' => 'Approved batch released for controlled posting'],
     'CscsUploadController@createReversal' => ['reason' => 'Correcting an approved CSCS source-file error', 'effective_date' => '2026-07-22', 'transaction_numbers' => []],
+    'LegacyMigrationController@create' => ['package_key' => 'legacy_share_register', 'register_id' => '{{register_id}}', 'share_class_id' => '{{share_class_id}}'],
+    'LegacyMigrationController@reconcile' => ['comment' => 'Staged records and quantity totals reviewed'],
+    'LegacyMigrationController@submit' => ['comment' => 'Validated migration submitted for independent approval'],
+    'LegacyMigrationController@approve' => ['comment' => 'Migration snapshot and reconciliation evidence approved'],
+    'LegacyMigrationController@rollback' => ['comment' => 'Controlled rollback approved after downstream activity review'],
+    'LegacyMigrationController@cancel' => ['comment' => 'Migration cancelled because a corrected source package will be used'],
 ];
 
 $multipartPayloads = [
     'AdminUserController@uploadProfilePicture' => [
+        ['key' => 'profile_picture', 'type' => 'file', 'src' => ''],
+    ],
+    'ShareholderController@uploadProfilePicture' => [
         ['key' => 'profile_picture', 'type' => 'file', 'src' => ''],
     ],
     'ShareholderController@bulkStore' => [
@@ -132,6 +146,7 @@ $queryExamples = [
     'NotificationController@index' => ['unread_only' => 'true', 'per_page' => '20'],
     'AuditReportController@index' => ['user_id' => '{{adminUser}}', 'role' => 'Operations', 'shareholder_id' => '{{shareholder}}', 'activity_category' => 'shareholders', 'date_from' => '2026-01-01', 'date_to' => '2026-12-31', 'per_page' => '15'],
     'IpoOfferController@index' => ['status' => 'approved', 'per_page' => '15'],
+    'InstrumentTypeController@index' => ['category' => 'fund', 'include_inactive' => 'false'],
     'ProbateCaseController@index' => ['per_page' => '15'],
     'SraGuardianController@index' => ['shareholder_id' => '{{shareholder}}', 'sra_id' => '{{sra_id}}', 'verified_status' => 'verified', 'per_page' => '15'],
     'SharePositionController@index' => ['sra_id' => '{{sra_id}}', 'share_class_id' => '{{share_class_id}}', 'per_page' => '15'],
@@ -144,6 +159,8 @@ $queryExamples = [
     'DividendEntitlementController@indexForRegister' => ['status' => 'DRAFT', 'initiator' => 'operations', 'search' => 'FY 2026', 'per_page' => '15'],
     'DividendValidationController@validatePeriod' => ['period_label' => 'FY 2026', 'exclude_declaration_id' => '{{declaration_id}}'],
     'DividendPaymentController@index' => ['status' => 'failed', 'per_page' => '50'],
+    'ShareholderCategoryController@index' => ['search' => 'Individual', 'default_holder_type' => 'individual', 'include_inactive' => 'false', 'include_deleted' => 'false', 'per_page' => '25'],
+    'LegacyMigrationController@index' => ['status' => 'DRAFT', 'register_id' => '{{register_id}}', 'package_key' => 'legacy_share_register', 'per_page' => '20'],
 ];
 
 $publicActions = [
@@ -155,6 +172,7 @@ $publicActions = [
 
 $folders = [];
 $pathVariables = [];
+$generatedSignatures = [];
 
 foreach ($routes as $route) {
     $method = explode('|', $route['method'])[0];
@@ -162,6 +180,11 @@ foreach ($routes as $route) {
     $action = shortAction($route['action']);
     $folder = folderFor($uri);
     $name = requestName($method, $uri, $action);
+    $signature = $method.' '.$uri;
+    if (isset($generatedSignatures[$signature])) {
+        throw new RuntimeException("Duplicate API operation generated: {$signature}");
+    }
+    $generatedSignatures[$signature] = true;
     preg_match_all('/\{([^}]+)\}/', $uri, $matches);
 
     foreach ($matches[1] as $variable) {
@@ -235,8 +258,13 @@ foreach ($routes as $route) {
 $variables = [
     ['key' => 'base_url', 'value' => 'http://localhost:8000', 'type' => 'string'],
     ['key' => 'token', 'value' => '', 'type' => 'string'],
+    ['key' => 'share_class_id', 'value' => '1', 'type' => 'string'],
+    ['key' => 'shareholder_category_id', 'value' => '1', 'type' => 'string'],
 ];
 foreach ($pathVariables as $key => $value) {
+    if (in_array($key, array_column($variables, 'key'), true)) {
+        continue;
+    }
     $variables[] = ['key' => $key, 'value' => $value, 'type' => 'string'];
 }
 
@@ -268,6 +296,24 @@ $collection = [
     ),
 ];
 
+$requestCount = array_sum(array_map('count', $folders));
+if ($requestCount !== count($routes)) {
+    throw new RuntimeException('Collection coverage mismatch: generated '.$requestCount.' requests for '.count($routes).' registered API routes.');
+}
+if (count($generatedSignatures) !== $requestCount) {
+    throw new RuntimeException('Collection contains duplicate method/URI operations.');
+}
+$variableKeys = array_column($variables, 'key');
+if (count($variableKeys) !== count(array_unique($variableKeys))) {
+    throw new RuntimeException('Collection contains duplicate variable keys.');
+}
+$serializedCollection = json_encode($collection, JSON_THROW_ON_ERROR);
+preg_match_all('/\{\{([A-Za-z0-9_]+)\}\}/', $serializedCollection, $referencedVariableMatches);
+$undefinedVariables = array_diff(array_unique($referencedVariableMatches[1]), $variableKeys);
+if ($undefinedVariables !== []) {
+    throw new RuntimeException('Collection references undefined variables: '.implode(', ', $undefinedVariables));
+}
+
 $outputDirectory = $basePath.'/docs/postman';
 if (! is_dir($outputDirectory)) {
     mkdir($outputDirectory, 0775, true);
@@ -276,7 +322,7 @@ if (! is_dir($outputDirectory)) {
 $outputPath = $outputDirectory.'/ProjectT-API.postman_collection.json';
 file_put_contents($outputPath, json_encode($collection, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES).PHP_EOL);
 
-echo "Generated {$outputPath} with ".count($routes).' requests in '.count($folders).' folders.'.PHP_EOL;
+echo "Generated {$outputPath} with {$requestCount} requests in ".count($folders).' folders; route coverage and uniqueness checks passed.'.PHP_EOL;
 
 function shortAction(string $action): string
 {
@@ -337,6 +383,8 @@ function descriptionFor(array $route, string $action): string
 
     $description = "Backend action: `{$action}`.";
     $description .= match ($action) {
+        'RegisterController@store', 'RegisterController@update' => "\n\nUnit display precision is configured with `unit_precision_type` and `decimal_precision`. Decimal precision accepts 2–4 places. Whole-number instrument types reject `decimal_precision`; decimal-only types require it; configurable types accept either mode.",
+        'InstrumentTypeController@update' => "\n\nBuilt-in instrument types accept only `description`. The full example payload applies to custom instrument types.",
         'ShareholderController@shareholderIdentityCreate' => "\n\nThe `shareholder` URL variable identifies the owner. Do not send `shareholder_id` in the request body.",
         'ShareholderController@shareholderIdentityUpdate' => "\n\nThe `shareholder` URL variable identifies the owner and `identity` identifies the identity record. Do not send `shareholder_id` in the request body.",
         default => '',

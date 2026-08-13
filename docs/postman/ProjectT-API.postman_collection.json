@@ -38,6 +38,16 @@
             "type": "string"
         },
         {
+            "key": "share_class_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "shareholder_category_id",
+            "value": "1",
+            "type": "string"
+        },
+        {
             "key": "company_id",
             "value": "1",
             "type": "string"
@@ -1282,7 +1292,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/admin/instrument-types",
+                            "raw": "{{base_url}}/api/admin/instrument-types?category=fund&include_inactive=false",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -1290,6 +1300,18 @@
                                 "api",
                                 "admin",
                                 "instrument-types"
+                            ],
+                            "query": [
+                                {
+                                    "key": "category",
+                                    "value": "fund",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "include_inactive",
+                                    "value": "false",
+                                    "disabled": false
+                                }
                             ]
                         },
                         "description": "Backend action: `InstrumentTypeController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:users.view"
@@ -1324,7 +1346,7 @@
                         "description": "Backend action: `InstrumentTypeController@store`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\RoleMiddleware:Super Admin",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"name\": \"Custom Unit Trust\",\n    \"code\": \"custom_unit_trust\",\n    \"category\": \"fund\",\n    \"precision_rule\": \"configurable\",\n    \"description\": \"Custom instrument with register-level unit precision.\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -1386,10 +1408,10 @@
                                 "{{instrumentType}}"
                             ]
                         },
-                        "description": "Backend action: `InstrumentTypeController@update`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\RoleMiddleware:Super Admin",
+                        "description": "Backend action: `InstrumentTypeController@update`.\n\nBuilt-in instrument types accept only `description`. The full example payload applies to custom instrument types.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\RoleMiddleware:Super Admin",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"name\": \"Custom Unit Trust\",\n    \"category\": \"fund\",\n    \"precision_rule\": \"configurable\",\n    \"description\": \"Updated custom instrument type. Built-in types accept description only.\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -1678,10 +1700,10 @@
                                 "registers"
                             ]
                         },
-                        "description": "Backend action: `RegisterController@store`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\RoleMiddleware:Super Admin",
+                        "description": "Backend action: `RegisterController@store`.\n\nUnit display precision is configured with `unit_precision_type` and `decimal_precision`. Decimal precision accepts 2\u20134 places. Whole-number instrument types reject `decimal_precision`; decimal-only types require it; configurable types accept either mode.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\RoleMiddleware:Super Admin",
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"company_id\": \"{{company_id}}\",\n    \"name\": \"Ordinary Share Register\",\n    \"instrument_type\": \"equity\",\n    \"capital_behaviour_type\": \"constant\",\n    \"paid_up_capital\": 1000000,\n    \"narration\": \"Primary register\",\n    \"is_default\": true,\n    \"status\": \"active\"\n}",
+                            "raw": "{\n    \"company_id\": \"{{company_id}}\",\n    \"name\": \"Ordinary Share Register\",\n    \"instrument_type_id\": \"{{instrumentType}}\",\n    \"capital_behaviour_type\": \"constant\",\n    \"paid_up_capital\": 1000000,\n    \"unit_precision_type\": \"decimal\",\n    \"decimal_precision\": 2,\n    \"narration\": \"Primary register\",\n    \"is_default\": true,\n    \"status\": \"active\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -1743,10 +1765,10 @@
                                 "{{id}}"
                             ]
                         },
-                        "description": "Backend action: `RegisterController@update`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:users.view",
+                        "description": "Backend action: `RegisterController@update`.\n\nUnit display precision is configured with `unit_precision_type` and `decimal_precision`. Decimal precision accepts 2\u20134 places. Whole-number instrument types reject `decimal_precision`; decimal-only types require it; configurable types accept either mode.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:users.view",
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"name\": \"Ordinary Share Register\",\n    \"instrument_type\": \"equity\",\n    \"capital_behaviour_type\": \"constant\",\n    \"paid_up_capital\": 1000000,\n    \"narration\": \"Updated register\",\n    \"is_default\": true,\n    \"status\": \"active\"\n}",
+                            "raw": "{\n    \"name\": \"Ordinary Share Register\",\n    \"instrument_type_id\": \"{{instrumentType}}\",\n    \"capital_behaviour_type\": \"constant\",\n    \"paid_up_capital\": 1000000,\n    \"unit_precision_type\": \"decimal\",\n    \"decimal_precision\": 2,\n    \"narration\": \"Updated register\",\n    \"is_default\": true,\n    \"status\": \"active\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4300,7 +4322,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/legacy-migrations/batches",
+                            "raw": "{{base_url}}/api/legacy-migrations/batches?status=DRAFT&register_id={{register_id}}&package_key=legacy_share_register&per_page=20",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -4308,6 +4330,28 @@
                                 "api",
                                 "legacy-migrations",
                                 "batches"
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "DRAFT",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "register_id",
+                                    "value": "{{register_id}}",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "package_key",
+                                    "value": "legacy_share_register",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "20",
+                                    "disabled": false
+                                }
                             ]
                         },
                         "description": "Backend action: `LegacyMigrationController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.view"
@@ -4342,7 +4386,7 @@
                         "description": "Backend action: `LegacyMigrationController@create`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.create",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"package_key\": \"legacy_share_register\",\n    \"register_id\": \"{{register_id}}\",\n    \"share_class_id\": \"{{share_class_id}}\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4408,7 +4452,7 @@
                         "description": "Backend action: `LegacyMigrationController@approve`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.approve",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"comment\": \"Migration snapshot and reconciliation evidence approved\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4448,7 +4492,7 @@
                         "description": "Backend action: `LegacyMigrationController@cancel`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.submit",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"comment\": \"Migration cancelled because a corrected source package will be used\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4555,7 +4599,7 @@
                         "description": "Backend action: `LegacyMigrationController@reconcile`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.reconcile",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"comment\": \"Staged records and quantity totals reviewed\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4595,7 +4639,7 @@
                         "description": "Backend action: `LegacyMigrationController@rollback`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.rollback",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"comment\": \"Controlled rollback approved after downstream activity review\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4675,7 +4719,7 @@
                         "description": "Backend action: `LegacyMigrationController@submit`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:legacy_migrations.submit",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"comment\": \"Validated migration submitted for independent approval\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -6486,13 +6530,40 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/shareholder-categories",
+                            "raw": "{{base_url}}/api/shareholder-categories?search=Individual&default_holder_type=individual&include_inactive=false&include_deleted=false&per_page=25",
                             "host": [
                                 "{{base_url}}"
                             ],
                             "path": [
                                 "api",
                                 "shareholder-categories"
+                            ],
+                            "query": [
+                                {
+                                    "key": "search",
+                                    "value": "Individual",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "default_holder_type",
+                                    "value": "individual",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "include_inactive",
+                                    "value": "false",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "include_deleted",
+                                    "value": "false",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "25",
+                                    "disabled": false
+                                }
                             ]
                         },
                         "description": "Backend action: `ShareholderCategoryController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.view"
@@ -6526,7 +6597,7 @@
                         "description": "Backend action: `ShareholderCategoryController@store`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.edit",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"code\": \"IND\",\n    \"name\": \"Individual\",\n    \"default_holder_type\": \"individual\",\n    \"requires_joint_holders\": false,\n    \"requires_review\": false,\n    \"is_active\": true,\n    \"source_system\": \"ProjectT\",\n    \"description\": \"Individual shareholder category\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -6589,7 +6660,7 @@
                         "description": "Backend action: `ShareholderCategoryController@update`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.edit",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"name\": \"Individual\",\n    \"default_holder_type\": \"individual\",\n    \"requires_joint_holders\": false,\n    \"requires_review\": false,\n    \"is_active\": true,\n    \"description\": \"Updated individual shareholder category\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -6627,7 +6698,7 @@
                         "description": "Backend action: `ShareholderCategoryController@update`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.edit",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"name\": \"Individual\",\n    \"default_holder_type\": \"individual\",\n    \"requires_joint_holders\": false,\n    \"requires_review\": false,\n    \"is_active\": true,\n    \"description\": \"Updated individual shareholder category\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -6735,7 +6806,7 @@
                         "description": "Backend action: `ShareholderRegisterAccountController@updateCategory`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.edit",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"shareholder_category_id\": \"{{shareholder_category_id}}\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -7298,10 +7369,6 @@
                             {
                                 "key": "Accept",
                                 "value": "application/json"
-                            },
-                            {
-                                "key": "Content-Type",
-                                "value": "application/json"
                             }
                         ],
                         "url": {
@@ -7318,13 +7385,14 @@
                         },
                         "description": "Backend action: `ShareholderController@uploadProfilePicture`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.edit",
                         "body": {
-                            "mode": "raw",
-                            "raw": "{}",
-                            "options": {
-                                "raw": {
-                                    "language": "json"
+                            "mode": "formdata",
+                            "formdata": [
+                                {
+                                    "key": "profile_picture",
+                                    "type": "file",
+                                    "src": ""
                                 }
-                            }
+                            ]
                         }
                     },
                     "response": []

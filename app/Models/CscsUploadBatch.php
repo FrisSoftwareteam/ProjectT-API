@@ -61,6 +61,11 @@ class CscsUploadBatch extends Model
         return $this->hasMany(CscsUploadRow::class, 'batch_id');
     }
 
+    public function register()
+    {
+        return $this->belongsTo(Register::class);
+    }
+
     public function approvalActions()
     {
         return $this->hasMany(CscsApprovalAction::class, 'batch_id');

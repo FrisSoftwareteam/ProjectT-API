@@ -21,6 +21,8 @@ php scripts/generate_postman_collection.php
 
 The generator reads Laravel's registered API routes and produces all method/URI combinations with module grouping, example payloads, query parameters, middleware requirements, and route variables.
 
+Generation also verifies that every registered API method/URI is represented exactly once and that collection variable keys are unique. The command fails instead of writing an incomplete or ambiguous collection.
+
 ## Known Registered But Unimplemented Routes
 
 These routes exist in `routes/api.php`, but their referenced controller methods are currently missing:
@@ -35,6 +37,9 @@ They remain in the collection for completeness and are marked with warnings.
 ## Notes
 
 - CSCS imports, shareholder bulk imports, and probate documents use multipart form-data and require selecting local files in Postman.
+- Admin and shareholder profile-picture endpoints use multipart form-data with a `profile_picture` file field.
+- Register create/update examples use `instrument_type_id`, `unit_precision_type`, and `decimal_precision`. Decimal registers accept 2–4 places; whole-number registers omit `decimal_precision`.
+- Register-bearing responses expose `unit_precision` metadata so clients can format raw decimal unit strings consistently.
 - CSCS upload is staging-only. After upload, follow `reconcile -> submit -> approve -> post`; upload and approval never directly change holdings. The posting endpoint queues an atomic, replay-protected posting job.
 - Configure an active CSCS security mapping before reconciliation, and use different authenticated users for maker and checker actions. See `docs/CSCS_API.md`, `docs/CSCS_FRONTEND_INTEGRATION_GUIDE.md`, and `docs/CSCS_UPLOAD_RECONCILIATION_WORKFLOW.md`.
 - Shareholder bulk import uses `POST /api/shareholders/bulk` with a `file` field. A ready sample is available at `docs/postman/shareholder_bulk_import_sample.csv`; update `register_id` and `share_class_id` to match the target environment before uploading.

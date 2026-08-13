@@ -57,7 +57,7 @@ class CscsUploadController extends Controller
             'business_reference' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('cscs.max_page_size', 100)],
         ]);
-        $query = CscsUploadBatch::query()->withCount(['rows', 'rows as unresolved_exceptions_count' => fn ($q) => $q
+        $query = CscsUploadBatch::query()->with('register')->withCount(['rows', 'rows as unresolved_exceptions_count' => fn ($q) => $q
             ->where('file_type', 'movement')->whereNotIn('resolution_status', ['READY', 'CONFIRMED_REPLAY', 'RULE_EXCLUDED', 'POSTED'])]);
         $query->when($validated['status'] ?? null, fn ($q, $v) => $q->where('workflow_status', $v));
         $query->when($validated['register_id'] ?? null, fn ($q, $v) => $q->where('register_id', $v));
@@ -68,7 +68,7 @@ class CscsUploadController extends Controller
 
     public function show(Request $request, int $batchId): JsonResponse
     {
-        $batch = CscsUploadBatch::withCount('rows')->with(['approvalActions.actor', 'events.actor'])->findOrFail($batchId);
+        $batch = CscsUploadBatch::withCount('rows')->with(['approvalActions.actor', 'events.actor', 'register'])->findOrFail($batchId);
 
         return response()->json(['data' => $this->batchPayload($batch, $request)]);
     }
@@ -91,12 +91,15 @@ class CscsUploadController extends Controller
         $query->when($validated['security_code'] ?? null, fn ($q, $v) => $q->where('sec_code', strtoupper($v)));
         $query->when($validated['sign'] ?? null, fn ($q, $v) => $q->where('sign', $v));
 
-        return response()->json($query->paginate($validated['per_page'] ?? 50));
+        return $this->paginatedWithPrecision($query->paginate($validated['per_page'] ?? 50), $batchId);
     }
 
     public function row(int $batchId, int $rowId): JsonResponse
     {
-        return response()->json(['data' => CscsUploadRow::where('batch_id', $batchId)->findOrFail($rowId)]);
+        return response()->json([
+            'data' => CscsUploadRow::where('batch_id', $batchId)->findOrFail($rowId),
+            'meta' => $this->precisionMeta($batchId),
+        ]);
     }
 
     public function masterRecords(Request $request, int $batchId): JsonResponse
@@ -104,8 +107,11 @@ class CscsUploadController extends Controller
         $this->batch($batchId);
         $validated = $request->validate(['per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('cscs.max_page_size', 100)]]);
 
-        return response()->json(CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'master')
-            ->orderBy('id')->paginate($validated['per_page'] ?? 50));
+        return $this->paginatedWithPrecision(
+            CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'master')
+                ->orderBy('id')->paginate($validated['per_page'] ?? 50),
+            $batchId
+        );
     }
 
     public function transactions(Request $request, int $batchId): JsonResponse
@@ -118,7 +124,7 @@ class CscsUploadController extends Controller
         $page = $validated['page'] ?? 1;
         $paginator = new LengthAwarePaginator($groups->forPage($page, $perPage)->values(), $groups->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
 
-        return response()->json($paginator);
+        return $this->paginatedWithPrecision($paginator, $batchId);
     }
 
     public function transaction(int $batchId, string $transactionNumber): JsonResponse
@@ -126,19 +132,25 @@ class CscsUploadController extends Controller
         $rows = CscsUploadRow::where('batch_id', $batchId)->where('tran_no', $transactionNumber)->orderBy('id')->get();
         abort_if($rows->isEmpty(), 404);
 
-        return response()->json(['data' => $this->transactionPayload($transactionNumber, $rows)]);
+        return response()->json([
+            'data' => $this->transactionPayload($transactionNumber, $rows),
+            'meta' => $this->precisionMeta($batchId),
+        ]);
     }
 
     public function accountEffects(int $batchId): JsonResponse
     {
         $this->batch($batchId);
 
-        return response()->json(['data' => $this->service->accountEffects($batchId)]);
+        return response()->json([
+            'data' => $this->service->accountEffects($batchId),
+            'meta' => $this->precisionMeta($batchId),
+        ]);
     }
 
     public function preview(Request $request, int $batchId): JsonResponse
     {
-        $batch = CscsUploadBatch::with(['approvalActions.actor'])->findOrFail($batchId);
+        $batch = CscsUploadBatch::with(['approvalActions.actor', 'register'])->findOrFail($batchId);
 
         return response()->json(['data' => [
             'batch' => $this->batchPayload($batch, $request),
@@ -160,7 +172,7 @@ class CscsUploadController extends Controller
         $query->when($validated['status'] ?? null, fn ($q, $v) => $q->where('resolution_status', $v));
         $query->when($validated['exception_code'] ?? null, fn ($q, $v) => $q->where('exception_code', $v));
 
-        return response()->json($query->paginate($validated['per_page'] ?? 50));
+        return $this->paginatedWithPrecision($query->paginate($validated['per_page'] ?? 50), $batchId);
     }
 
     public function resolveException(Request $request, int $batchId, int $exceptionId): JsonResponse
@@ -472,6 +484,22 @@ class CscsUploadController extends Controller
         $payload['allowed_actions'] = array_values(array_unique($actions));
 
         return $payload;
+    }
+
+    private function paginatedWithPrecision(LengthAwarePaginator $paginator, int $batchId): JsonResponse
+    {
+        $payload = $paginator->toArray();
+        $payload['meta'] = $this->precisionMeta($batchId);
+
+        return response()->json($payload);
+    }
+
+    /** @return array{unit_precision: array{type: string, decimal_places: int}} */
+    private function precisionMeta(int $batchId): array
+    {
+        $batch = CscsUploadBatch::with('register')->findOrFail($batchId);
+
+        return ['unit_precision' => $batch->register->unit_precision];
     }
 
     private function batch(int $batchId): CscsUploadBatch

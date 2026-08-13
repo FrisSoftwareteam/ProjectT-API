@@ -30,6 +30,9 @@ class ShareholderFilterApiTest extends TestCase
         Schema::create('registers', function (Blueprint $table) {
             $table->id();
             $table->string('register_code')->unique();
+            $table->string('unit_precision_type')->default('decimal');
+            $table->unsignedTinyInteger('decimal_precision')->nullable();
+            $table->softDeletes();
             $table->timestamps();
         });
 
@@ -99,7 +102,9 @@ class ShareholderFilterApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('total', 1)
             ->assertJsonPath('data.0.id', $first)
-            ->assertJsonPath('data.0.total_holdings', '0.000000');
+            ->assertJsonPath('data.0.total_holdings', '0.000000')
+            ->assertJsonPath('meta.unit_precision.type', 'decimal')
+            ->assertJsonPath('meta.unit_precision.decimal_places', 2);
     }
 
     public function test_shareholders_can_be_filtered_by_share_class(): void

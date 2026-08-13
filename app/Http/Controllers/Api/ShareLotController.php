@@ -10,7 +10,7 @@ class ShareLotController extends Controller
 {
     public function index(Request $request)
     {
-        $query = ShareLot::query();
+        $query = ShareLot::with('shareClass.register');
         if ($request->filled('sra_id')) {
             $query->where('sra_id', $request->query('sra_id'));
         }
@@ -22,6 +22,6 @@ class ShareLotController extends Controller
 
     public function show(ShareLot $shareLot)
     {
-        return response()->json($shareLot);
+        return response()->json($shareLot->loadMissing('shareClass.register'));
     }
 }
