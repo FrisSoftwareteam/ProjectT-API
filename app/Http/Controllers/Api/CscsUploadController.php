@@ -228,8 +228,10 @@ class CscsUploadController extends Controller
     public function respondToQuery(Request $request, int $batchId): JsonResponse
     {
         $validated = $request->validate(['comment' => ['required', 'string', 'min:10', 'max:1000']]);
+        $data = $this->service->respondToQuery($batchId, (int) $request->user()->id, $validated['comment']);
+        $this->notify(['Reconciliation', 'Admin', 'Super Admin'], 'CSCS_QUERY_RESPONDED', 'CSCS query answered', $batchId, $request->user()->id);
 
-        return $this->success('Query response recorded; reconcile and resubmit the batch', $this->service->respondToQuery($batchId, (int) $request->user()->id, $validated['comment']));
+        return $this->success('Query response recorded; reconcile and resubmit the batch', $data);
     }
 
     public function approve(Request $request, int $batchId): JsonResponse
@@ -244,8 +246,10 @@ class CscsUploadController extends Controller
     public function reject(Request $request, int $batchId): JsonResponse
     {
         $validated = $request->validate(['comment' => ['required', 'string', 'min:10', 'max:1000']]);
+        $data = $this->service->reject($batchId, $request->user(), $validated['comment']);
+        $this->notify([], 'CSCS_REJECTED', 'CSCS batch rejected', $batchId, $request->user()->id, [$this->batch($batchId)->uploaded_by]);
 
-        return $this->success('CSCS batch rejected', $this->service->reject($batchId, $request->user(), $validated['comment']));
+        return $this->success('CSCS batch rejected', $data);
     }
 
     public function cancel(Request $request, int $batchId): JsonResponse
@@ -260,6 +264,7 @@ class CscsUploadController extends Controller
         $validated = $request->validate(['comment' => ['nullable', 'string', 'max:1000']]);
         $data = $this->service->queueForPosting($batchId, $request->user(), $validated['comment'] ?? null);
         PostCscsBatchJob::dispatch($batchId, (int) $request->user()->id, $validated['comment'] ?? null);
+        $this->notify(['Reconciliation', 'Internal Audit', 'Compliance', 'Admin', 'Super Admin'], 'CSCS_POSTING_QUEUED', 'CSCS posting queued', $batchId, $request->user()->id);
 
         return $this->success('CSCS batch accepted for controlled posting', $data, 202);
     }
@@ -319,6 +324,13 @@ class CscsUploadController extends Controller
         $batch = CscsUploadBatch::with(['approvalActions.actor'])->findOrFail($batchId);
 
         return response()->json(['data' => $batch->approvalActions]);
+    }
+
+    public function snapshots(int $batchId): JsonResponse
+    {
+        $batch = $this->batch($batchId);
+
+        return response()->json(['data' => $batch->snapshots()->latest('revision')->get()]);
     }
 
     public function files(int $batchId): JsonResponse

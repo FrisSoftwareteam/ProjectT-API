@@ -3,6 +3,8 @@
 namespace App\Jobs;
 
 use App\Models\CscsUploadBatch;
+use App\Models\CscsWorkflowEvent;
+use App\Services\AdminNotificationService;
 use App\Services\CscsImportService;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -33,19 +35,46 @@ class ProcessCscsImportJob implements ShouldBeUnique, ShouldQueue
         return 'cscs-import-'.$this->batchId;
     }
 
-    public function handle(CscsImportService $service): void
+    public function handle(CscsImportService $service, ?AdminNotificationService $notifications = null): void
     {
         $service->processStagedImport($this->batchId);
+        $batch = CscsUploadBatch::find($this->batchId);
+        if ($batch && $notifications) {
+            $notifications->sendToRoles(
+                [],
+                'CSCS_DRAFT_READY',
+                'CSCS draft ready for review',
+                "CSCS batch #{$this->batchId} has completed validation and is ready for reconciliation.",
+                'cscs_upload_batch',
+                $this->batchId,
+                "CSCS batch #{$this->batchId}",
+                "/cscs/uploads/{$this->batchId}",
+                null,
+                array_filter([$batch->uploaded_by])
+            );
+        }
     }
 
     public function failed(?Throwable $exception): void
     {
-        CscsUploadBatch::whereKey($this->batchId)
+        $updated = CscsUploadBatch::whereKey($this->batchId)
             ->where('workflow_status', 'PROCESSING')
             ->update([
                 'status' => 'failed',
                 'workflow_status' => 'PROCESSING_FAILED',
                 'failure_reason' => 'The CSCS import worker stopped before processing completed. Review the secured application logs.',
             ]);
+        if ($updated > 0 && ($batch = CscsUploadBatch::find($this->batchId))) {
+            CscsWorkflowEvent::create([
+                'batch_id' => $batch->id,
+                'event_type' => 'PROCESSING_FAILED',
+                'from_status' => 'PROCESSING',
+                'to_status' => 'PROCESSING_FAILED',
+                'actor_id' => $batch->uploaded_by,
+                'comment' => 'The import worker stopped before processing completed.',
+                'metadata' => [],
+                'created_at' => now(),
+            ]);
+        }
     }
 }

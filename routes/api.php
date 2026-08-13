@@ -293,6 +293,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::get('/uploads/{batchId}/related-batches', [CscsUploadController::class, 'relatedBatches'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/events', [CscsUploadController::class, 'events'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/approvals', [CscsUploadController::class, 'approvals'])->middleware('permission:cscs.view');
+        Route::get('/uploads/{batchId}/snapshots', [CscsUploadController::class, 'snapshots'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/files', [CscsUploadController::class, 'files'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/files/{fileIndex}/download', [CscsUploadController::class, 'downloadFile'])->middleware('permission:cscs.export');
         Route::get('/uploads/{batchId}/export', [CscsUploadController::class, 'export'])->middleware('permission:cscs.export');

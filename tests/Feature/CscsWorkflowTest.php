@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Jobs\ProcessCscsImportJob;
 use App\Models\AdminUser;
+use App\Models\CscsApprovalPolicy;
+use App\Models\CscsBatchSnapshot;
 use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
@@ -62,6 +64,7 @@ class CscsWorkflowTest extends TestCase
             'sra_external_identifiers', 'share_positions', 'share_transactions', 'cscs_upload_batches',
             'cscs_upload_rows', 'cscs_security_mappings', 'cscs_approval_policies',
             'cscs_approval_actions', 'cscs_workflow_events',
+            'cscs_batch_snapshots',
         ]) as $table) {
             Schema::dropIfExists($table);
         }
@@ -95,6 +98,9 @@ class CscsWorkflowTest extends TestCase
         $this->assertDatabaseCount('share_transactions', 2);
         $this->assertSame(2, CscsUploadRow::where('batch_id', $result['batch_id'])->where('status', 'posted')->count());
         $this->assertCount(2, $this->service->accountEffects($result['batch_id']));
+        $verification = CscsUploadBatch::findOrFail($result['batch_id'])->reconciliation['post_verification'];
+        $this->assertSame('VERIFIED', $verification['status']);
+        $this->assertNotContains(false, $verification['checks'], true);
 
         $reversal = $this->service->createReversal(
             $result['batch_id'],
@@ -168,6 +174,144 @@ class CscsWorkflowTest extends TestCase
             $this->assertSame(2, CscsUploadRow::where('batch_id', $result['batch_id'])->where('exception_code', 'UNBALANCED_QUANTITY')->count());
             $this->assertSame('DRAFT_REVIEW', CscsUploadBatch::find($result['batch_id'])->workflow_status);
         }
+    }
+
+    public function test_duplicate_file_is_rejected_before_a_second_batch_is_processed(): void
+    {
+        $this->stageBatch();
+
+        try {
+            $this->service->stageImport($this->files(), $this->register->id, $this->maker->id);
+            $this->fail('Expected duplicate-file validation to fail.');
+        } catch (ValidationException $exception) {
+            $this->assertStringContainsString('duplicates a file already staged', $exception->getMessage());
+            $this->assertSame('PROCESSING_FAILED', CscsUploadBatch::latest('id')->first()->workflow_status);
+        }
+    }
+
+    public function test_duplicate_movement_row_is_a_blocking_structural_exception(): void
+    {
+        $files = $this->files();
+        $movement = $files[0]->getContent();
+        $firstLine = preg_split('/\r\n|\n|\r/', trim($movement))[0];
+        $files[0] = UploadedFile::fake()->createWithContent('STANBICs6-duplicate.txt', $movement.$firstLine."\r\n");
+
+        $result = $this->service->import($files, $this->register->id, $this->maker->id);
+
+        $this->assertDatabaseHas('cscs_upload_rows', [
+            'batch_id' => $result['batch_id'],
+            'exception_code' => 'DUPLICATE_SOURCE_ROW',
+            'resolution_status' => 'INVALID',
+        ]);
+        $this->assertSame(1, $result['summary']['duplicate_rows']);
+        $this->assertGreaterThan(0, $result['summary']['unresolved_exceptions']);
+    }
+
+    public function test_submitted_revision_keeps_an_immutable_snapshot_after_a_query(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $snapshot = CscsBatchSnapshot::where('batch_id', $batch->id)->where('revision', 1)->firstOrFail();
+        $originalHash = $snapshot->snapshot_hash;
+        $originalPayload = $snapshot->payload;
+
+        $this->service->raiseQuery($batch->id, $this->checker->id, 'Please confirm the supplied CSCS instruction reference.');
+        $this->service->respondToQuery($batch->id, $this->maker->id, 'The source instruction has now been confirmed.');
+
+        $snapshot->refresh();
+        $this->assertSame($originalHash, $snapshot->snapshot_hash);
+        $this->assertSame($originalPayload, $snapshot->payload);
+        $this->assertSame(2, $batch->fresh()->revision);
+    }
+
+    public function test_internally_inconsistent_file_is_rejected_during_detection(): void
+    {
+        $master = $this->masterLine('C111111111', 'Debit Holder', 'debit@example.test', '08000000001')."\r\n"
+            .$this->movementLine('2606160005615022', '0', '-', 'C111111111', '248889')."\r\n";
+
+        $this->expectException(ValidationException::class);
+        $this->service->stageImport(
+            [UploadedFile::fake()->createWithContent('mixed.txt', $master)],
+            $this->register->id,
+            $this->maker->id
+        );
+    }
+
+    public function test_maker_cannot_post_an_independently_approved_batch(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker, 'Independent approval completed.');
+
+        $this->expectException(HttpException::class);
+        $this->service->post($batch->id, $this->maker, 'Maker must not release their own batch.');
+    }
+
+    public function test_cancelling_a_draft_marks_unposted_rows_with_a_final_disposition(): void
+    {
+        $result = $this->stageBatch();
+        $cancelled = $this->service->cancel($result['batch_id'], $this->maker->id, 'A corrected source file will replace this batch.');
+
+        $this->assertSame('CANCELLED', $cancelled['status']);
+        $this->assertSame(
+            2,
+            CscsUploadRow::where('batch_id', $result['batch_id'])->where('resolution_status', 'CANCELLED_WITH_BATCH')->count()
+        );
+    }
+
+    public function test_non_utf8_source_file_is_rejected_before_storage(): void
+    {
+        $this->expectException(ValidationException::class);
+        $this->service->stageImport(
+            [UploadedFile::fake()->createWithContent('binary.txt', "\xFF\xFE\x00\x01")],
+            $this->register->id,
+            $this->maker->id
+        );
+    }
+
+    public function test_duplicate_master_identifier_blocks_account_resolution(): void
+    {
+        $master = $this->masterLine('C444444444', 'Unknown Holder', 'unknown@example.test', '08000000008')."\r\n"
+            .$this->masterLine('C444444444', 'Different Holder', 'different@example.test', '08000000009')."\r\n"
+            .$this->masterLine('C222222222', 'Credit Holder', 'credit@example.test', '08000000002')."\r\n";
+        $movement = $this->movementLine('2606160005615022', '0', '-', 'C444444444', '248889')."\r\n"
+            .$this->movementLine('2606160005615022', '11', '+', 'C222222222', '248889')."\r\n";
+
+        $result = $this->service->import([
+            UploadedFile::fake()->createWithContent('master-duplicates.txt', $master),
+            UploadedFile::fake()->createWithContent('movement.txt', $movement),
+        ], $this->register->id, $this->maker->id);
+
+        $this->assertDatabaseHas('cscs_upload_rows', [
+            'batch_id' => $result['batch_id'],
+            'identifier_value' => 'C444444444',
+            'exception_code' => 'AMBIGUOUS_MASTER_RECORD',
+        ]);
+        $this->assertSame(1, $result['summary']['duplicate_master_identifiers']);
+    }
+
+    public function test_new_account_risk_adds_an_oversight_approval_step(): void
+    {
+        CscsApprovalPolicy::create([
+            'name' => 'Risk policy',
+            'is_active' => true,
+            'checker_roles' => [],
+            'additional_approval_roles' => [],
+            'checker_can_post' => true,
+        ]);
+        $master = $this->masterLine('C111111111', 'Debit Holder', 'debit@example.test', '08000000001')."\r\n"
+            .$this->masterLine('C333333333', 'New Credit Holder', 'new-credit@example.test', '08000000003')."\r\n";
+        $movement = $this->movementLine('2606160005615033', '0', '-', 'C111111111', '100')."\r\n"
+            .$this->movementLine('2606160005615033', '1', '+', 'C333333333', '100')."\r\n";
+        $result = $this->service->import([
+            UploadedFile::fake()->createWithContent('new-account-master.txt', $master),
+            UploadedFile::fake()->createWithContent('new-account-movement.txt', $movement),
+        ], $this->register->id, $this->maker->id);
+
+        $this->service->reconcile($result['batch_id'], $this->maker->id);
+        $submitted = $this->service->submit($result['batch_id'], $this->maker->id);
+
+        $this->assertContains('NEW_ACCOUNT', $submitted['risk_flags']);
+        $this->assertCount(2, $submitted['required_approval_steps']);
+        $this->assertSame('OVERSIGHT', $submitted['required_approval_steps'][1]['code']);
     }
 
     private function stageAndSubmit(): CscsUploadBatch
@@ -450,6 +594,20 @@ class CscsWorkflowTest extends TestCase
             $t->text('comment')->nullable();
             $t->json('metadata')->nullable();
             $t->timestamp('created_at');
+        });
+        Schema::create('cscs_batch_snapshots', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('batch_id');
+            $t->unsignedInteger('revision');
+            $t->string('snapshot_hash');
+            $t->json('payload');
+            $t->json('reconciliation');
+            $t->json('risk_flags')->nullable();
+            $t->json('source_files');
+            $t->unsignedBigInteger('submitted_by')->nullable();
+            $t->timestamp('submitted_at');
+            $t->timestamps();
+            $t->unique(['batch_id', 'revision']);
         });
     }
 }

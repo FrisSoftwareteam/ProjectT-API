@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\AdminUser;
 use App\Models\CscsApprovalAction;
 use App\Models\CscsApprovalPolicy;
+use App\Models\CscsBatchSnapshot;
 use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
@@ -81,27 +82,46 @@ class CscsImportService
                 <=> ($this->detectFileType($right) === 'master' ? 0 : 1));
             $seenTypes = [];
             foreach ($files as $file) {
+                $this->assertUtf8File($file);
                 $type = $this->detectFileType($file);
                 if (isset($seenTypes[$type])) {
                     throw ValidationException::withMessages(['files' => ["Only one {$type} file may be uploaded in a batch."]]);
                 }
                 $seenTypes[$type] = true;
                 $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', basename($file->getClientOriginalName())) ?: 'cscs.txt';
+                $hash = hash_file('sha256', $file->getRealPath());
+                $duplicateBatchId = $this->duplicateFileBatchId($hash, $registerId, (int) $batch->id);
+                if ($duplicateBatchId) {
+                    throw ValidationException::withMessages([
+                        'files' => ["{$safeName} duplicates a file already staged in CSCS batch #{$duplicateBatchId}."],
+                    ]);
+                }
                 $path = $file->storeAs(
                     'private/cscs_uploads/'.$batch->id,
                     now()->format('Ymd_His_u').'_'.$safeName
                 );
-                $hash = hash_file('sha256', $file->getRealPath());
                 $storedFiles[] = [
                     'name' => $safeName,
+                    'original_name' => $file->getClientOriginalName(),
                     'path' => $path,
                     'type' => $type,
                     'size' => $file->getSize(),
                     'sha256' => $hash,
+                    'encoding' => 'UTF-8',
                 ];
             }
 
-            $batch->update(['uploaded_files' => $storedFiles]);
+            $batch->update([
+                'uploaded_files' => $storedFiles,
+                'summary' => [
+                    'processing_stage' => 'STAGED',
+                    'processing_percent' => 0,
+                    'files_total' => count($storedFiles),
+                    'files_processed' => 0,
+                    'duplicate_files' => 0,
+                    'encoding' => 'UTF-8',
+                ],
+            ]);
 
             return $this->batchResult($batch->fresh());
         } catch (\Throwable $e) {
@@ -119,7 +139,20 @@ class CscsImportService
 
         $storedFiles = $batch->uploaded_files ?? [];
         $masterProfiles = [];
-        $counts = ['master_rows' => 0, 'movement_rows' => 0, 'invalid_rows' => 0];
+        $counts = [
+            'master_rows' => 0,
+            'movement_rows' => 0,
+            'invalid_rows' => 0,
+            'duplicate_rows' => 0,
+            'duplicate_master_identifiers' => 0,
+            'processing_stage' => 'PARSING',
+            'processing_percent' => 0,
+            'files_total' => count($storedFiles),
+            'files_processed' => 0,
+            'duplicate_files' => 0,
+            'encoding' => 'UTF-8',
+        ];
+        $seenMovementRows = [];
 
         try {
             foreach ($storedFiles as $storedFile) {
@@ -135,8 +168,14 @@ class CscsImportService
                         }
                         $profile = $this->parseMasterLine($line);
                         $counts['master_rows']++;
+                        $duplicateMaster = false;
                         if ($profile['identifier'] !== '') {
-                            $masterProfiles[$profile['identifier']] = $profile;
+                            $masterProfiles[$profile['identifier']] ??= [];
+                            $masterProfiles[$profile['identifier']][] = $profile;
+                            $duplicateMaster = count($masterProfiles[$profile['identifier']]) > 1;
+                            if ($duplicateMaster) {
+                                $counts['duplicate_master_identifiers']++;
+                            }
                         }
                         CscsUploadRow::create([
                             'batch_id' => $batch->id,
@@ -145,11 +184,17 @@ class CscsImportService
                             'row_number' => $index + 1,
                             'identifier_value' => $profile['identifier'] ?: null,
                             'status' => 'skipped',
-                            'resolution_status' => 'MASTER_RECORD',
+                            'resolution_status' => $duplicateMaster ? 'INVALID' : 'MASTER_RECORD',
+                            'exception_code' => $duplicateMaster ? 'DUPLICATE_MASTER_IDENTIFIER' : null,
+                            'error_message' => $duplicateMaster ? 'The master identifier occurs more than once.' : null,
                             'raw_line' => $line,
                             'extra_details' => ['profile' => $profile],
                         ]);
                     }
+
+                    $counts['files_processed']++;
+                    $counts['processing_percent'] = (int) floor(($counts['files_processed'] / max(1, $counts['files_total'])) * 100);
+                    $batch->update(['summary' => $counts]);
 
                     continue;
                 }
@@ -166,17 +211,34 @@ class CscsImportService
 
                         continue;
                     }
-                    $profile = $masterProfiles[$parsed['identifier_value']] ?? null;
+                    $sourceFingerprint = hash('sha256', $line);
+                    $isDuplicateRow = isset($seenMovementRows[$sourceFingerprint]);
+                    $seenMovementRows[$sourceFingerprint] = true;
+                    if ($isDuplicateRow) {
+                        $counts['duplicate_rows']++;
+                    }
+                    $profiles = $masterProfiles[$parsed['identifier_value']] ?? [];
+                    $profile = count($profiles) === 1 ? $profiles[0] : null;
                     CscsUploadRow::create(array_merge($parsed, [
                         'batch_id' => $batch->id,
                         'file_type' => 'movement',
                         'status' => 'skipped',
-                        'resolution_status' => 'UNRESOLVED',
+                        'resolution_status' => $isDuplicateRow ? 'INVALID' : 'UNRESOLVED',
+                        'exception_code' => $isDuplicateRow ? 'DUPLICATE_SOURCE_ROW' : null,
+                        'error_message' => $isDuplicateRow ? 'This movement row is duplicated within the uploaded file.' : null,
                         'transaction_group_key' => $parsed['tran_no'],
                         'replay_key' => $this->replayKey($parsed),
-                        'extra_details' => ['master_profile' => $profile],
+                        'extra_details' => [
+                            'master_profile' => $profile,
+                            'master_profile_count' => count($profiles),
+                            'source_fingerprint' => $sourceFingerprint,
+                        ],
                     ]));
                 }
+
+                $counts['files_processed']++;
+                $counts['processing_percent'] = (int) floor(($counts['files_processed'] / max(1, $counts['files_total'])) * 100);
+                $batch->update(['summary' => $counts]);
             }
 
             if ($counts['movement_rows'] === 0) {
@@ -186,7 +248,7 @@ class CscsImportService
             $batch->update([
                 'status' => 'completed',
                 'uploaded_files' => $storedFiles,
-                'summary' => $counts,
+                'summary' => array_merge($counts, ['processing_stage' => 'VALIDATING', 'processing_percent' => 95]),
             ]);
             $this->validateDraft($batch, $batch->uploaded_by, false);
             $this->event($batch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $batch->uploaded_by, null, $counts);
@@ -256,10 +318,11 @@ class CscsImportService
             if (in_array($row->resolution_status, ['RULE_EXCLUDED', 'CONFIRMED_REPLAY'], true)) {
                 continue;
             }
+            $structuralException = in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true);
             $row->update([
-                'resolution_status' => $row->exception_code === 'INVALID_FORMAT' ? 'INVALID' : 'UNRESOLVED',
-                'exception_code' => $row->exception_code === 'INVALID_FORMAT' ? 'INVALID_FORMAT' : null,
-                'error_message' => $row->exception_code === 'INVALID_FORMAT' ? $row->error_message : null,
+                'resolution_status' => $structuralException ? 'INVALID' : 'UNRESOLVED',
+                'exception_code' => $structuralException ? $row->exception_code : null,
+                'error_message' => $structuralException ? $row->error_message : null,
                 'proposed_share_class_id' => null,
                 'proposed_before_qty' => null,
                 'proposed_delta_qty' => null,
@@ -275,6 +338,13 @@ class CscsImportService
         $groups = $rows->filter(fn (CscsUploadRow $row) => $row->tran_no)->groupBy('tran_no');
 
         foreach ($groups as $tranNo => $group) {
+            if ($group->contains(fn (CscsUploadRow $row) => in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true))) {
+                foreach ($group->reject(fn (CscsUploadRow $row) => in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true)) as $row) {
+                    $this->failRow($row, 'GROUP_STRUCTURAL_ERROR', 'Another leg in this transaction group has a structural validation error.');
+                }
+
+                continue;
+            }
             if ($group->every(fn (CscsUploadRow $row) => $row->resolution_status === 'RULE_EXCLUDED')) {
                 continue;
             }
@@ -409,6 +479,8 @@ class CscsImportService
         $excludedRows = CscsUploadRow::where('batch_id', $batch->id)->where('resolution_status', 'RULE_EXCLUDED')->count();
         $net = bcsub($totalCredit, $totalDebit, self::SCALE);
         $summary = array_merge($batch->summary ?? [], [
+            'processing_stage' => 'READY',
+            'processing_percent' => 100,
             'transaction_groups' => $groups->count(),
             'ready_groups' => $readyGroups,
             'ready_rows' => $readyRows,
@@ -459,6 +531,24 @@ class CscsImportService
                 'submitted_at' => now(),
                 'required_approval_steps' => $steps,
                 'current_approval_step' => 1,
+            ]);
+            CscsBatchSnapshot::create([
+                'batch_id' => $batch->id,
+                'revision' => $batch->revision,
+                'snapshot_hash' => $batch->snapshot_hash,
+                'payload' => $this->snapshotPayload($batch->id),
+                'reconciliation' => $batch->reconciliation ?? [],
+                'risk_flags' => $batch->risk_flags ?? [],
+                'source_files' => collect($batch->uploaded_files ?? [])->map(fn (array $file) => [
+                    'name' => $file['name'] ?? null,
+                    'original_name' => $file['original_name'] ?? $file['name'] ?? null,
+                    'type' => $file['type'] ?? null,
+                    'size' => $file['size'] ?? null,
+                    'sha256' => $file['sha256'] ?? null,
+                    'encoding' => $file['encoding'] ?? null,
+                ])->values()->all(),
+                'submitted_by' => $actorId,
+                'submitted_at' => now(),
             ]);
             $this->event($batch, 'SUBMITTED', $from, 'PENDING_APPROVAL', $actorId, $comment, ['snapshot_hash' => $batch->snapshot_hash]);
 
@@ -563,6 +653,10 @@ class CscsImportService
         $this->assertState($batch, ['DRAFT_REVIEW', 'RECONCILED', 'QUERY_RAISED', 'STALE', 'PROCESSING_FAILED']);
         $from = $batch->workflow_status;
         $batch->update(['workflow_status' => 'CANCELLED', 'failure_reason' => $comment]);
+        CscsUploadRow::where('batch_id', $batch->id)
+            ->where('file_type', 'movement')
+            ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
+            ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
         $this->event($batch, 'CANCELLED', $from, 'CANCELLED', $actorId, $comment);
 
         return $this->batchResult($batch->fresh());
@@ -705,14 +799,18 @@ class CscsImportService
                     ]);
                 }
 
-                $this->verifyPostedEffects($batch);
+                $verification = $this->verifyPostedEffects($batch);
+                $reconciliation = $batch->reconciliation ?? [];
+                $reconciliation['post_verification'] = $verification;
                 $batch->update([
                     'status' => 'completed',
                     'workflow_status' => 'POSTED',
                     'posted_at' => now(),
                     'failure_reason' => null,
+                    'reconciliation' => $reconciliation,
                 ]);
-                $this->event($batch, 'POSTED', 'POSTING', 'POSTED', $actor->id, $comment, ['posted_rows' => $rows->count()]);
+                $this->event($batch, 'POST_VERIFIED', 'POSTING', 'POSTING', $actor->id, null, $verification);
+                $this->event($batch, 'POSTED', 'POSTING', 'POSTED', $actor->id, $comment, ['posted_rows' => $rows->count(), 'verification' => $verification]);
             }, 3);
         } catch (ValidationException $e) {
             $message = (string) collect($e->errors())->flatten()->first();
@@ -732,6 +830,9 @@ class CscsImportService
                 'workflow_status' => 'POSTING_FAILED',
                 'failure_reason' => "A technical posting error occurred. Reference: {$reference}",
             ]);
+            if ($failedBatch = CscsUploadBatch::find($batchId)) {
+                $this->event($failedBatch, 'POSTING_FAILED', 'POSTING', 'POSTING_FAILED', $actor->id, "Technical failure reference: {$reference}");
+            }
             throw $e;
         }
 
@@ -846,23 +947,81 @@ class CscsImportService
     private function detectFileType(UploadedFile $file): string
     {
         $handle = fopen($file->getRealPath(), 'rb');
-        $line = '';
+        $lines = [];
         if ($handle) {
-            while (($candidate = fgets($handle)) !== false) {
+            while (($candidate = fgets($handle)) !== false && count($lines) < max(2, (int) config('cscs.file_detection_sample_lines', 25))) {
                 $candidate = rtrim($candidate, "\r\n");
                 if ($candidate !== '') {
-                    $line = $candidate;
-                    break;
+                    $lines[] = $candidate;
                 }
             }
             fclose($handle);
         }
 
-        return match (strlen($line)) {
-            393 => 'master',
-            114 => 'movement',
-            default => throw ValidationException::withMessages(['files' => ["Unsupported fixed-width format for {$file->getClientOriginalName()}."]]),
-        };
+        $movementMatches = collect($lines)->filter(fn (string $line) => $this->looksLikeMovementLine($line))->count();
+        $masterMatches = collect($lines)->filter(fn (string $line) => $this->looksLikeMasterLine($line))->count();
+        if ($lines !== [] && $movementMatches === count($lines)) {
+            return 'movement';
+        }
+        if ($lines !== [] && $masterMatches === count($lines)) {
+            return 'master';
+        }
+
+        throw ValidationException::withMessages([
+            'files' => ["Unsupported or internally inconsistent CSCS format for {$file->getClientOriginalName()}."],
+        ]);
+    }
+
+    private function looksLikeMovementLine(string $line): bool
+    {
+        if (strlen($line) !== 114) {
+            return false;
+        }
+
+        return preg_match('/^\s*\d{14,16}/', substr($line, 0, 16)) === 1
+            && preg_match('/^\d{8}$/', substr($line, 23, 8)) === 1
+            && in_array(substr($line, 73, 1), ['+', '-'], true)
+            && trim(substr($line, 31, 21)) !== ''
+            && trim(substr($line, 74, 40)) !== '';
+    }
+
+    private function looksLikeMasterLine(string $line): bool
+    {
+        if (strlen($line) !== 393) {
+            return false;
+        }
+
+        $identifier = trim(substr($line, 0, 12));
+        $name = trim(substr($line, 12, 80));
+
+        return $identifier !== '' && $name !== ''
+            && preg_match('/^[A-Z0-9._-]+$/i', $identifier) === 1;
+    }
+
+    private function assertUtf8File(UploadedFile $file): void
+    {
+        $content = file_get_contents($file->getRealPath());
+        if ($content === false || str_contains($content, "\0") || ! mb_check_encoding($content, 'UTF-8')) {
+            throw ValidationException::withMessages([
+                'files' => ["{$file->getClientOriginalName()} must be valid UTF-8 text without binary content."],
+            ]);
+        }
+    }
+
+    private function duplicateFileBatchId(string $hash, int $registerId, int $currentBatchId): ?int
+    {
+        $batches = CscsUploadBatch::where('register_id', $registerId)
+            ->where('id', '!=', $currentBatchId)
+            ->whereNotIn('workflow_status', ['PROCESSING_FAILED', 'CANCELLED'])
+            ->get(['id', 'uploaded_files']);
+
+        foreach ($batches as $batch) {
+            if (collect($batch->uploaded_files ?? [])->contains(fn (array $file) => hash_equals((string) ($file['sha256'] ?? ''), $hash))) {
+                return (int) $batch->id;
+            }
+        }
+
+        return null;
     }
 
     /** @return array<string, string|null> */
@@ -982,6 +1141,10 @@ class CscsImportService
         }
 
         $profile = data_get($row->extra_details, 'master_profile');
+        $profileCount = (int) data_get($row->extra_details, 'master_profile_count', $profile ? 1 : 0);
+        if ($profileCount > 1) {
+            return ['resolved' => false, 'sra_id' => null, 'method' => null, 'new_account' => false, 'code' => 'AMBIGUOUS_MASTER_RECORD', 'message' => 'More than one master record uses this identifier; manual correction is required.'];
+        }
         if (! $profile) {
             return ['resolved' => false, 'sra_id' => null, 'method' => null, 'new_account' => false, 'code' => 'MASTER_RECORD_MISSING', 'message' => 'No matching master record exists.'];
         }
@@ -1074,16 +1237,52 @@ class CscsImportService
         }
     }
 
-    private function verifyPostedEffects(CscsUploadBatch $batch): void
+    /** @return array<string, mixed> */
+    private function verifyPostedEffects(CscsUploadBatch $batch): array
     {
         $rows = CscsUploadRow::where('batch_id', $batch->id)->where('resolution_status', 'POSTED')->get();
+        $expected = $batch->reconciliation ?? [];
+        $actualDebit = $this->zero();
+        $actualCredit = $this->zero();
+        foreach ($rows as $row) {
+            $quantity = $this->decimal($row->volume);
+            if ($row->sign === '-') {
+                $actualDebit = bcadd($actualDebit, $quantity, self::SCALE);
+            } else {
+                $actualCredit = bcadd($actualCredit, $quantity, self::SCALE);
+            }
+        }
+        $actualNet = bcsub($actualCredit, $actualDebit, self::SCALE);
+        $checks = [
+            'posted_row_count' => $rows->count() === (int) ($expected['ready_rows'] ?? -1),
+            'share_transaction_count' => $rows->whereNotNull('share_transaction_id')->unique('share_transaction_id')->count() === $rows->count(),
+            'unique_replay_fingerprints' => $rows->whereNotNull('fingerprint')->unique('fingerprint')->count() === $rows->count(),
+            'debit_total' => bccomp($actualDebit, $this->decimal($expected['total_debit'] ?? 0), self::SCALE) === 0,
+            'credit_total' => bccomp($actualCredit, $this->decimal($expected['total_credit'] ?? 0), self::SCALE) === 0,
+            'net_movement' => bccomp($actualNet, $this->decimal($expected['net_movement'] ?? 0), self::SCALE) === 0,
+            'holding_effects' => true,
+        ];
         foreach ($rows->groupBy(fn (CscsUploadRow $row) => $row->sra_id.':'.$row->share_class_id) as $effectRows) {
             $first = $effectRows->first();
             $actual = $this->decimal(SharePosition::where('sra_id', $first->sra_id)->where('share_class_id', $first->share_class_id)->value('quantity') ?? 0);
             if (bccomp($actual, $this->decimal($first->proposed_after_qty), self::SCALE) !== 0) {
-                throw new \RuntimeException('Post-posting verification failed for a holding effect.');
+                $checks['holding_effects'] = false;
             }
         }
+
+        if (in_array(false, $checks, true)) {
+            throw new \RuntimeException('Post-posting verification failed: '.implode(', ', array_keys(array_filter($checks, fn (bool $passed) => ! $passed))));
+        }
+
+        return [
+            'status' => 'VERIFIED',
+            'checks' => $checks,
+            'posted_rows' => $rows->count(),
+            'total_debit' => $actualDebit,
+            'total_credit' => $actualCredit,
+            'net_movement' => $actualNet,
+            'verified_at' => now()->toIso8601String(),
+        ];
     }
 
     private function failGroup(Collection $group, string $code, string $message): void
@@ -1109,8 +1308,11 @@ class CscsImportService
     {
         $policy = CscsApprovalPolicy::where('is_active', true)->first();
         $steps = [['step' => 1, 'code' => 'CHECKER', 'roles' => $policy?->checker_roles ?? []]];
-        if ($policy?->additional_approval_quantity
-            && bccomp($this->decimal(data_get($batch->summary, 'total_debit', 0)), $this->decimal($policy->additional_approval_quantity), self::SCALE) >= 0) {
+        $quantityTrigger = $policy?->additional_approval_quantity
+            && bccomp($this->decimal(data_get($batch->summary, 'total_debit', 0)), $this->decimal($policy->additional_approval_quantity), self::SCALE) >= 0;
+        $configuredRiskFlags = config('cscs.additional_approval_risk_flags', []);
+        $riskTrigger = $policy && array_intersect($batch->risk_flags ?? [], $configuredRiskFlags);
+        if ($quantityTrigger || $riskTrigger) {
             $steps[] = ['step' => 2, 'code' => 'OVERSIGHT', 'roles' => $policy->additional_approval_roles ?? ['Internal Audit', 'Compliance']];
         }
 
@@ -1162,13 +1364,17 @@ class CscsImportService
 
     private function snapshotHash(int $batchId): string
     {
-        $payload = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->orderBy('id')->get()->map(fn (CscsUploadRow $row) => [
+        return hash('sha256', json_encode($this->snapshotPayload($batchId), JSON_THROW_ON_ERROR));
+    }
+
+    /** @return array<int, array<int, mixed>> */
+    private function snapshotPayload(int $batchId): array
+    {
+        return CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->orderBy('id')->get()->map(fn (CscsUploadRow $row) => [
             $row->id, $row->raw_line, $row->resolution_status, $row->proposed_sra_id,
             $row->proposed_share_class_id, $row->proposed_before_qty, $row->proposed_delta_qty,
             $row->proposed_after_qty, $row->replay_key, $row->resolution_reason,
         ])->all();
-
-        return hash('sha256', json_encode($payload, JSON_THROW_ON_ERROR));
     }
 
     private function replayKey(array|CscsUploadRow $row): string

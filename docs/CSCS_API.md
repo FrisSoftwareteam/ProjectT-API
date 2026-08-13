@@ -84,7 +84,7 @@ Approval policy:
 }
 ```
 
-The second approval step is activated when total debit is at or above the configured threshold. One user cannot approve multiple steps in the same batch revision.
+The second approval step is activated when total debit is at or above the configured threshold or when a configured risk flag (currently `NEW_ACCOUNT`) is present. One user cannot approve multiple steps in the same batch revision.
 
 ## Upload and inspection endpoints
 
@@ -104,6 +104,7 @@ The second approval step is activated when total debit is at or above the config
 | GET | `/uploads/{batchId}/files` | Private source-file metadata |
 | GET | `/uploads/{batchId}/files/{fileIndex}/download` | Authorized source-file download |
 | GET | `/uploads/{batchId}/related-batches` | Original/reversal batch links |
+| GET | `/uploads/{batchId}/snapshots` | Immutable submitted revision evidence |
 
 Upload uses `multipart/form-data`:
 
@@ -123,7 +124,13 @@ Rules:
 - Allowed extensions are `.txt` and `.csv`, but content must match a supported fixed-width layout.
 - Master rows are 393 characters and movement rows are 114 characters, excluding line endings.
 - Multipart file order does not matter.
-- Original names are sanitized and SHA-256 file hashes are retained.
+- Files must be valid UTF-8 text without binary content.
+- File classification samples multiple non-empty records and validates field signatures; it does not trust a filename or one line length.
+- Original and sanitized names, encoding, size, type, and SHA-256 hashes are retained.
+- A file hash already staged for the same register is rejected unless the earlier batch failed or was cancelled.
+- Duplicate movement rows and duplicate/ambiguous master identifiers are blocking exceptions.
+
+The asynchronous response is `202 Accepted`. `summary.processing_stage` and `summary.processing_percent` can be used for progress display; the final parsed status is available from `GET /uploads/{batchId}`.
 
 ## Reconciliation endpoints
 
@@ -180,8 +187,9 @@ Reconciliation requires:
 | POST | `/uploads/{batchId}/cancel` | `cscs.submit` |
 | GET | `/uploads/{batchId}/approvals` | `cscs.view` |
 | GET | `/uploads/{batchId}/events` | `cscs.view` |
+| GET | `/uploads/{batchId}/snapshots` | `cscs.view` |
 
-Submission freezes a SHA-256 snapshot of every source row, resolution, mapping, and proposed holding effect. Any query response or material change creates a new revision and clears the previous submission state.
+Submission freezes a SHA-256 snapshot of every source row, resolution, mapping, and proposed holding effect. It also persists the normalized payload, reconciliation, risk flags, and source-file integrity metadata in an immutable revision record. Any query response or material change creates a new revision and clears the active submission state without deleting earlier evidence.
 
 Approval does not post holdings. The maker is prohibited from approving, rejecting as checker, or posting their own batch.
 
@@ -226,7 +234,7 @@ Before changing holdings, the job locks the batch and relevant positions and con
 - Any separate-poster policy is satisfied.
 - No movement replay key has already been posted.
 
-All movement legs are posted in one database transaction. A failure rolls back the financial changes. Quantities use BCMath at six-decimal precision. Post-posting verification must succeed before the batch becomes `POSTED`.
+All movement legs are posted in one database transaction. A failure rolls back the financial changes. Quantities use BCMath at six-decimal precision. Before the batch becomes `POSTED`, post-verification checks row and transaction counts, unique replay fingerprints, debit and credit totals, net movement, and final holding effects. The complete result is returned under `reconciliation.post_verification` and recorded in workflow events.
 
 If opening holdings or mappings changed, the batch becomes `STALE` and must return through reconciliation and approval. Technical failures become `POSTING_FAILED` and may be retried deliberately.
 
@@ -245,6 +253,17 @@ Supported types:
 - `posting`
 
 Exports and source downloads require `cscs.export`.
+
+## Operations and retention
+
+Run the queue worker and Laravel scheduler in production. Two scheduled controls are included:
+
+```bash
+php artisan cscs:health
+php artisan cscs:prune-source-files --dry-run
+```
+
+`cscs:health` detects batches stuck in processing or posting. `cscs:prune-source-files` removes expired private source-file content after `CSCS_RETENTION_DAYS` while retaining hashes, parsed rows, snapshots, reconciliation data, and audit history.
 
 ## Corrections after posting
 

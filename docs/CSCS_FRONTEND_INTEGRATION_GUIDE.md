@@ -138,7 +138,9 @@ Rules:
 - Do not send files as JSON/base64.
 - Do not manually set multipart `Content-Type`.
 
-Success returns `201` with `data.batch_id`, `data.status`, and parse counts under `data.summary`. The status is normally `DRAFT_REVIEW`. Upload never changes live holdings.
+Success returns `202` with `data.batch_id`, `data.status`, and progress under `data.summary`. The initial status is `PROCESSING`; upload never changes live holdings. Poll `GET /uploads/{batchId}` until a terminal processing state is returned. Use `summary.processing_stage` and `summary.processing_percent` for a real progress display rather than inventing a client-side percentage.
+
+The API validates UTF-8 encoding, samples multiple records to identify each fixed-width file, rejects duplicate hashes for the same register, and reports duplicate movement rows or ambiguous master identifiers as blocking exceptions.
 
 ### Step 3 — Load the batch workspace
 
@@ -162,9 +164,10 @@ GET /api/cscs/uploads/{batchId}/account-effects
 GET /api/cscs/uploads/{batchId}/files
 GET /api/cscs/uploads/{batchId}/events
 GET /api/cscs/uploads/{batchId}/approvals
+GET /api/cscs/uploads/{batchId}/snapshots
 ```
 
-Show file names/hashes, record counts, transaction groups, debit/credit totals, unresolved exceptions, opening and proposed holdings, risk flags, revision, approval step, and audit events.
+Show file names/hashes/encoding, record and duplicate counts, transaction groups, debit/credit totals, unresolved exceptions, opening and proposed holdings, risk flags, revision, approval step, immutable snapshots, and audit events.
 
 ### Step 4 — Render actions from the batch response
 

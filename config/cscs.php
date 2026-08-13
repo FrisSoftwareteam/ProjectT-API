@@ -7,4 +7,6 @@ return [
     'max_page_size' => (int) env('CSCS_MAX_PAGE_SIZE', 100),
     'queue' => env('CSCS_QUEUE', 'cscs'),
     'import_job_timeout' => (int) env('CSCS_IMPORT_JOB_TIMEOUT', 3600),
+    'file_detection_sample_lines' => (int) env('CSCS_FILE_DETECTION_SAMPLE_LINES', 25),
+    'additional_approval_risk_flags' => ['NEW_ACCOUNT'],
 ];

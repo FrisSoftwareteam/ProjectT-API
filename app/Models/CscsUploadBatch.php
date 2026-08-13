@@ -76,6 +76,11 @@ class CscsUploadBatch extends Model
         return $this->hasMany(CscsWorkflowEvent::class, 'batch_id');
     }
 
+    public function snapshots()
+    {
+        return $this->hasMany(CscsBatchSnapshot::class, 'batch_id');
+    }
+
     public function sourceBatch()
     {
         return $this->belongsTo(self::class, 'source_batch_id');

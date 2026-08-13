@@ -59,6 +59,17 @@ class PostCscsBatchJob implements ShouldBeUnique, ShouldQueue
                 'workflow_status' => 'POSTING_FAILED',
                 'failure_reason' => 'The controlled posting job failed. Review the secured application logs before retrying.',
             ]);
+            app(AdminNotificationService::class)->sendToRoles(
+                ['Reconciliation', 'Internal Audit', 'Compliance', 'Admin', 'Super Admin'],
+                'CSCS_POSTING_FAILED',
+                'CSCS posting failed',
+                "CSCS batch #{$this->batchId} requires review before retrying.",
+                'cscs_upload_batch',
+                $this->batchId,
+                "CSCS batch #{$this->batchId}",
+                "/cscs/uploads/{$this->batchId}",
+                $this->actorId
+            );
         }
     }
 }
