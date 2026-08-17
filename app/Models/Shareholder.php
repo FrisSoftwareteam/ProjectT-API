@@ -68,6 +68,11 @@ class Shareholder extends Model
         return $this->hasMany(ShareholderRegisterAccount::class);
     }
 
+    public function changeRequests()
+    {
+        return $this->hasMany(ShareholderChangeRequest::class);
+    }
+
     public function holdings()
     {
         return $this->hasManyThrough(

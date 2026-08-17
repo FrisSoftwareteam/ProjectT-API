@@ -36,6 +36,11 @@ class RolesAndPermissionsSeeder extends Seeder
             'shareholders.delete',
             'shareholders.export',
 
+            // Pending Shareholder Updates (maker-checker)
+            'shareholder_change_requests.view',
+            'shareholder_change_requests.create',
+            'shareholder_change_requests.approve',
+
             // Share Management
             'shares.view',
             'shares.create',
@@ -246,6 +251,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'users.view', 'users.create', 'users.edit', 'users.delete', 'users.activate', 'users.deactivate',
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shareholder_identities.view', 'shareholder_identities.create', 'shareholder_identities.edit', 'shareholder_identities.export',
+            'shareholder_change_requests.view', 'shareholder_change_requests.create', 'shareholder_change_requests.approve',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
             'certificates.view', 'certificates.create', 'certificates.edit', 'certificates.issue',
             'warrants.view', 'warrants.create', 'warrants.edit',
@@ -266,6 +272,7 @@ class RolesAndPermissionsSeeder extends Seeder
         $role->syncPermissions([
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shareholder_identities.view', 'shareholder_identities.create', 'shareholder_identities.edit', 'shareholder_identities.export',
+            'shareholder_change_requests.view', 'shareholder_change_requests.create',
             'shares.view', 'shares.create', 'shares.edit', 'shares.transfer', 'shares.export',
             'reports.view', 'reports.generate',
             'notifications.view', 'notifications.send',
