@@ -32,7 +32,7 @@ class ShareTransferController extends Controller
         $data = $request->validated();
         $fromShareholder = Shareholder::findOrFail($data['from_shareholder_id']);
         $toShareholder = Shareholder::findOrFail($data['to_shareholder_id']);
-        $shareClass = ShareClass::findOrFail($data['share_class_id']);
+        $shareClass = ShareClass::with('register')->findOrFail($data['share_class_id']);
         $this->unitPrecisionValidationService->assertValidForShareClass(
             (int) $shareClass->id,
             $data['quantity']
@@ -149,7 +149,7 @@ class ShareTransferController extends Controller
 
             return response()->json([
                 'message' => 'Share transfer completed',
-                'data' => $event,
+                'data' => $event->load('shareClass.register'),
             ], 201);
         });
     }

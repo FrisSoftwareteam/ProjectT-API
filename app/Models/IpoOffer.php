@@ -34,5 +34,9 @@ class IpoOffer extends Model
     {
         return $this->hasMany(IpoOfferAllotment::class, 'offer_id');
     }
-}
 
+    public function register()
+    {
+        return $this->belongsTo(Register::class);
+    }
+}

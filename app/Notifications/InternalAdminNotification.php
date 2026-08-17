@@ -13,7 +13,7 @@ class InternalAdminNotification extends Notification implements ShouldQueue
     use Queueable;
 
     public function __construct(
-        protected readonly array $payload
+        protected array $payload
     ) {}
 
     public function via(object $notifiable): array

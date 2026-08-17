@@ -1608,7 +1608,7 @@ class DividendEntitlementController extends Controller
             'gross_amount' => 0.0,
             'tax_amount' => 0.0,
             'net_amount' => 0.0,
-            'total_shares' => 0.0,
+            'total_shares' => '0.000000',
         ];
 
         foreach ($accounts as $account) {
@@ -1621,7 +1621,11 @@ class DividendEntitlementController extends Controller
                 $pageTotals['gross_amount'] += (float) str_replace(',', '', $entitlement['gross_amount']);
                 $pageTotals['tax_amount'] += (float) str_replace(',', '', $entitlement['tax_amount']);
                 $pageTotals['net_amount'] += (float) str_replace(',', '', $entitlement['net_amount']);
-                $pageTotals['total_shares'] += (float) str_replace(',', '', $entitlement['eligible_shares']);
+                $pageTotals['total_shares'] = bcadd(
+                    $pageTotals['total_shares'],
+                    $entitlement['eligible_shares'],
+                    6
+                );
             }
         }
 
@@ -1655,7 +1659,7 @@ class DividendEntitlementController extends Controller
                 'shareholder_no' => $account->shareholder_no,
                 'share_class_id' => $position->share_class_id,
                 'share_class_code' => $shareClass->class_code,
-                'eligible_shares' => number_format($amounts['eligible_shares'], 6),
+                'eligible_shares' => $amounts['eligible_shares'],
                 'rate_per_share' => number_format((float) $declaration->rate_per_share, 6),
                 'gross_amount' => number_format($amounts['gross_amount'], 2),
                 'tax_rate' => number_format($amounts['tax_rate'], 2),
@@ -1675,7 +1679,7 @@ class DividendEntitlementController extends Controller
      */
     private function calculateAmounts(SharePosition $position, DividendDeclaration $declaration, $shareClass): array
     {
-        $eligibleShares = (float) $position->quantity;
+        $eligibleShares = (string) $position->quantity;
         $ratePerShare = (float) $declaration->rate_per_share;
         $taxRate = (float) $shareClass->withholding_tax_rate;
 
@@ -1756,12 +1760,15 @@ class DividendEntitlementController extends Controller
                 ],
                 'page_summary' => [
                     'count' => count($result['entitlements']),
-                    'total_shares' => number_format($result['page_totals']['total_shares'], 6),
+                    'total_shares' => $result['page_totals']['total_shares'],
                     'total_gross' => number_format($result['page_totals']['gross_amount'], 2),
                     'total_tax' => number_format($result['page_totals']['tax_amount'], 2),
                     'total_net' => number_format($result['page_totals']['net_amount'], 2),
                 ],
                 'grand_totals' => $grandTotals,
+            ],
+            'meta' => [
+                'unit_precision' => $declaration->register->unit_precision,
             ],
             'message' => 'Entitlement preview generated successfully'
         ];
@@ -1956,7 +1963,7 @@ class DividendEntitlementController extends Controller
     {
         return [
             'eligible_shareholders_count' => 0,
-            'total_shares' => 0.0,
+            'total_shares' => '0.000000',
             'total_gross_amount' => 0.0,
             'total_tax_amount' => 0.0,
             'total_net_amount' => 0.0,
@@ -2005,7 +2012,7 @@ class DividendEntitlementController extends Controller
         }
 
         // Add to totals
-        $grandTotals['total_shares'] += $amounts['eligible_shares'];
+        $grandTotals['total_shares'] = bcadd($grandTotals['total_shares'], $amounts['eligible_shares'], 6);
         $grandTotals['total_gross_amount'] += $amounts['gross_amount'];
         $grandTotals['total_tax_amount'] += $amounts['tax_amount'];
         $grandTotals['total_net_amount'] += $amounts['net_amount'];
@@ -2030,14 +2037,18 @@ class DividendEntitlementController extends Controller
         if (!isset($grandTotals['by_share_class'][$classCode])) {
             $grandTotals['by_share_class'][$classCode] = [
                 'share_class_code' => $classCode,
-                'total_shares' => 0.0,
+                'total_shares' => '0.000000',
                 'gross_amount' => 0.0,
                 'tax_amount' => 0.0,
                 'net_amount' => 0.0,
             ];
         }
 
-        $grandTotals['by_share_class'][$classCode]['total_shares'] += $amounts['eligible_shares'];
+        $grandTotals['by_share_class'][$classCode]['total_shares'] = bcadd(
+            $grandTotals['by_share_class'][$classCode]['total_shares'],
+            $amounts['eligible_shares'],
+            6
+        );
         $grandTotals['by_share_class'][$classCode]['gross_amount'] += $amounts['gross_amount'];
         $grandTotals['by_share_class'][$classCode]['tax_amount'] += $amounts['tax_amount'];
         $grandTotals['by_share_class'][$classCode]['net_amount'] += $amounts['net_amount'];
@@ -2052,7 +2063,6 @@ class DividendEntitlementController extends Controller
             - $grandTotals['total_tax_amount']
             - $grandTotals['total_net_amount'];
 
-        $grandTotals['total_shares'] = number_format($grandTotals['total_shares'], 6);
         $grandTotals['total_gross_amount'] = number_format($grandTotals['total_gross_amount'], 2);
         $grandTotals['total_tax_amount'] = number_format($grandTotals['total_tax_amount'], 2);
         $grandTotals['total_net_amount'] = number_format($grandTotals['total_net_amount'], 2);
@@ -2061,7 +2071,6 @@ class DividendEntitlementController extends Controller
         $grandTotals['rounding_residue'] = number_format($grandTotals['rounding_residue'], 6);
 
         foreach ($grandTotals['by_share_class'] as $code => $data) {
-            $grandTotals['by_share_class'][$code]['total_shares'] = number_format($data['total_shares'], 6);
             $grandTotals['by_share_class'][$code]['gross_amount'] = number_format($data['gross_amount'], 2);
             $grandTotals['by_share_class'][$code]['tax_amount'] = number_format($data['tax_amount'], 2);
             $grandTotals['by_share_class'][$code]['net_amount'] = number_format($data['net_amount'], 2);

@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             RolesAndPermissionsSeeder::class,
             DividendApprovalRolesSeeder::class,
+            ShareholderCategorySeeder::class,
         ]);
 
         // Only seed test data in non-production environments

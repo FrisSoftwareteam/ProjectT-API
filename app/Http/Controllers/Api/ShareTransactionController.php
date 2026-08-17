@@ -10,7 +10,7 @@ class ShareTransactionController extends Controller
 {
     public function index(Request $request)
     {
-        $query = ShareTransaction::query();
+        $query = ShareTransaction::with('shareClass.register');
         if ($request->filled('sra_id')) {
             $query->where('sra_id', $request->query('sra_id'));
         }
@@ -73,6 +73,7 @@ class ShareTransactionController extends Controller
 
     public function show(ShareTransaction $shareTransaction)
     {
+        $shareTransaction->loadMissing('shareClass.register');
         $outflowTypes = ['transfer_out', 'demat_out', 'cancellation'];
         $inflowTypes = ['allot', 'bonus', 'rights', 'transfer_in', 'demat_in'];
         $isOutflow = in_array($shareTransaction->tx_type, $outflowTypes, true);

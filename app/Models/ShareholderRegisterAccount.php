@@ -24,6 +24,7 @@ class ShareholderRegisterAccount extends Model
     protected $fillable = [
         'shareholder_id',
         'register_id',
+        'shareholder_category_id',
         'shareholder_no',
         'chn',
         'cscs_account_no',
@@ -56,6 +57,14 @@ class ShareholderRegisterAccount extends Model
     public function register()
     {
         return $this->belongsTo(Register::class);
+    }
+
+    /**
+     * Get the register-specific shareholder category.
+     */
+    public function category()
+    {
+        return $this->belongsTo(ShareholderCategory::class, 'shareholder_category_id')->withTrashed();
     }
 
     /**

@@ -41,6 +41,7 @@ class ProbateCaseController extends Controller
         $data = ProbateCase::with([
             'shareholder',
             'beneficiaries.beneficiaryShareholder',
+            'beneficiaries.shareClass.register',
             'representatives.shareholder',
         ])->paginate($request->query('per_page', 15));
 
@@ -207,7 +208,7 @@ class ProbateCaseController extends Controller
             'quantity' => $beneficiary->quantity,
         ]);
 
-        return response()->json($beneficiary->load('beneficiaryShareholder'), 201);
+        return response()->json($beneficiary->load(['beneficiaryShareholder', 'shareClass.register']), 201);
     }
 
     public function addRepresentative(EstateCaseRepresentativeRequest $request, ProbateCase $probateCase)
@@ -448,7 +449,7 @@ class ProbateCaseController extends Controller
 
         return response()->json([
             'message' => 'Estate distribution completed',
-            'data' => $event,
+            'data' => $event->load('shareClass.register'),
         ], 201);
     }
 
@@ -548,6 +549,7 @@ class ProbateCaseController extends Controller
         return [
             'shareholder',
             'beneficiaries.beneficiaryShareholder',
+            'beneficiaries.shareClass.register',
             'representatives.shareholder',
         ];
     }

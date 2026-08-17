@@ -35,4 +35,9 @@ class ProbateBeneficiary extends Model
     {
         return $this->belongsTo(Shareholder::class, 'beneficiary_shareholder_id');
     }
+
+    public function shareClass()
+    {
+        return $this->belongsTo(ShareClass::class);
+    }
 }

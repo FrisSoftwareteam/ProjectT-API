@@ -33,7 +33,7 @@ class ShareAllocationController extends Controller
     {
         $shareholder = Shareholder::findOrFail($shareholderId);
         $data = $request->validated();
-        $shareClass = ShareClass::findOrFail($data['share_class_id']);
+        $shareClass = ShareClass::with('register')->findOrFail($data['share_class_id']);
         $this->unitPrecisionValidationService->assertValidForShareClass(
             (int) $data['share_class_id'],
             $data['quantity']
@@ -46,7 +46,7 @@ class ShareAllocationController extends Controller
             ], 422);
         }
 
-        return DB::transaction(function () use ($shareholder, $data, $registerId) {
+        return DB::transaction(function () use ($shareholder, $data, $registerId, $shareClass) {
             $this->capitalValidationService->assertChangeAllowed(
                 (int) $registerId,
                 (float) $data['quantity'],
@@ -109,6 +109,7 @@ class ShareAllocationController extends Controller
 
             return response()->json([
                 'direction' => 'inflow',
+                'meta' => ['unit_precision' => $shareClass->register->unit_precision],
                 'sra' => $sra,
                 'position' => $position,
                 'lot' => $lot,
@@ -124,12 +125,13 @@ class ShareAllocationController extends Controller
     {
         $shareholder = Shareholder::findOrFail($shareholderId);
         $data = $request->validated();
+        $shareClass = ShareClass::with('register')->findOrFail($data['share_class_id']);
         $this->unitPrecisionValidationService->assertValidForShareClass(
             (int) $data['share_class_id'],
             $data['quantity']
         );
 
-        return DB::transaction(function () use ($shareholder, $data) {
+        return DB::transaction(function () use ($shareholder, $data, $shareClass) {
             $sra = ShareholderRegisterAccount::where('shareholder_id', $shareholder->id)
                 ->where('register_id', $data['register_id'])
                 ->firstOrFail();
@@ -171,6 +173,7 @@ class ShareAllocationController extends Controller
 
             return response()->json([
                 'direction' => 'outflow',
+                'meta' => ['unit_precision' => $shareClass->register->unit_precision],
                 'sra' => $sra,
                 'position' => $closeIfZero && bccomp($newQty, '0', 8) === 0 ? null : $position->fresh(),
                 'transaction' => $tx,

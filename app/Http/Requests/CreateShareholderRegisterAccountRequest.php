@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class CreateShareholderRegisterAccountRequest extends FormRequest
 {
@@ -15,6 +16,13 @@ class CreateShareholderRegisterAccountRequest extends FormRequest
     {
         return [
             'register_id' => 'required|exists:registers,id',
+            'shareholder_category_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('shareholder_categories', 'id')->where(
+                    fn ($query) => $query->where('is_active', true)->whereNull('deleted_at')
+                ),
+            ],
             'shareholder_no' => 'nullable|string|max:30',
             'chn' => 'nullable|string|max:50',
             'cscs_account_no' => 'nullable|string|max:50',
@@ -24,4 +32,3 @@ class CreateShareholderRegisterAccountRequest extends FormRequest
         ];
     }
 }
-

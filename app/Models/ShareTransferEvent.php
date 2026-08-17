@@ -26,5 +26,9 @@ class ShareTransferEvent extends Model
         'quantity' => 'decimal:6',
         'metadata' => 'array',
     ];
-}
 
+    public function shareClass()
+    {
+        return $this->belongsTo(ShareClass::class);
+    }
+}

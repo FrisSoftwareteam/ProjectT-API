@@ -11,6 +11,10 @@ class Register extends Model
 {
     use HasFactory, SoftDeletes;
 
+    protected $appends = [
+        'unit_precision',
+    ];
+
     protected $fillable = [
         'company_id',
         'register_code',
@@ -63,14 +67,13 @@ class Register extends Model
         return $this->belongsTo(InstrumentType::class);
     }
 
-    // TEMPORARILY COMMENTED OUT - Will enable when we create this model
-    // /**
-    //  * Get the shareholder register accounts for this register.
-    //  */
-    // public function shareholderRegisterAccounts()
-    // {
-    //     return $this->hasMany(ShareholderRegisterAccount::class);
-    // }
+    /**
+     * Get the shareholder register accounts for this register.
+     */
+    public function shareholderRegisterAccounts()
+    {
+        return $this->hasMany(ShareholderRegisterAccount::class);
+    }
 
     /**
      * Scope a query to only include active registers.
@@ -134,6 +137,17 @@ class Register extends Model
     public function getMaxDecimalPlaces(): int
     {
         return $this->isWholeNumberOnly() ? 0 : (int) ($this->decimal_precision ?? 2);
+    }
+
+    /**
+     * @return array{type: string, decimal_places: int}
+     */
+    public function getUnitPrecisionAttribute(): array
+    {
+        return [
+            'type' => $this->isWholeNumberOnly() ? 'whole_number' : 'decimal',
+            'decimal_places' => $this->getMaxDecimalPlaces(),
+        ];
     }
 
     /**
