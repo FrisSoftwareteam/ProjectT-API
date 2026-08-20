@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\CscsImportCancelledException;
 use App\Models\AdminUser;
 use App\Models\CscsApprovalAction;
 use App\Models\CscsApprovalPolicy;
@@ -258,9 +259,14 @@ class CscsImportService
             $this->persistProcessingProgress($batch, $counts, 'VALIDATING', 82, true);
             $batch->update(['status' => 'completed', 'uploaded_files' => $storedFiles]);
             $this->validateDraft($batch, $batch->uploaded_by, false);
-            $this->event($batch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $batch->uploaded_by, null, $counts);
+            $processedBatch = $batch->fresh();
+            if ($processedBatch->workflow_status === 'DRAFT_REVIEW') {
+                $this->event($processedBatch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $processedBatch->uploaded_by, null, $counts);
+            }
 
-            return $this->batchResult($batch->fresh());
+            return $this->batchResult($processedBatch);
+        } catch (CscsImportCancelledException) {
+            return $this->finalizeCancelledImport($batchId);
         } catch (\Throwable $e) {
             $this->failImport($batch, $storedFiles, $counts, $e);
         }
@@ -319,7 +325,31 @@ class CscsImportService
 
         $summary['processing_stage'] = $stage;
         $summary['processing_percent'] = $percent;
-        $batch->update(['summary' => $summary]);
+
+        DB::transaction(function () use ($batch, $summary): void {
+            $current = CscsUploadBatch::lockForUpdate()->findOrFail($batch->id);
+            if ($current->workflow_status === 'CANCELLED') {
+                throw new CscsImportCancelledException;
+            }
+            if ($current->workflow_status !== 'PROCESSING') {
+                throw new \RuntimeException("CSCS batch {$batch->id} left PROCESSING while the import worker was active.");
+            }
+
+            $current->update(['summary' => $summary]);
+        });
+
+        $batch->setAttribute('summary', $summary);
+    }
+
+    /** @return array<string, mixed> */
+    private function finalizeCancelledImport(int $batchId): array
+    {
+        CscsUploadRow::where('batch_id', $batchId)
+            ->where('file_type', 'movement')
+            ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
+            ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
+
+        return $this->batchResult(CscsUploadBatch::findOrFail($batchId));
     }
 
     /**
@@ -628,7 +658,7 @@ class CscsImportService
         $snapshot = $unresolved === 0 ? $this->snapshotHash($batch->id) : null;
         $from = $batch->workflow_status;
         $to = $markReconciled && $unresolved === 0 ? 'RECONCILED' : 'DRAFT_REVIEW';
-        $batch->update([
+        $attributes = [
             'workflow_status' => $to,
             'summary' => $summary,
             'reconciliation' => $summary,
@@ -637,7 +667,23 @@ class CscsImportService
             'reconciled_by' => $to === 'RECONCILED' ? $actorId : null,
             'reconciled_at' => $to === 'RECONCILED' ? now() : null,
             'failure_reason' => null,
-        ]);
+        ];
+        if ($trackImportProgress) {
+            DB::transaction(function () use ($batch, $attributes): void {
+                $current = CscsUploadBatch::lockForUpdate()->findOrFail($batch->id);
+                if ($current->workflow_status === 'CANCELLED') {
+                    throw new CscsImportCancelledException;
+                }
+                if ($current->workflow_status !== 'PROCESSING') {
+                    throw new \RuntimeException("CSCS batch {$batch->id} left PROCESSING before validation completed.");
+                }
+
+                $current->update($attributes);
+            });
+            $batch->refresh();
+        } else {
+            $batch->update($attributes);
+        }
         if ($markReconciled) {
             $this->event($batch, 'RECONCILED', $from, $to, $actorId, $comment, $summary);
         }
@@ -781,18 +827,24 @@ class CscsImportService
     /** @return array<string, mixed> */
     public function cancel(int $batchId, int $actorId, string $comment): array
     {
-        $batch = CscsUploadBatch::findOrFail($batchId);
-        $this->assertMaker($batch, $actorId);
-        $this->assertState($batch, ['DRAFT_REVIEW', 'RECONCILED', 'QUERY_RAISED', 'STALE', 'PROCESSING_FAILED']);
-        $from = $batch->workflow_status;
-        $batch->update(['workflow_status' => 'CANCELLED', 'failure_reason' => $comment]);
-        CscsUploadRow::where('batch_id', $batch->id)
-            ->where('file_type', 'movement')
-            ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
-            ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
-        $this->event($batch, 'CANCELLED', $from, 'CANCELLED', $actorId, $comment);
+        return DB::transaction(function () use ($batchId, $actorId, $comment) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['PROCESSING', 'DRAFT_REVIEW', 'RECONCILED', 'QUERY_RAISED', 'STALE', 'PROCESSING_FAILED']);
+            $from = $batch->workflow_status;
+            $summary = $batch->summary ?? [];
+            if ($from === 'PROCESSING') {
+                $summary['processing_stage'] = 'CANCELLED';
+            }
+            $batch->update(['workflow_status' => 'CANCELLED', 'summary' => $summary, 'failure_reason' => $comment]);
+            CscsUploadRow::where('batch_id', $batch->id)
+                ->where('file_type', 'movement')
+                ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
+                ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
+            $this->event($batch, 'CANCELLED', $from, 'CANCELLED', $actorId, $comment);
 
-        return $this->batchResult($batch->fresh());
+            return $this->batchResult($batch->fresh());
+        });
     }
 
     /** @return array<string, mixed> */

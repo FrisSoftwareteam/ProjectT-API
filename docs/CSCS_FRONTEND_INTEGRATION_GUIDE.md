@@ -392,6 +392,8 @@ POST /api/cscs/uploads/{batchId}/reject
 
 ### Maker cancellation
 
+The maker can cancel a batch while it is `PROCESSING`, `DRAFT_REVIEW`, `RECONCILED`, `QUERY_RAISED`, `STALE`, or `PROCESSING_FAILED`. During an active import, cancellation safely stops the worker and prevents it from later changing the batch to `DRAFT_REVIEW`.
+
 ```http
 POST /api/cscs/uploads/{batchId}/cancel
 ```

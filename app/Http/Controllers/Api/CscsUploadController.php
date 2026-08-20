@@ -481,7 +481,10 @@ class CscsUploadController extends Controller
         $isMaker = $user && (int) $batch->uploaded_by === (int) $user->id;
         $actions = ['view'];
         if ($isMaker && $user->can('cscs.reconcile') && in_array($status, ['DRAFT_REVIEW', 'QUERY_RAISED', 'STALE'], true)) {
-            $actions = array_merge($actions, ['resolve', 'revalidate', 'cancel']);
+            $actions = array_merge($actions, ['resolve', 'revalidate']);
+        }
+        if ($isMaker && $user->can('cscs.submit') && in_array($status, ['PROCESSING', 'DRAFT_REVIEW', 'RECONCILED', 'QUERY_RAISED', 'STALE', 'PROCESSING_FAILED'], true)) {
+            $actions[] = 'cancel';
         }
         if ($isMaker && $user->can('cscs.submit') && $status === 'RECONCILED') {
             $actions[] = 'submit';

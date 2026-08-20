@@ -185,6 +185,78 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame($summary['source_rows_total'], $summary['source_rows_processed']);
     }
 
+    public function test_processing_batch_can_be_cancelled_before_the_queue_job_starts(): void
+    {
+        $staged = $this->service->stageImport(
+            $this->files(),
+            $this->register->id,
+            $this->maker->id,
+            'Queued batch to cancel',
+            'TEST-CSCS-CANCEL-QUEUED'
+        );
+
+        $cancelled = $this->service->cancel(
+            $staged['batch_id'],
+            $this->maker->id,
+            'The queued upload was cancelled by its maker.'
+        );
+        (new ProcessCscsImportJob($staged['batch_id']))->handle($this->service);
+
+        $batch = CscsUploadBatch::findOrFail($staged['batch_id']);
+        $this->assertSame('CANCELLED', $cancelled['status']);
+        $this->assertSame('CANCELLED', $batch->workflow_status);
+        $this->assertSame('CANCELLED', $batch->summary['processing_stage']);
+        $this->assertDatabaseCount('cscs_upload_rows', 0);
+        $this->assertDatabaseMissing('cscs_workflow_events', [
+            'batch_id' => $batch->id,
+            'event_type' => 'PARSED',
+        ]);
+    }
+
+    public function test_active_import_worker_stops_without_overwriting_cancellation(): void
+    {
+        $staged = $this->service->stageImport(
+            $this->files(),
+            $this->register->id,
+            $this->maker->id,
+            'Active batch to cancel',
+            'TEST-CSCS-CANCEL-ACTIVE'
+        );
+        $cancelRequested = false;
+
+        Event::listen('eloquent.updated: '.CscsUploadBatch::class, function (CscsUploadBatch $batch) use ($staged, &$cancelRequested): void {
+            if ($cancelRequested || (int) $batch->id !== (int) $staged['batch_id'] || ! $batch->wasChanged('summary')) {
+                return;
+            }
+
+            if ((int) ($batch->summary['movement_rows'] ?? 0) > 0) {
+                $cancelRequested = true;
+                $this->service->cancel(
+                    $batch->id,
+                    $this->maker->id,
+                    'The active import was cancelled by its maker.'
+                );
+            }
+        });
+
+        (new ProcessCscsImportJob($staged['batch_id']))->handle($this->service);
+
+        $batch = CscsUploadBatch::findOrFail($staged['batch_id']);
+        $movementRows = CscsUploadRow::where('batch_id', $batch->id)->where('file_type', 'movement');
+        $this->assertTrue($cancelRequested);
+        $this->assertSame('CANCELLED', $batch->workflow_status);
+        $this->assertSame('CANCELLED', $batch->summary['processing_stage']);
+        $this->assertGreaterThan(0, $movementRows->count());
+        $this->assertSame(
+            $movementRows->count(),
+            (clone $movementRows)->where('resolution_status', 'CANCELLED_WITH_BATCH')->count()
+        );
+        $this->assertDatabaseMissing('cscs_workflow_events', [
+            'batch_id' => $batch->id,
+            'event_type' => 'PARSED',
+        ]);
+    }
+
     public function test_maker_cannot_approve_their_own_batch(): void
     {
         $batch = $this->stageAndSubmit();

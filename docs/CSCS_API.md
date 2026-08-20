@@ -193,6 +193,8 @@ Submission freezes a SHA-256 snapshot of every source row, resolution, mapping, 
 
 Approval does not post holdings. The maker is prohibited from approving, rejecting as checker, or posting their own batch.
 
+The maker may cancel during `PROCESSING`, `DRAFT_REVIEW`, `RECONCILED`, `QUERY_RAISED`, `STALE`, or `PROCESSING_FAILED`. Cancelling an active import signals the queue worker to stop, preserves `CANCELLED` as the final status, and marks any already-created unposted movement rows `CANCELLED_WITH_BATCH`.
+
 Typical action body:
 
 ```json

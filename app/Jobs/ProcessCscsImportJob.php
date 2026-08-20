@@ -39,7 +39,7 @@ class ProcessCscsImportJob implements ShouldBeUnique, ShouldQueue
     {
         $service->processStagedImport($this->batchId);
         $batch = CscsUploadBatch::find($this->batchId);
-        if ($batch && $notifications) {
+        if ($batch?->workflow_status === 'DRAFT_REVIEW' && $notifications) {
             $notifications->sendToRoles(
                 [],
                 'CSCS_DRAFT_READY',

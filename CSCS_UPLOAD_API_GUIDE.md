@@ -211,6 +211,21 @@ Progress is based on actual backend work and never moves backwards:
 
 During parsing, the response also contains `summary.source_rows_processed` and `summary.source_rows_total`. The frontend may display, for example, “Reading row 4,250 of 10,000.”
 
+The maker may cancel while processing when `allowed_actions` contains `cancel`:
+
+```http
+POST /api/cscs/uploads/{batchId}/cancel
+Content-Type: application/json
+```
+
+```json
+{
+  "comment": "The incorrect CSCS upload is being replaced"
+}
+```
+
+The comment is required and must be 10–1,000 characters. On success, stop polling and render the batch as read-only because its status is `CANCELLED`. The background worker will stop safely even if parsing has already started.
+
 Cancel polling when the page unmounts.
 
 ## 4. Maker reviews the batch
