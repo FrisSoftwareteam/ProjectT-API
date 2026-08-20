@@ -130,7 +130,7 @@ Rules:
 - A file hash already staged for the same register is rejected unless the earlier batch failed or was cancelled.
 - Duplicate movement rows and duplicate/ambiguous master identifiers are blocking exceptions.
 
-The asynchronous response is `202 Accepted`. `summary.processing_stage` and `summary.processing_percent` can be used for progress display; the final parsed status is available from `GET /uploads/{batchId}`.
+The asynchronous response is `202 Accepted`. `summary.processing_percent` advances monotonically from staged (`0`) through row parsing (`1–80`), validation (`82–99`), and ready (`100`). `summary.processing_stage` identifies the active stage, while `source_rows_processed` and `source_rows_total` provide row-level parsing progress. The current values and final parsed status are available from `GET /uploads/{batchId}`.
 
 ## Reconciliation endpoints
 

@@ -17,6 +17,7 @@ use App\Models\SharePosition;
 use App\Services\CscsImportService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -136,6 +137,52 @@ class CscsWorkflowTest extends TestCase
             'tran_seq' => '0',
             'resolution_status' => 'READY',
         ]);
+    }
+
+    public function test_queued_import_reports_monotonic_row_and_validation_progress(): void
+    {
+        $staged = $this->service->stageImport(
+            $this->files(),
+            $this->register->id,
+            $this->maker->id,
+            'Progress-tracked CSCS batch',
+            'TEST-CSCS-PROGRESS'
+        );
+        $updates = [];
+
+        Event::listen('eloquent.updated: '.CscsUploadBatch::class, function (CscsUploadBatch $batch) use (&$updates): void {
+            if (! $batch->wasChanged('summary')) {
+                return;
+            }
+
+            $summary = $batch->summary ?? [];
+            if (isset($summary['processing_percent'], $summary['processing_stage'])) {
+                $updates[] = [
+                    'percent' => (int) $summary['processing_percent'],
+                    'stage' => (string) $summary['processing_stage'],
+                ];
+            }
+        });
+
+        (new ProcessCscsImportJob($staged['batch_id']))->handle($this->service);
+
+        $percentages = array_column($updates, 'percent');
+        $sortedPercentages = $percentages;
+        sort($sortedPercentages);
+        $stages = array_values(array_unique(array_column($updates, 'stage')));
+        $summary = CscsUploadBatch::findOrFail($staged['batch_id'])->summary;
+
+        $this->assertGreaterThan(5, count($updates));
+        $this->assertSame($sortedPercentages, $percentages, 'Processing percentage must never move backwards.');
+        $this->assertContains('PARSING', $stages);
+        $this->assertContains('VALIDATING', $stages);
+        $this->assertContains('VALIDATING_ROWS', $stages);
+        $this->assertContains('VALIDATING_TRANSACTIONS', $stages);
+        $this->assertContains('CALCULATING_EFFECTS', $stages);
+        $this->assertContains('FINALIZING', $stages);
+        $this->assertContains('READY', $stages);
+        $this->assertContains(100, $percentages);
+        $this->assertSame($summary['source_rows_total'], $summary['source_rows_processed']);
     }
 
     public function test_maker_cannot_approve_their_own_batch(): void

@@ -138,7 +138,7 @@ Rules:
 - Do not send files as JSON/base64.
 - Do not manually set multipart `Content-Type`.
 
-Success returns `202` with `data.batch_id`, `data.status`, and progress under `data.summary`. The initial status is `PROCESSING`; upload never changes live holdings. Poll `GET /uploads/{batchId}` until a terminal processing state is returned. Use `summary.processing_stage` and `summary.processing_percent` for a real progress display rather than inventing a client-side percentage.
+Success returns `202` with `data.batch_id`, `data.status`, and progress under `data.summary`. The initial status is `PROCESSING`; upload never changes live holdings. Poll `GET /uploads/{batchId}` until a terminal processing state is returned. Use the monotonic `summary.processing_percent` and `summary.processing_stage` values (`STAGED`, `PARSING`, `VALIDATING`, `VALIDATING_ROWS`, `VALIDATING_TRANSACTIONS`, `CALCULATING_EFFECTS`, `FINALIZING`, `READY`). During parsing, `summary.source_rows_processed` and `summary.source_rows_total` provide row-level progress.
 
 The API validates UTF-8 encoding, samples multiple records to identify each fixed-width file, rejects duplicate hashes for the same register, and reports duplicate movement rows or ambiguous master identifiers as blocking exceptions.
 

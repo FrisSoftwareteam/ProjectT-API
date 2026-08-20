@@ -155,6 +155,12 @@ class CscsImportService
         $seenMovementRows = [];
 
         try {
+            $totalSourceRows = $this->countSourceRows($storedFiles);
+            $processedSourceRows = 0;
+            $counts['source_rows_total'] = $totalSourceRows;
+            $counts['source_rows_processed'] = 0;
+            $this->persistProcessingProgress($batch, $counts, 'PARSING', 1, true);
+
             foreach ($storedFiles as $storedFile) {
                 $type = (string) $storedFile['type'];
                 $safeName = (string) $storedFile['name'];
@@ -190,11 +196,12 @@ class CscsImportService
                             'raw_line' => $line,
                             'extra_details' => ['profile' => $profile],
                         ]);
+                        $processedSourceRows++;
+                        $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows);
                     }
 
                     $counts['files_processed']++;
-                    $counts['processing_percent'] = (int) floor(($counts['files_processed'] / max(1, $counts['files_total'])) * 100);
-                    $batch->update(['summary' => $counts]);
+                    $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows, true);
 
                     continue;
                 }
@@ -208,6 +215,8 @@ class CscsImportService
                     if (isset($parsed['parse_error'])) {
                         $counts['invalid_rows']++;
                         $this->createInvalidRow($batch, $parsed);
+                        $processedSourceRows++;
+                        $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows);
 
                         continue;
                     }
@@ -234,22 +243,20 @@ class CscsImportService
                             'source_fingerprint' => $sourceFingerprint,
                         ],
                     ]));
+                    $processedSourceRows++;
+                    $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows);
                 }
 
                 $counts['files_processed']++;
-                $counts['processing_percent'] = (int) floor(($counts['files_processed'] / max(1, $counts['files_total'])) * 100);
-                $batch->update(['summary' => $counts]);
+                $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows, true);
             }
 
             if ($counts['movement_rows'] === 0) {
                 throw ValidationException::withMessages(['files' => ['A CSCS movement file is required.']]);
             }
 
-            $batch->update([
-                'status' => 'completed',
-                'uploaded_files' => $storedFiles,
-                'summary' => array_merge($counts, ['processing_stage' => 'VALIDATING', 'processing_percent' => 95]),
-            ]);
+            $this->persistProcessingProgress($batch, $counts, 'VALIDATING', 82, true);
+            $batch->update(['status' => 'completed', 'uploaded_files' => $storedFiles]);
             $this->validateDraft($batch, $batch->uploaded_by, false);
             $this->event($batch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $batch->uploaded_by, null, $counts);
 
@@ -260,18 +267,83 @@ class CscsImportService
     }
 
     /**
+     * Count meaningful source rows one file at a time, including CR-only source files.
+     *
      * @param  array<int, array<string, mixed>>  $storedFiles
-     * @param  array<string, int>  $counts
+     */
+    private function countSourceRows(array $storedFiles): int
+    {
+        $total = 0;
+
+        foreach ($storedFiles as $storedFile) {
+            $path = (string) ($storedFile['path'] ?? '');
+            $lines = preg_split('/\r\n|\n|\r/', (string) Storage::get($path)) ?: [];
+            $total += count(array_filter($lines, fn (string $line) => trim($line) !== ''));
+        }
+
+        return $total;
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function persistParsingProgress(
+        CscsUploadBatch $batch,
+        array &$summary,
+        int $processedRows,
+        int $totalRows,
+        bool $force = false
+    ): void {
+        $summary['source_rows_processed'] = $processedRows;
+        $summary['source_rows_total'] = $totalRows;
+        $percent = $totalRows > 0
+            ? 5 + (int) floor(($processedRows / $totalRows) * 75)
+            : 80;
+
+        $this->persistProcessingProgress($batch, $summary, 'PARSING', min(80, $percent), $force);
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function persistProcessingProgress(
+        CscsUploadBatch $batch,
+        array &$summary,
+        string $stage,
+        int $percent,
+        bool $force = false
+    ): void {
+        $currentStage = (string) ($summary['processing_stage'] ?? '');
+        $currentPercent = (int) ($summary['processing_percent'] ?? 0);
+        $percent = max($currentPercent, min(99, max(0, $percent)));
+
+        if (! $force && $currentStage === $stage && $currentPercent === $percent) {
+            return;
+        }
+
+        $summary['processing_stage'] = $stage;
+        $summary['processing_percent'] = $percent;
+        $batch->update(['summary' => $summary]);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $storedFiles
+     * @param  array<string, mixed>  $counts
      */
     private function failImport(CscsUploadBatch $batch, array $storedFiles, array $counts, \Throwable $exception): never
     {
         $reference = (string) Str::uuid();
+        $latestSummary = $batch->fresh()->summary ?? [];
+        $failureSummary = array_merge($counts, $latestSummary, [
+            'processing_stage' => 'FAILED',
+            'processing_percent' => max(
+                (int) ($counts['processing_percent'] ?? 0),
+                (int) ($latestSummary['processing_percent'] ?? 0)
+            ),
+            'failure_reference' => $reference,
+        ]);
         Log::error('CSCS staging failed', ['batch_id' => $batch->id, 'reference' => $reference, 'error' => $exception->getMessage()]);
         $batch->update([
             'status' => 'failed',
             'workflow_status' => 'PROCESSING_FAILED',
             'uploaded_files' => $storedFiles,
-            'summary' => array_merge($counts, ['failure_reference' => $reference]),
+            'summary' => $failureSummary,
             'failure_reason' => "CSCS processing failed. Reference: {$reference}",
         ]);
         $this->event(
@@ -309,13 +381,22 @@ class CscsImportService
         bool $markReconciled,
         ?string $comment = null
     ): array {
+        $trackImportProgress = $batch->workflow_status === 'PROCESSING';
+        $progressSummary = $batch->summary ?? [];
         $rows = CscsUploadRow::where('batch_id', $batch->id)
             ->where('file_type', 'movement')
             ->orderBy('id')
             ->get();
 
+        $processedValidationRows = 0;
         foreach ($rows as $row) {
             if (in_array($row->resolution_status, ['RULE_EXCLUDED', 'CONFIRMED_REPLAY'], true)) {
+                $processedValidationRows++;
+                if ($trackImportProgress) {
+                    $percent = 82 + (int) floor(($processedValidationRows / max(1, $rows->count())) * 6);
+                    $this->persistProcessingProgress($batch, $progressSummary, 'VALIDATING_ROWS', $percent);
+                }
+
                 continue;
             }
             $structuralException = in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true);
@@ -328,6 +409,11 @@ class CscsImportService
                 'proposed_delta_qty' => null,
                 'proposed_after_qty' => null,
             ]);
+            $processedValidationRows++;
+            if ($trackImportProgress) {
+                $percent = 82 + (int) floor(($processedValidationRows / max(1, $rows->count())) * 6);
+                $this->persistProcessingProgress($batch, $progressSummary, 'VALIDATING_ROWS', $percent);
+            }
         }
 
         $totalDebit = $this->zero();
@@ -336,6 +422,20 @@ class CscsImportService
         $effects = [];
         $readyGroups = 0;
         $groups = $rows->filter(fn (CscsUploadRow $row) => $row->tran_no)->groupBy('tran_no');
+        $processedValidationGroups = 0;
+        $advanceValidationGroup = function () use (
+            $batch,
+            $groups,
+            $trackImportProgress,
+            &$processedValidationGroups,
+            &$progressSummary
+        ): void {
+            $processedValidationGroups++;
+            if ($trackImportProgress) {
+                $percent = 88 + (int) floor(($processedValidationGroups / max(1, $groups->count())) * 7);
+                $this->persistProcessingProgress($batch, $progressSummary, 'VALIDATING_TRANSACTIONS', $percent);
+            }
+        };
 
         foreach ($groups as $tranNo => $group) {
             if ($group->contains(fn (CscsUploadRow $row) => in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true))) {
@@ -343,15 +443,21 @@ class CscsImportService
                     $this->failRow($row, 'GROUP_STRUCTURAL_ERROR', 'Another leg in this transaction group has a structural validation error.');
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
             if ($group->every(fn (CscsUploadRow $row) => $row->resolution_status === 'RULE_EXCLUDED')) {
+                $advanceValidationGroup();
+
                 continue;
             }
             if ($group->contains(fn (CscsUploadRow $row) => $row->resolution_status === 'RULE_EXCLUDED')) {
                 foreach ($group->reject(fn (CscsUploadRow $row) => $row->resolution_status === 'RULE_EXCLUDED') as $row) {
                     $this->failRow($row, 'PARTIAL_GROUP_EXCLUSION', 'A transfer group must be included or excluded as a whole.');
                 }
+
+                $advanceValidationGroup();
 
                 continue;
             }
@@ -366,10 +472,14 @@ class CscsImportService
                     ]);
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
             if ($replayed->isNotEmpty()) {
                 $this->failGroup($group, 'PARTIAL_REPLAY', 'Only part of this transaction group was previously posted.');
+
+                $advanceValidationGroup();
 
                 continue;
             }
@@ -378,6 +488,8 @@ class CscsImportService
             if ($groupError) {
                 $this->failGroup($group, $groupError[0], $groupError[1]);
 
+                $advanceValidationGroup();
+
                 continue;
             }
 
@@ -385,6 +497,8 @@ class CscsImportService
             $mapping = CscsSecurityMapping::where('security_code', $securityCode)->where('is_active', true)->first();
             if (! $mapping || (int) $mapping->register_id !== (int) $batch->register_id) {
                 $this->failGroup($group, 'UNKNOWN_SECURITY', "No active mapping exists for {$securityCode} in this register.");
+
+                $advanceValidationGroup();
 
                 continue;
             }
@@ -419,6 +533,8 @@ class CscsImportService
                     $this->failRow($readyRow, 'GROUP_UNRESOLVED', 'Another leg in this transaction group is unresolved.');
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
 
@@ -447,8 +563,10 @@ class CscsImportService
                 $effects[$key]['rows'][] = $row->id;
             }
             $readyGroups++;
+            $advanceValidationGroup();
         }
 
+        $processedEffects = 0;
         foreach ($effects as $effect) {
             $before = $this->zero();
             if ($effect['sra_id']) {
@@ -462,12 +580,27 @@ class CscsImportService
                     $this->failRow(CscsUploadRow::findOrFail($rowId), 'INSUFFICIENT_HOLDING', 'The proposed debit would create a negative holding.');
                 }
 
+                $processedEffects++;
+                if ($trackImportProgress) {
+                    $percent = 95 + (int) floor(($processedEffects / max(1, count($effects))) * 4);
+                    $this->persistProcessingProgress($batch, $progressSummary, 'CALCULATING_EFFECTS', $percent);
+                }
+
                 continue;
             }
             CscsUploadRow::whereIn('id', $effect['rows'])->update([
                 'proposed_before_qty' => $before,
                 'proposed_after_qty' => $after,
             ]);
+            $processedEffects++;
+            if ($trackImportProgress) {
+                $percent = 95 + (int) floor(($processedEffects / max(1, count($effects))) * 4);
+                $this->persistProcessingProgress($batch, $progressSummary, 'CALCULATING_EFFECTS', $percent);
+            }
+        }
+
+        if ($trackImportProgress) {
+            $this->persistProcessingProgress($batch, $progressSummary, 'FINALIZING', 99, true);
         }
 
         $unresolved = CscsUploadRow::where('batch_id', $batch->id)

@@ -65,6 +65,9 @@ class ProcessCscsImportJob implements ShouldBeUnique, ShouldQueue
                 'failure_reason' => 'The CSCS import worker stopped before processing completed. Review the secured application logs.',
             ]);
         if ($updated > 0 && ($batch = CscsUploadBatch::find($this->batchId))) {
+            $summary = $batch->summary ?? [];
+            $summary['processing_stage'] = 'FAILED';
+            $batch->update(['summary' => $summary]);
             CscsWorkflowEvent::create([
                 'batch_id' => $batch->id,
                 'event_type' => 'PROCESSING_FAILED',
