@@ -26,7 +26,7 @@ class PostCscsBatchJob implements ShouldBeUnique, ShouldQueue
         public readonly int $actorId,
         public readonly ?string $comment = null
     ) {
-        $this->onQueue('cscs');
+        $this->onQueue(config('cscs.queue', 'cscs'));
     }
 
     public function uniqueId(): string

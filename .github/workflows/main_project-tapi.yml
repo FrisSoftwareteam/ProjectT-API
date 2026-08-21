@@ -38,14 +38,22 @@ jobs:
           composer install --no-dev --prefer-dist --no-interaction --no-progress
           composer dump-autoload --optimize
 
-      # Optional: run Laravel optimizations (won't fail pipeline)
+      # Build only caches that are independent of Azure runtime settings.
+      # Configuration must be resolved after deployment from App Service settings.
       - name: Laravel optimizations
         if: steps.check_files.outputs.exists == 'true'
         run: |
-          php artisan config:clear || true
-          php artisan config:cache || true
-          php artisan route:cache || true
-          php artisan view:cache || true
+          php artisan config:clear
+          php artisan route:cache
+          php artisan view:cache
+
+      - name: Verify continuous queue workers
+        run: |
+          test -x App_Data/jobs/continuous/projectt-cscs-worker/run.sh
+          test -x App_Data/jobs/continuous/projectt-notification-worker/run.sh
+          bash -n App_Data/jobs/continuous/projectt-cscs-worker/run.sh
+          bash -n App_Data/jobs/continuous/projectt-notification-worker/run.sh
+          php -r 'foreach (glob("App_Data/jobs/continuous/*/settings.job") as $file) { json_decode(file_get_contents($file), true, 512, JSON_THROW_ON_ERROR); }'
 
       - name: Create deployment package
         run: |
@@ -77,6 +85,25 @@ jobs:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_067A9F3CC7084918A5518511FF00C5E9 }}
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C60D61AD966E49409B1C56A3A0BFD2AF }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_40E501E15F1F4711BEA1086859128EB3 }}
+
+      - name: Configure Azure background workers
+        shell: bash
+        run: |
+          resource_group="$(az webapp list --query "[?name=='Project-TAPI'].resourceGroup | [0]" --output tsv)"
+          if [ -z "$resource_group" ]; then
+            echo "Could not find Azure Web App Project-TAPI in the configured subscription." >&2
+            exit 1
+          fi
+          az webapp config set \
+            --resource-group "$resource_group" \
+            --name "Project-TAPI" \
+            --always-on true \
+            --output none
+          az webapp config appsettings set \
+            --resource-group "$resource_group" \
+            --name "Project-TAPI" \
+            --settings CSCS_QUEUE=cscs NOTIFICATION_QUEUE=default DB_QUEUE_RETRY_AFTER=3900 \
+            --output none
 
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3

@@ -12,9 +12,15 @@ class InternalAdminNotification extends Notification implements ShouldQueue
 {
     use Queueable;
 
+    public int $tries = 3;
+
+    public int $timeout = 120;
+
     public function __construct(
         protected array $payload
-    ) {}
+    ) {
+        $this->onQueue(config('notifications.queue', 'default'));
+    }
 
     public function via(object $notifiable): array
     {
