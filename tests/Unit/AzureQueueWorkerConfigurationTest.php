@@ -63,4 +63,15 @@ class AzureQueueWorkerConfigurationTest extends TestCase
             $this->assertTrue($settings['is_singleton']);
         }
     }
+
+    #[Test]
+    public function azure_deployment_enables_required_webjob_runtime_settings(): void
+    {
+        $workflow = file_get_contents(base_path('.github/workflows/main_project-tapi.yml'));
+
+        $this->assertStringContainsString('"webJobsEnabled":true', $workflow);
+        $this->assertStringContainsString('WEBSITES_ENABLE_APP_SERVICE_STORAGE=true', $workflow);
+        $this->assertStringContainsString('WEBJOBS_STOPPED=0', $workflow);
+        $this->assertStringContainsString('--always-on true', $workflow);
+    }
 }

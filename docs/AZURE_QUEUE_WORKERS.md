@@ -24,14 +24,21 @@ Each worker exits cleanly after one hour. Azure Continuous WebJobs automatically
 The GitHub deployment workflow automatically:
 
 1. enables App Service **Always On**;
-2. sets `CSCS_QUEUE=cscs`;
-3. sets `NOTIFICATION_QUEUE=default`;
-4. sets `DB_QUEUE_RETRY_AFTER=3900`, which is longer than the maximum 3,600-second CSCS worker timeout; and
-5. deploys both jobs under `App_Data/jobs/continuous`.
+2. enables the App Service **WebJobs runtime**;
+3. enables persistent App Service storage with `WEBSITES_ENABLE_APP_SERVICE_STORAGE=true`;
+4. ensures WebJobs are not globally stopped with `WEBJOBS_STOPPED=0`;
+5. sets `CSCS_QUEUE=cscs`;
+6. sets `NOTIFICATION_QUEUE=default`;
+7. sets `DB_QUEUE_RETRY_AFTER=3900`, which is longer than the maximum 3,600-second CSCS worker timeout; and
+8. deploys both jobs under `App_Data/jobs/continuous`.
 
 The deployment does not pre-build Laravel's configuration cache. Azure App Service settings therefore remain the runtime source of truth instead of being replaced by values from the GitHub build machine.
 
 Always On requires an App Service tier that supports it. The deployment deliberately fails if the setting cannot be enabled, because deploying an API whose workers can silently sleep would be incomplete.
+
+SCM Basic Auth Publishing Credentials can remain disabled. The GitHub workflow uses Microsoft Entra/OIDC authentication, and enabling password-based publishing credentials is not required for the workers to execute. The Azure Portal may continue to display its basic-authentication advisory even when the workers are running.
+
+If persistent storage or the WebJobs runtime is enabled after an application was already deployed, deploy the application again. The second deployment places the worker files onto the newly mounted persistent filesystem where Kudu can discover them.
 
 The production queue connection must be a real asynchronous driver. The current application default is `database`; do not set `QUEUE_CONNECTION=sync` in production.
 
