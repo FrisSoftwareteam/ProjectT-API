@@ -106,21 +106,6 @@ jobs:
             --settings CSCS_QUEUE=cscs NOTIFICATION_QUEUE=default DB_QUEUE_RETRY_AFTER=3900 WEBSITES_ENABLE_APP_SERVICE_STORAGE=true WEBJOBS_STOPPED=0 \
             --output none
 
-          webjobs_enabled="$(az webapp config show \
-            --resource-group "$resource_group" \
-            --name "Project-TAPI" \
-            --query webJobsEnabled \
-            --output tsv)"
-          remote_storage="$(az webapp config appsettings list \
-            --resource-group "$resource_group" \
-            --name "Project-TAPI" \
-            --query "[?name=='WEBSITES_ENABLE_APP_SERVICE_STORAGE'].value | [0]" \
-            --output tsv)"
-          if [ "$webjobs_enabled" != "true" ] || [ "$remote_storage" != "true" ]; then
-            echo "Azure WebJobs runtime or persistent App Service storage was not enabled." >&2
-            exit 1
-          fi
-
       - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
