@@ -97,7 +97,7 @@ The second approval step is activated when total debit is at or above the config
 | GET | `/uploads/{batchId}/rows/{rowId}` | One staged row |
 | GET | `/uploads/{batchId}/master-records` | Parsed master records |
 | GET | `/uploads/{batchId}/transactions` | Transaction groups |
-| GET | `/uploads/{batchId}/transactions/{transactionNumber}` | Debit and credit legs for a transaction |
+| GET | `/uploads/{batchId}/transactions/{transactionNumber}` | Debit/credit legs plus balance status and flag reasons for one transaction |
 | GET | `/uploads/{batchId}/account-effects` | Proposed holding effects |
 | GET | `/uploads/{batchId}/preview` | Complete maker/checker preview |
 | GET | `/uploads/{batchId}/exceptions` | Blocking and resolved exceptions |

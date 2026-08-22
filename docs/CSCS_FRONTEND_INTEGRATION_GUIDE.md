@@ -169,6 +169,27 @@ GET /api/cscs/uploads/{batchId}/snapshots
 
 Show file names/hashes/encoding, record and duplicate counts, transaction groups, debit/credit totals, unresolved exceptions, opening and proposed holdings, risk flags, revision, approval step, immutable snapshots, and audit events.
 
+The individual transaction endpoint includes explicit UI fields in addition to the existing totals and legs:
+
+```json
+{
+  "data": {
+    "transaction_number": "2606160005615022",
+    "debit_total": "248889.000000",
+    "credit_total": "248889.000000",
+    "net_total": "0.000000",
+    "is_balanced": true,
+    "balance_status": "BALANCED",
+    "is_flagged": false,
+    "flag_reasons": [],
+    "status": ["READY"],
+    "legs": []
+  }
+}
+```
+
+`balance_status` is `BALANCED` or `UNBALANCED`. `is_flagged` is true when the transaction is unbalanced, contains an exception, or has a leg outside the normal `READY`/`POSTED` states. `flag_reasons` contains the applicable exception and resolution codes. These three fields are intentionally exposed on the individual `/transactions/{transactionNumber}` endpoint, not the paginated transaction-groups endpoint.
+
 ### Step 4 — Render actions from the batch response
 
 `GET /uploads/{batchId}` includes `allowed_actions`:

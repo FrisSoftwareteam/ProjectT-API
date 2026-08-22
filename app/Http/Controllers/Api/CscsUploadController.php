@@ -132,8 +132,23 @@ class CscsUploadController extends Controller
         $rows = CscsUploadRow::where('batch_id', $batchId)->where('tran_no', $transactionNumber)->orderBy('id')->get();
         abort_if($rows->isEmpty(), 404);
 
+        $payload = $this->transactionPayload($transactionNumber, $rows);
+        $exceptionCodes = $rows->pluck('exception_code')->filter()->unique()->values();
+        $flaggedStatuses = $rows->pluck('resolution_status')->filter()
+            ->reject(fn (string $status) => in_array($status, ['READY', 'POSTED'], true))
+            ->unique()->values();
+        $flagReasons = $exceptionCodes->merge($flaggedStatuses)->unique()->values();
+        if (! $payload['is_balanced']) {
+            $flagReasons->prepend('UNBALANCED_TRANSACTION');
+            $flagReasons = $flagReasons->unique()->values();
+        }
+
+        $payload['balance_status'] = $payload['is_balanced'] ? 'BALANCED' : 'UNBALANCED';
+        $payload['is_flagged'] = $flagReasons->isNotEmpty();
+        $payload['flag_reasons'] = $flagReasons->all();
+
         return response()->json([
-            'data' => $this->transactionPayload($transactionNumber, $rows),
+            'data' => $payload,
             'meta' => $this->precisionMeta($batchId),
         ]);
     }

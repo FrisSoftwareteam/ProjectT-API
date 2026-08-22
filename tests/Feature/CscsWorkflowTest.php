@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\Api\CscsUploadController;
 use App\Jobs\ProcessCscsImportJob;
 use App\Models\AdminUser;
 use App\Models\CscsApprovalPolicy;
@@ -16,6 +17,7 @@ use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
 use App\Services\CscsImportService;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
@@ -293,6 +295,41 @@ class CscsWorkflowTest extends TestCase
             $this->assertSame(2, CscsUploadRow::where('batch_id', $result['batch_id'])->where('exception_code', 'UNBALANCED_QUANTITY')->count());
             $this->assertSame('DRAFT_REVIEW', CscsUploadBatch::find($result['batch_id'])->workflow_status);
         }
+    }
+
+    public function test_individual_transaction_exposes_balance_and_flag_information(): void
+    {
+        $balanced = $this->stageBatch();
+        $controller = app(CscsUploadController::class);
+        $balancedPayload = $controller->transaction($balanced['batch_id'], '2606160005615022')->getData(true)['data'];
+
+        $this->assertSame('BALANCED', $balancedPayload['balance_status']);
+        $this->assertFalse($balancedPayload['is_flagged']);
+        $this->assertSame([], $balancedPayload['flag_reasons']);
+
+        $listPayload = $controller->transactions(Request::create('/api/cscs/transactions'), $balanced['batch_id'])->getData(true);
+        $this->assertArrayNotHasKey('balance_status', $listPayload['data'][0]);
+        $this->assertArrayNotHasKey('is_flagged', $listPayload['data'][0]);
+        $this->assertArrayNotHasKey('flag_reasons', $listPayload['data'][0]);
+    }
+
+    public function test_individual_unbalanced_transaction_exposes_flag_reasons(): void
+    {
+        $unbalanced = $this->service->import(
+            $this->files('248889', '248888'),
+            $this->register->id,
+            $this->maker->id,
+            'Unbalanced CSCS batch',
+            'TEST-CSCS-UNBALANCED-DETAIL'
+        );
+        $controller = app(CscsUploadController::class);
+        $unbalancedPayload = $controller->transaction($unbalanced['batch_id'], '2606160005615022')->getData(true)['data'];
+
+        $this->assertSame('UNBALANCED', $unbalancedPayload['balance_status']);
+        $this->assertTrue($unbalancedPayload['is_flagged']);
+        $this->assertContains('UNBALANCED_TRANSACTION', $unbalancedPayload['flag_reasons']);
+        $this->assertContains('UNBALANCED_QUANTITY', $unbalancedPayload['flag_reasons']);
+        $this->assertContains('UNRESOLVED', $unbalancedPayload['flag_reasons']);
     }
 
     public function test_duplicate_file_is_rejected_before_a_second_batch_is_processed(): void
