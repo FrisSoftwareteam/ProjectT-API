@@ -153,6 +153,31 @@ GET /api/cscs/uploads/{batchId}/exceptions?per_page=50
 GET /api/cscs/uploads/{batchId}/transactions?per_page=50
 ```
 
+The transaction-groups endpoint supports server-side workspace filtering. Filters are applied before pagination:
+
+```http
+GET /api/cscs/uploads/{batchId}/transactions?search=2606160005615022&balance_status=BALANCED&is_flagged=false&resolution_status=READY&security_code=FIDELITYBK&trade_date_from=2026-06-16&trade_date_to=2026-06-16&page=1&per_page=50
+```
+
+All filters are optional. `search` matches transaction number, either account identifier, or security code. `balance_status` accepts `BALANCED` or `UNBALANCED`; `is_flagged` accepts `true` or `false`. The response includes full-batch tab counts and normalized active filters independently of the current page:
+
+```json
+{
+  "meta": {
+    "transaction_counts": {
+      "all": 1145,
+      "balanced": 1000,
+      "unbalanced": 145,
+      "flagged": 300
+    },
+    "applied_filters": {
+      "balance_status": "BALANCED",
+      "is_flagged": false
+    }
+  }
+}
+```
+
 Optional tabs:
 
 ```text
@@ -188,7 +213,7 @@ The individual transaction endpoint includes explicit UI fields in addition to t
 }
 ```
 
-`balance_status` is `BALANCED` or `UNBALANCED`. `is_flagged` is true when the transaction is unbalanced, contains an exception, or has a leg outside the normal `READY`/`POSTED` states. `flag_reasons` contains the applicable exception and resolution codes. These three fields are intentionally exposed on the individual `/transactions/{transactionNumber}` endpoint, not the paginated transaction-groups endpoint.
+`balance_status` is `BALANCED` or `UNBALANCED`. `is_flagged` is true when the transaction is unbalanced, contains an exception, or has a leg outside the normal `READY`/`POSTED` states. `flag_reasons` contains the applicable exception and resolution codes. These three fields are returned by both the paginated `/transactions` endpoint and the individual `/transactions/{transactionNumber}` endpoint.
 
 ### Step 4 — Render actions from the batch response
 

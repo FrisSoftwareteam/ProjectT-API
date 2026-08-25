@@ -4289,7 +4289,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/transactions",
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/transactions?page=1&per_page=50",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -4299,9 +4299,64 @@
                                 "uploads",
                                 "{{batchId}}",
                                 "transactions"
+                            ],
+                            "query": [
+                                {
+                                    "key": "search",
+                                    "value": "2606160005615022",
+                                    "description": "Search transaction number, debit/credit identifier, or security code.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "balance_status",
+                                    "value": "BALANCED",
+                                    "description": "Accepted values: BALANCED or UNBALANCED.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "is_flagged",
+                                    "value": "true",
+                                    "description": "Use true for flagged groups or false for clear groups.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "resolution_status",
+                                    "value": "UNRESOLVED",
+                                    "description": "Return groups containing at least one leg with this resolution status.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "security_code",
+                                    "value": "FIDELITYBK",
+                                    "description": "Return groups containing this security code.",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "trade_date_from",
+                                    "value": "2026-06-16",
+                                    "description": "Inclusive transaction trade-date lower bound (YYYY-MM-DD).",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "trade_date_to",
+                                    "value": "2026-06-16",
+                                    "description": "Inclusive transaction trade-date upper bound (YYYY-MM-DD).",
+                                    "disabled": true
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "50",
+                                    "description": "Between 1 and 100.",
+                                    "disabled": false
+                                }
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@transactions`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@transactions`.\n\nSupports server-side search, balance, flagged, resolution, security-code, trade-date, and pagination filters. Each group returns `balance_status`, `is_flagged`, and `flag_reasons`. Response `meta.transaction_counts` contains full-batch all/balanced/unbalanced/flagged counts; `meta.applied_filters` echoes normalized active filters.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -4329,7 +4384,7 @@
                                 "{{transactionNumber}}"
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@transaction`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@transaction`.\n\nReturns one transaction group with debit/credit legs, `balance_status`, `is_flagged`, and `flag_reasons`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 }

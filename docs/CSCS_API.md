@@ -96,7 +96,7 @@ The second approval step is activated when total debit is at or above the config
 | GET | `/uploads/{batchId}/rows` | Movement rows |
 | GET | `/uploads/{batchId}/rows/{rowId}` | One staged row |
 | GET | `/uploads/{batchId}/master-records` | Parsed master records |
-| GET | `/uploads/{batchId}/transactions` | Transaction groups |
+| GET | `/uploads/{batchId}/transactions` | Paginated transaction groups with balance status and flag reasons |
 | GET | `/uploads/{batchId}/transactions/{transactionNumber}` | Debit/credit legs plus balance status and flag reasons for one transaction |
 | GET | `/uploads/{batchId}/account-effects` | Proposed holding effects |
 | GET | `/uploads/{batchId}/preview` | Complete maker/checker preview |
@@ -105,6 +105,22 @@ The second approval step is activated when total debit is at or above the config
 | GET | `/uploads/{batchId}/files/{fileIndex}/download` | Authorized source-file download |
 | GET | `/uploads/{batchId}/related-batches` | Original/reversal batch links |
 | GET | `/uploads/{batchId}/snapshots` | Immutable submitted revision evidence |
+
+Transaction-group query parameters:
+
+```text
+search=transaction number, account identifier, or security code
+balance_status=BALANCED|UNBALANCED
+is_flagged=true|false
+resolution_status=READY|UNRESOLVED|INVALID|RULE_EXCLUDED|CONFIRMED_REPLAY|POSTED
+security_code=FIDELITYBK
+trade_date_from=YYYY-MM-DD
+trade_date_to=YYYY-MM-DD
+page=1
+per_page=50
+```
+
+`meta.transaction_counts` always reports counts across the complete batch, while `total`, `current_page`, and `data` describe the filtered result.
 
 Upload uses `multipart/form-data`:
 

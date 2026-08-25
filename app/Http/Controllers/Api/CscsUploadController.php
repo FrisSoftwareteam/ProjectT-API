@@ -12,9 +12,11 @@ use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
 use App\Services\AdminNotificationService;
 use App\Services\CscsImportService;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
@@ -117,14 +119,69 @@ class CscsUploadController extends Controller
     public function transactions(Request $request, int $batchId): JsonResponse
     {
         $this->batch($batchId);
-        $validated = $request->validate(['per_page' => ['nullable', 'integer', 'min:1', 'max:100'], 'page' => ['nullable', 'integer', 'min:1']]);
-        $groups = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->whereNotNull('tran_no')
-            ->orderBy('tran_no')->orderBy('id')->get()->groupBy('tran_no')->map(fn ($rows, $number) => $this->transactionPayload((string) $number, $rows))->values();
+        $flaggedFilter = $request->query('is_flagged');
+        if (is_string($flaggedFilter) && in_array(strtolower($flaggedFilter), ['true', 'false'], true)) {
+            $flaggedFilter = strtolower($flaggedFilter) === 'true';
+        }
+        $request->merge(array_filter([
+            'search' => $request->filled('search') ? trim((string) $request->query('search')) : null,
+            'balance_status' => $request->filled('balance_status') ? strtoupper((string) $request->query('balance_status')) : null,
+            'resolution_status' => $request->filled('resolution_status') ? strtoupper((string) $request->query('resolution_status')) : null,
+            'security_code' => $request->filled('security_code') ? strtoupper((string) $request->query('security_code')) : null,
+            'is_flagged' => $request->has('is_flagged') ? $flaggedFilter : null,
+        ], fn ($value) => $value !== null));
+        $validated = $request->validate([
+            'search' => ['nullable', 'string', 'max:100'],
+            'balance_status' => ['nullable', Rule::in(['BALANCED', 'UNBALANCED'])],
+            'is_flagged' => ['nullable', 'boolean'],
+            'resolution_status' => ['nullable', 'string', 'max:40'],
+            'security_code' => ['nullable', 'string', 'max:20'],
+            'trade_date_from' => ['nullable', 'date_format:Y-m-d'],
+            'trade_date_to' => ['nullable', 'date_format:Y-m-d'],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
+        if (array_key_exists('is_flagged', $validated) && $validated['is_flagged'] !== null) {
+            $validated['is_flagged'] = filter_var($validated['is_flagged'], FILTER_VALIDATE_BOOLEAN);
+        }
+        if (isset($validated['trade_date_from'], $validated['trade_date_to'])
+            && $validated['trade_date_to'] < $validated['trade_date_from']) {
+            throw ValidationException::withMessages([
+                'trade_date_to' => ['The trade date to must be on or after the trade date from.'],
+            ]);
+        }
+
+        $groups = $this->transactionGroupsQuery($batchId);
+        $this->applyTransactionFilters($groups, $batchId, $validated);
         $perPage = $validated['per_page'] ?? 50;
         $page = $validated['page'] ?? 1;
-        $paginator = new LengthAwarePaginator($groups->forPage($page, $perPage)->values(), $groups->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
+        $paginator = $groups->orderBy('tran_no')->paginate($perPage, ['*'], 'page', $page);
+        $paginator->appends($request->query());
+        $transactionNumbers = $paginator->getCollection()->pluck('tran_no')->map(fn ($number) => (string) $number);
+        $rows = CscsUploadRow::where('batch_id', $batchId)->whereIn('tran_no', $transactionNumbers)
+            ->orderBy('tran_no')->orderBy('id')->get()->groupBy('tran_no');
+        $paginator->setCollection($transactionNumbers->map(
+            fn (string $number) => $this->transactionPayload($number, $rows->get($number, collect()))
+        ));
 
-        return $this->paginatedWithPrecision($paginator, $batchId);
+        $counts = DB::query()->fromSub($this->transactionGroupsQuery($batchId), 'transaction_groups')
+            ->selectRaw('COUNT(*) as all_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN is_balanced = 1 THEN 1 ELSE 0 END), 0) as balanced_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN is_balanced = 0 THEN 1 ELSE 0 END), 0) as unbalanced_count')
+            ->selectRaw('COALESCE(SUM(CASE WHEN is_flagged = 1 THEN 1 ELSE 0 END), 0) as flagged_count')
+            ->first();
+        $appliedFilters = collect($validated)->except(['page', 'per_page'])
+            ->filter(fn ($value) => $value !== null && $value !== '')->all();
+
+        return $this->paginatedWithPrecision($paginator, $batchId, [
+            'transaction_counts' => [
+                'all' => (int) ($counts->all_count ?? 0),
+                'balanced' => (int) ($counts->balanced_count ?? 0),
+                'unbalanced' => (int) ($counts->unbalanced_count ?? 0),
+                'flagged' => (int) ($counts->flagged_count ?? 0),
+            ],
+            'applied_filters' => $appliedFilters,
+        ]);
     }
 
     public function transaction(int $batchId, string $transactionNumber): JsonResponse
@@ -132,23 +189,8 @@ class CscsUploadController extends Controller
         $rows = CscsUploadRow::where('batch_id', $batchId)->where('tran_no', $transactionNumber)->orderBy('id')->get();
         abort_if($rows->isEmpty(), 404);
 
-        $payload = $this->transactionPayload($transactionNumber, $rows);
-        $exceptionCodes = $rows->pluck('exception_code')->filter()->unique()->values();
-        $flaggedStatuses = $rows->pluck('resolution_status')->filter()
-            ->reject(fn (string $status) => in_array($status, ['READY', 'POSTED'], true))
-            ->unique()->values();
-        $flagReasons = $exceptionCodes->merge($flaggedStatuses)->unique()->values();
-        if (! $payload['is_balanced']) {
-            $flagReasons->prepend('UNBALANCED_TRANSACTION');
-            $flagReasons = $flagReasons->unique()->values();
-        }
-
-        $payload['balance_status'] = $payload['is_balanced'] ? 'BALANCED' : 'UNBALANCED';
-        $payload['is_flagged'] = $flagReasons->isNotEmpty();
-        $payload['flag_reasons'] = $flagReasons->all();
-
         return response()->json([
-            'data' => $payload,
+            'data' => $this->transactionPayload($transactionNumber, $rows),
             'meta' => $this->precisionMeta($batchId),
         ]);
     }
@@ -474,6 +516,16 @@ class CscsUploadController extends Controller
                 $credit = bcadd($credit, (string) $row->volume, 6);
             }
         }
+        $isBalanced = $rows->count() === 2 && bccomp($credit, $debit, 6) === 0;
+        $exceptionCodes = $rows->pluck('exception_code')->filter()->unique()->values();
+        $flaggedStatuses = $rows->pluck('resolution_status')->filter()
+            ->reject(fn (string $status) => in_array($status, ['READY', 'POSTED'], true))
+            ->unique()->values();
+        $flagReasons = $exceptionCodes->merge($flaggedStatuses)->unique()->values();
+        if (! $isBalanced) {
+            $flagReasons->prepend('UNBALANCED_TRANSACTION');
+            $flagReasons = $flagReasons->unique()->values();
+        }
 
         return [
             'transaction_number' => $number,
@@ -483,10 +535,82 @@ class CscsUploadController extends Controller
             'credit_total' => $credit,
             'net_total' => bcsub($credit, $debit, 6),
             'leg_count' => $rows->count(),
-            'is_balanced' => $rows->count() === 2 && bccomp($credit, $debit, 6) === 0,
+            'is_balanced' => $isBalanced,
+            'balance_status' => $isBalanced ? 'BALANCED' : 'UNBALANCED',
+            'is_flagged' => $flagReasons->isNotEmpty(),
+            'flag_reasons' => $flagReasons->all(),
             'status' => $rows->pluck('resolution_status')->unique()->values(),
             'legs' => $rows,
         ];
+    }
+
+    private function transactionGroupsQuery(int $batchId): Builder
+    {
+        $balanced = $this->balancedTransactionSql();
+        $flagged = $this->flaggedTransactionSql();
+
+        return CscsUploadRow::query()
+            ->where('batch_id', $batchId)
+            ->where('file_type', 'movement')
+            ->whereNotNull('tran_no')
+            ->select('tran_no')
+            ->selectRaw('COUNT(*) as leg_count')
+            ->selectRaw("CASE WHEN {$balanced} THEN 1 ELSE 0 END as is_balanced")
+            ->selectRaw("CASE WHEN {$flagged} THEN 1 ELSE 0 END as is_flagged")
+            ->groupBy('tran_no');
+    }
+
+    private function applyTransactionFilters(Builder $groups, int $batchId, array $filters): void
+    {
+        foreach (['search', 'resolution_status', 'security_code', 'trade_date_from', 'trade_date_to'] as $filter) {
+            if (! isset($filters[$filter]) || $filters[$filter] === '') {
+                continue;
+            }
+
+            $matchingTransactions = CscsUploadRow::query()
+                ->select('tran_no')
+                ->where('batch_id', $batchId)
+                ->where('file_type', 'movement')
+                ->whereNotNull('tran_no');
+
+            match ($filter) {
+                'search' => $matchingTransactions->where(fn (Builder $query) => $query
+                    ->where('tran_no', 'like', '%'.$filters[$filter].'%')
+                    ->orWhere('identifier_value', 'like', '%'.$filters[$filter].'%')
+                    ->orWhere('sec_code', 'like', '%'.$filters[$filter].'%')),
+                'resolution_status' => $matchingTransactions->where('resolution_status', $filters[$filter]),
+                'security_code' => $matchingTransactions->where('sec_code', $filters[$filter]),
+                'trade_date_from' => $matchingTransactions->whereDate('trade_date', '>=', $filters[$filter]),
+                'trade_date_to' => $matchingTransactions->whereDate('trade_date', '<=', $filters[$filter]),
+            };
+
+            $groups->whereIn('tran_no', $matchingTransactions->distinct());
+        }
+
+        if (isset($filters['balance_status'])) {
+            $groups->havingRaw(
+                $filters['balance_status'] === 'BALANCED'
+                    ? $this->balancedTransactionSql()
+                    : 'NOT ('.$this->balancedTransactionSql().')'
+            );
+        }
+        if (array_key_exists('is_flagged', $filters) && $filters['is_flagged'] !== null) {
+            $groups->havingRaw(
+                $filters['is_flagged']
+                    ? $this->flaggedTransactionSql()
+                    : 'NOT ('.$this->flaggedTransactionSql().')'
+            );
+        }
+    }
+
+    private function balancedTransactionSql(): string
+    {
+        return "COUNT(*) = 2 AND COALESCE(SUM(CASE WHEN sign = '-' THEN volume ELSE 0 END), 0) = COALESCE(SUM(CASE WHEN sign = '+' THEN volume ELSE 0 END), 0)";
+    }
+
+    private function flaggedTransactionSql(): string
+    {
+        return 'NOT ('.$this->balancedTransactionSql().") OR MAX(CASE WHEN exception_code IS NOT NULL OR resolution_status NOT IN ('READY', 'POSTED') THEN 1 ELSE 0 END) = 1";
     }
 
     private function batchPayload(CscsUploadBatch $batch, Request $request): array
@@ -516,10 +640,10 @@ class CscsUploadController extends Controller
         return $payload;
     }
 
-    private function paginatedWithPrecision(LengthAwarePaginator $paginator, int $batchId): JsonResponse
+    private function paginatedWithPrecision(LengthAwarePaginator $paginator, int $batchId, array $meta = []): JsonResponse
     {
         $payload = $paginator->toArray();
-        $payload['meta'] = $this->precisionMeta($batchId);
+        $payload['meta'] = array_merge($this->precisionMeta($batchId), $meta);
 
         return response()->json($payload);
     }

@@ -308,9 +308,9 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame([], $balancedPayload['flag_reasons']);
 
         $listPayload = $controller->transactions(Request::create('/api/cscs/transactions'), $balanced['batch_id'])->getData(true);
-        $this->assertArrayNotHasKey('balance_status', $listPayload['data'][0]);
-        $this->assertArrayNotHasKey('is_flagged', $listPayload['data'][0]);
-        $this->assertArrayNotHasKey('flag_reasons', $listPayload['data'][0]);
+        $this->assertSame('BALANCED', $listPayload['data'][0]['balance_status']);
+        $this->assertFalse($listPayload['data'][0]['is_flagged']);
+        $this->assertSame([], $listPayload['data'][0]['flag_reasons']);
     }
 
     public function test_individual_unbalanced_transaction_exposes_flag_reasons(): void
@@ -330,6 +330,82 @@ class CscsWorkflowTest extends TestCase
         $this->assertContains('UNBALANCED_TRANSACTION', $unbalancedPayload['flag_reasons']);
         $this->assertContains('UNBALANCED_QUANTITY', $unbalancedPayload['flag_reasons']);
         $this->assertContains('UNRESOLVED', $unbalancedPayload['flag_reasons']);
+
+        $listPayload = $controller->transactions(Request::create('/api/cscs/transactions'), $unbalanced['batch_id'])->getData(true);
+        $this->assertSame('UNBALANCED', $listPayload['data'][0]['balance_status']);
+        $this->assertTrue($listPayload['data'][0]['is_flagged']);
+        $this->assertContains('UNBALANCED_QUANTITY', $listPayload['data'][0]['flag_reasons']);
+    }
+
+    public function test_transactions_support_workspace_search_filters_and_full_batch_counts(): void
+    {
+        $batch = $this->stageBatch();
+        $controller = app(CscsUploadController::class);
+
+        $cases = [
+            [['search' => '2606160005615022'], 1],
+            [['search' => 'C111111111'], 1],
+            [['search' => 'DOES-NOT-EXIST'], 0],
+            [['balance_status' => 'balanced'], 1],
+            [['balance_status' => 'unbalanced'], 0],
+            [['is_flagged' => 'false'], 1],
+            [['is_flagged' => 'true'], 0],
+            [['resolution_status' => 'ready'], 1],
+            [['resolution_status' => 'invalid'], 0],
+            [['security_code' => 'stanbic'], 1],
+            [['trade_date_from' => '2026-06-16', 'trade_date_to' => '2026-06-16'], 1],
+            [['trade_date_from' => '2026-06-17'], 0],
+            [['trade_date_to' => '2026-06-15'], 0],
+        ];
+
+        foreach ($cases as [$query, $expectedTotal]) {
+            $payload = $controller->transactions(
+                Request::create('/api/cscs/transactions', 'GET', $query),
+                $batch['batch_id']
+            )->getData(true);
+            $this->assertSame($expectedTotal, $payload['total'], json_encode($query));
+            $this->assertSame(1, $payload['meta']['transaction_counts']['all']);
+            $this->assertSame(1, $payload['meta']['transaction_counts']['balanced']);
+            $this->assertSame(0, $payload['meta']['transaction_counts']['unbalanced']);
+            $this->assertSame(0, $payload['meta']['transaction_counts']['flagged']);
+        }
+
+        $filtered = $controller->transactions(
+            Request::create('/api/cscs/transactions', 'GET', ['balance_status' => 'balanced', 'is_flagged' => 'false']),
+            $batch['batch_id']
+        )->getData(true);
+        $this->assertSame('BALANCED', $filtered['meta']['applied_filters']['balance_status']);
+        $this->assertFalse($filtered['meta']['applied_filters']['is_flagged']);
+    }
+
+    public function test_balanced_transaction_can_still_be_filtered_as_flagged(): void
+    {
+        $batch = $this->stageBatch();
+        CscsUploadRow::where('batch_id', $batch['batch_id'])->where('file_type', 'movement')->update([
+            'resolution_status' => 'UNRESOLVED',
+            'exception_code' => 'ACCOUNT_REVIEW_REQUIRED',
+            'error_message' => 'Account review is required.',
+        ]);
+
+        $payload = app(CscsUploadController::class)->transactions(
+            Request::create('/api/cscs/transactions', 'GET', [
+                'balance_status' => 'BALANCED',
+                'is_flagged' => 'true',
+            ]),
+            $batch['batch_id']
+        )->getData(true);
+
+        $this->assertSame(1, $payload['total']);
+        $this->assertSame('BALANCED', $payload['data'][0]['balance_status']);
+        $this->assertTrue($payload['data'][0]['is_flagged']);
+        $this->assertContains('ACCOUNT_REVIEW_REQUIRED', $payload['data'][0]['flag_reasons']);
+        $this->assertContains('UNRESOLVED', $payload['data'][0]['flag_reasons']);
+        $this->assertSame([
+            'all' => 1,
+            'balanced' => 1,
+            'unbalanced' => 0,
+            'flagged' => 1,
+        ], $payload['meta']['transaction_counts']);
     }
 
     public function test_duplicate_file_is_rejected_before_a_second_batch_is_processed(): void
