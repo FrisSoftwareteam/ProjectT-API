@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\Admin\RegisterController;
 use App\Http\Controllers\Api\Admin\RoleController;
 use App\Http\Controllers\Api\Admin\ShareClassController;
 use App\Http\Controllers\Api\Admin\ShareholderCategoryController;
+use App\Http\Controllers\Api\Admin\ShareholderChangeRequestController;
 use App\Http\Controllers\Api\Admin\ShareholderController;
 use App\Http\Controllers\Api\AuditReportController;
 use App\Http\Controllers\Api\BankVerificationController;
@@ -169,10 +170,19 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/{shareholder}/identities', [ShareholderController::class, 'shareholderIdentityCreate'])->middleware('permission:shareholder_identities.create');
         Route::put('/{shareholder}/identities/{identity}', [ShareholderController::class, 'shareholderIdentityUpdate'])->middleware('permission:shareholder_identities.edit');
         Route::post('/{shareholder}/register-accounts', [ShareholderController::class, 'addRegisterAccount'])->middleware('permission:shareholders.edit');
+        Route::post('/{shareholder}/change-requests', [ShareholderChangeRequestController::class, 'store'])->middleware('permission:shareholder_change_requests.create');
 
         // Share posting endpoints (inflow/outflow)
         Route::post('/{shareholder}/shares/allocate', [ShareAllocationController::class, 'allocate'])->middleware('permission:shares.create');
         Route::post('/{shareholder}/shares/dispose', [ShareAllocationController::class, 'dispose'])->middleware('permission:shares.transfer');
+    });
+
+    // Pending Shareholder Updates (maker-checker for profile changes)
+    Route::prefix('shareholder-change-requests')->group(function () {
+        Route::get('/', [ShareholderChangeRequestController::class, 'index'])->middleware('permission:shareholder_change_requests.view');
+        Route::get('/{changeRequest}', [ShareholderChangeRequestController::class, 'show'])->middleware('permission:shareholder_change_requests.view');
+        Route::post('/{changeRequest}/approve', [ShareholderChangeRequestController::class, 'approve'])->middleware('permission:shareholder_change_requests.approve');
+        Route::post('/{changeRequest}/reject', [ShareholderChangeRequestController::class, 'reject'])->middleware('permission:shareholder_change_requests.approve');
     });
 
     Route::prefix('shareholder-categories')->group(function () {
