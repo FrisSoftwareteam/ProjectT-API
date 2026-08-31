@@ -2,7 +2,7 @@
     "info": {
         "_postman_id": "1aa59e6a-c071-48fa-a4cc-projecttapi001",
         "name": "ProjectT API - Complete Collection",
-        "description": "Generated from Laravel's registered API routes. Includes all 223 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
+        "description": "Generated from Laravel's registered API routes. Includes all 232 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "auth": {
@@ -45,6 +45,16 @@
         {
             "key": "shareholder_category_id",
             "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "cscs_export_type",
+            "value": "audit",
+            "type": "string"
+        },
+        {
+            "key": "cscs_export_format",
+            "value": "pdf",
             "type": "string"
         },
         {
@@ -159,6 +169,11 @@
         },
         {
             "key": "shareTransaction",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "changeRequest",
             "value": "1",
             "type": "string"
         },
@@ -3489,6 +3504,80 @@
                     "response": []
                 },
                 {
+                    "name": "GET - Cscs Upload - Comments",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/comments?per_page=50",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "comments"
+                            ],
+                            "query": [
+                                {
+                                    "key": "per_page",
+                                    "value": "50",
+                                    "disabled": false
+                                }
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@comments`.\n\nReturns standalone review comments and comments recorded with workflow actions.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Cscs Upload - Store Comment",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/comments",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "comments"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@storeComment`.\n\nCreates a standalone review comment without changing the batch workflow state.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.review|cscs.reconcile|cscs.approve|cscs.post",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"comment\": \"Please verify the attached CSCS instruction reference.\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
                     "name": "POST - Cscs Upload - Create Reversal",
                     "request": {
                         "method": "POST",
@@ -3647,7 +3736,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/export",
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/export?type={{cscs_export_type}}&format={{cscs_export_format}}",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -3657,9 +3746,21 @@
                                 "uploads",
                                 "{{batchId}}",
                                 "export"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "{{cscs_export_type}}",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "format",
+                                    "value": "{{cscs_export_format}}",
+                                    "disabled": false
+                                }
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@export`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.export"
+                        "description": "Backend action: `CscsUploadController@export`.\n\nSet collection variables `cscs_export_type` and `cscs_export_format`. Supported report pairs include `audit/pdf`, `posting/csv`, `reconciliation/pdf`, and `activity/xls` or `activity/xlsx`. Existing row, exception, preview, posting, and reconciliation CSV exports remain supported.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.export"
                     },
                     "response": []
                 },
@@ -3783,6 +3884,33 @@
                                 }
                             }
                         }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Cscs Upload - Posting Readiness",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/posting-readiness",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "posting-readiness"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@postingReadiness`.\n\nUse `data.ready` and the individual `data.checks` to populate the posting confirmation modal. This request does not change workflow state or holdings.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -4302,48 +4430,6 @@
                             ],
                             "query": [
                                 {
-                                    "key": "search",
-                                    "value": "2606160005615022",
-                                    "description": "Search transaction number, debit/credit identifier, or security code.",
-                                    "disabled": true
-                                },
-                                {
-                                    "key": "balance_status",
-                                    "value": "BALANCED",
-                                    "description": "Accepted values: BALANCED or UNBALANCED.",
-                                    "disabled": true
-                                },
-                                {
-                                    "key": "is_flagged",
-                                    "value": "true",
-                                    "description": "Use true for flagged groups or false for clear groups.",
-                                    "disabled": true
-                                },
-                                {
-                                    "key": "resolution_status",
-                                    "value": "UNRESOLVED",
-                                    "description": "Return groups containing at least one leg with this resolution status.",
-                                    "disabled": true
-                                },
-                                {
-                                    "key": "security_code",
-                                    "value": "FIDELITYBK",
-                                    "description": "Return groups containing this security code.",
-                                    "disabled": true
-                                },
-                                {
-                                    "key": "trade_date_from",
-                                    "value": "2026-06-16",
-                                    "description": "Inclusive transaction trade-date lower bound (YYYY-MM-DD).",
-                                    "disabled": true
-                                },
-                                {
-                                    "key": "trade_date_to",
-                                    "value": "2026-06-16",
-                                    "description": "Inclusive transaction trade-date upper bound (YYYY-MM-DD).",
-                                    "disabled": true
-                                },
-                                {
                                     "key": "page",
                                     "value": "1",
                                     "disabled": false
@@ -4351,12 +4437,11 @@
                                 {
                                     "key": "per_page",
                                     "value": "50",
-                                    "description": "Between 1 and 100.",
                                     "disabled": false
                                 }
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@transactions`.\n\nSupports server-side search, balance, flagged, resolution, security-code, trade-date, and pagination filters. Each group returns `balance_status`, `is_flagged`, and `flag_reasons`. Response `meta.transaction_counts` contains full-batch all/balanced/unbalanced/flagged counts; `meta.applied_filters` echoes normalized active filters.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@transactions`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -4384,7 +4469,34 @@
                                 "{{transactionNumber}}"
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@transaction`.\n\nReturns one transaction group with debit/credit legs, `balance_status`, `is_flagged`, and `flag_reasons`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@transaction`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Cscs Upload - Verification Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/verification-summary",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "verification-summary"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@verificationSummary`.\n\nUse this consolidated response for the post-posting verification screen. Display success only when `data.verification_status` is `VERIFIED`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 }
@@ -6857,6 +6969,138 @@
             ]
         },
         {
+            "name": "Shareholder Change Requests",
+            "item": [
+                {
+                    "name": "GET - Shareholder Change Request - Index",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Shareholder Change Request - Show",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests/{{changeRequest}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests",
+                                "{{changeRequest}}"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@show`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder Change Request - Approve",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests/{{changeRequest}}/approve",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests",
+                                "{{changeRequest}}",
+                                "approve"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@approve`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.approve",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder Change Request - Reject",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests/{{changeRequest}}/reject",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests",
+                                "{{changeRequest}}",
+                                "reject"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@reject`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.approve",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
             "name": "Shareholder Register Accounts",
             "item": [
                 {
@@ -7276,6 +7520,45 @@
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"address_line1\": \"2 Marina Road\",\n    \"city\": \"Lagos\",\n    \"state\": \"Lagos\",\n    \"postal_code\": \"100001\",\n    \"country\": \"Nigeria\",\n    \"is_primary\": true\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder Change Request - Store",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholders/{{shareholder}}/change-requests",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholders",
+                                "{{shareholder}}",
+                                "change-requests"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@store`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.create",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
                             "options": {
                                 "raw": {
                                     "language": "json"

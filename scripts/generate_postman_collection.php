@@ -86,6 +86,7 @@ $jsonPayloads = [
     'CscsUploadController@reject' => ['comment' => 'Source movement details require correction before posting'],
     'CscsUploadController@cancel' => ['comment' => 'Batch cancelled because a replacement CSCS file was supplied'],
     'CscsUploadController@post' => ['comment' => 'Approved batch released for controlled posting'],
+    'CscsUploadController@storeComment' => ['comment' => 'Please verify the attached CSCS instruction reference.'],
     'CscsUploadController@createReversal' => ['reason' => 'Correcting an approved CSCS source-file error', 'effective_date' => '2026-07-22', 'transaction_numbers' => []],
     'LegacyMigrationController@create' => ['package_key' => 'legacy_share_register', 'register_id' => '{{register_id}}', 'share_class_id' => '{{share_class_id}}'],
     'LegacyMigrationController@reconcile' => ['comment' => 'Staged records and quantity totals reviewed'],
@@ -143,6 +144,9 @@ $queryExamples = [
     'CscsUploadController@index' => ['status' => 'DRAFT_REVIEW', 'register_id' => '{{register_id}}', 'per_page' => '15'],
     'CscsUploadController@rows' => ['status' => 'UNRESOLVED', 'identifier' => 'C123', 'security_code' => 'STANBIC', 'per_page' => '50'],
     'CscsUploadController@exceptions' => ['status' => 'UNRESOLVED', 'per_page' => '50'],
+    'CscsUploadController@transactions' => ['page' => '1', 'per_page' => '50'],
+    'CscsUploadController@comments' => ['per_page' => '50'],
+    'CscsUploadController@export' => ['type' => '{{cscs_export_type}}', 'format' => '{{cscs_export_format}}'],
     'NotificationController@index' => ['unread_only' => 'true', 'per_page' => '20'],
     'AuditReportController@index' => ['user_id' => '{{adminUser}}', 'role' => 'Operations', 'shareholder_id' => '{{shareholder}}', 'activity_category' => 'shareholders', 'date_from' => '2026-01-01', 'date_to' => '2026-12-31', 'per_page' => '15'],
     'IpoOfferController@index' => ['status' => 'approved', 'per_page' => '15'],
@@ -260,6 +264,8 @@ $variables = [
     ['key' => 'token', 'value' => '', 'type' => 'string'],
     ['key' => 'share_class_id', 'value' => '1', 'type' => 'string'],
     ['key' => 'shareholder_category_id', 'value' => '1', 'type' => 'string'],
+    ['key' => 'cscs_export_type', 'value' => 'audit', 'type' => 'string'],
+    ['key' => 'cscs_export_format', 'value' => 'pdf', 'type' => 'string'],
 ];
 foreach ($pathVariables as $key => $value) {
     if (in_array($key, array_column($variables, 'key'), true)) {
@@ -387,6 +393,11 @@ function descriptionFor(array $route, string $action): string
         'InstrumentTypeController@update' => "\n\nBuilt-in instrument types accept only `description`. The full example payload applies to custom instrument types.",
         'ShareholderController@shareholderIdentityCreate' => "\n\nThe `shareholder` URL variable identifies the owner. Do not send `shareholder_id` in the request body.",
         'ShareholderController@shareholderIdentityUpdate' => "\n\nThe `shareholder` URL variable identifies the owner and `identity` identifies the identity record. Do not send `shareholder_id` in the request body.",
+        'CscsUploadController@postingReadiness' => "\n\nUse `data.ready` and the individual `data.checks` to populate the posting confirmation modal. This request does not change workflow state or holdings.",
+        'CscsUploadController@verificationSummary' => "\n\nUse this consolidated response for the post-posting verification screen. Display success only when `data.verification_status` is `VERIFIED`.",
+        'CscsUploadController@comments' => "\n\nReturns standalone review comments and comments recorded with workflow actions.",
+        'CscsUploadController@storeComment' => "\n\nCreates a standalone review comment without changing the batch workflow state.",
+        'CscsUploadController@export' => "\n\nSet collection variables `cscs_export_type` and `cscs_export_format`. Supported report pairs include `audit/pdf`, `posting/csv`, `reconciliation/pdf`, and `activity/xls` or `activity/xlsx`. Existing row, exception, preview, posting, and reconciliation CSV exports remain supported.",
         default => '',
     };
     [$controllerName, $method] = explode('@', $route['action']);

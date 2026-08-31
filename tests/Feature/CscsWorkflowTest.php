@@ -546,6 +546,91 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame('OVERSIGHT', $submitted['required_approval_steps'][1]['code']);
     }
 
+    public function test_posting_readiness_reports_passes_and_detects_changed_holdings(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker, 'Approved after independent review.');
+
+        $ready = $this->service->postingReadiness($batch->id);
+
+        $this->assertTrue($ready['ready']);
+        $this->assertSame(2, $ready['summary']['records_to_post']);
+        $this->assertTrue($ready['checks']['snapshot_hash_unchanged']['passed']);
+        $this->assertTrue($ready['checks']['holdings_current']['passed']);
+
+        SharePosition::where('sra_id', $this->debitAccount->id)->update(['quantity' => '299999.000000']);
+        $stale = $this->service->postingReadiness($batch->id);
+
+        $this->assertFalse($stale['ready']);
+        $this->assertFalse($stale['checks']['holdings_current']['passed']);
+    }
+
+    public function test_exception_filter_accepts_resolution_status_alias(): void
+    {
+        $result = $this->stageBatch();
+        CscsUploadRow::where('batch_id', $result['batch_id'])->where('tran_seq', '0')->update([
+            'resolution_status' => 'UNRESOLVED',
+            'exception_code' => 'ACCOUNT_REVIEW_REQUIRED',
+        ]);
+
+        $payload = app(CscsUploadController::class)->exceptions(
+            Request::create('/api/cscs/exceptions', 'GET', ['resolution_status' => 'unresolved']),
+            $result['batch_id']
+        )->getData(true);
+
+        $this->assertSame(1, $payload['total']);
+        $this->assertSame('UNRESOLVED', $payload['data'][0]['resolution_status']);
+    }
+
+    public function test_review_comments_are_stored_and_returned_with_workflow_notes(): void
+    {
+        $result = $this->stageBatch();
+        $request = Request::create('/api/cscs/comments', 'POST', ['comment' => 'Please verify the attached CSCS instruction reference.']);
+        $request->setUserResolver(fn () => $this->checker);
+
+        $response = app(CscsUploadController::class)->storeComment($request, $result['batch_id']);
+        $comments = app(CscsUploadController::class)->comments(
+            Request::create('/api/cscs/comments', 'GET'),
+            $result['batch_id']
+        )->getData(true);
+
+        $this->assertSame(201, $response->status());
+        $this->assertSame('COMMENT_ADDED', $response->getData(true)['data']['event_type']);
+        $this->assertGreaterThanOrEqual(1, $comments['total']);
+        $this->assertDatabaseHas('cscs_workflow_events', [
+            'batch_id' => $result['batch_id'],
+            'event_type' => 'COMMENT_ADDED',
+            'actor_id' => $this->checker->id,
+        ]);
+    }
+
+    public function test_posted_batch_exposes_verification_summary_and_report_downloads(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker, 'Approved after independent review.');
+        $this->service->post($batch->id, $this->poster, 'Authorized for posting.');
+        $controller = app(CscsUploadController::class);
+
+        $summary = $controller->verificationSummary($batch->id)->getData(true)['data'];
+        $this->assertSame('VERIFIED', $summary['verification_status']);
+        $this->assertSame(2, $summary['metrics']['records_posted']);
+        $this->assertSame(1, $summary['metrics']['transaction_groups_posted']);
+
+        $pdf = $controller->export(
+            Request::create('/api/cscs/export', 'GET', ['type' => 'audit', 'format' => 'pdf']),
+            $batch->id
+        );
+        $this->assertStringStartsWith('%PDF-', $pdf->getContent());
+        $this->assertStringContainsString('.pdf', (string) $pdf->headers->get('content-disposition'));
+
+        $excel = $controller->export(
+            Request::create('/api/cscs/export', 'GET', ['type' => 'activity', 'format' => 'xls']),
+            $batch->id
+        );
+        $this->assertStringContainsString('.xls', (string) $excel->headers->get('content-disposition'));
+        $this->assertGreaterThan(0, $excel->getFile()->getSize());
+    }
+
     private function stageAndSubmit(): CscsUploadBatch
     {
         $result = $this->stageBatch();

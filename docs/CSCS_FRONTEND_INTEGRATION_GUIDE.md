@@ -323,7 +323,10 @@ GET /api/cscs/uploads/{batchId}/account-effects
 GET /api/cscs/uploads/{batchId}/files
 GET /api/cscs/uploads/{batchId}/approvals
 GET /api/cscs/uploads/{batchId}/events
+GET /api/cscs/uploads/{batchId}/comments
 ```
+
+Post a standalone review note with `POST /api/cscs/uploads/{batchId}/comments` and a JSON body containing `comment`. The comments read also includes comments recorded with workflow actions.
 
 ### Step 9 — Checker approves
 
@@ -347,6 +350,14 @@ Approval never changes holdings.
 ### Step 10 — Release for posting
 
 The poster cannot be the maker. Policy may also require someone other than the checker.
+
+Populate the authorization modal before enabling the release action:
+
+```http
+GET /api/cscs/uploads/{batchId}/posting-readiness
+```
+
+Require `data.ready === true` and render the individual checks returned under `data.checks`. This read validates the snapshot, security and account mappings, opening holdings, replay protection, blocking exceptions, and current workflow state without changing the batch.
 
 ```http
 POST /api/cscs/uploads/{batchId}/post
@@ -391,6 +402,14 @@ Stop on:
 - `STALE`: return the batch to maker reconciliation.
 
 Cancel polling when the page unmounts.
+
+For the consolidated success screen, load:
+
+```http
+GET /api/cscs/uploads/{batchId}/verification-summary
+```
+
+Show posting as verified only when `data.verification_status` is `VERIFIED`.
 
 ## 5. Alternative branches
 
@@ -541,7 +560,12 @@ GET /uploads/{batchId}/export?type=exceptions
 GET /uploads/{batchId}/export?type=reconciliation
 GET /uploads/{batchId}/export?type=preview
 GET /uploads/{batchId}/export?type=posting
+GET /uploads/{batchId}/export?type=audit&format=pdf
+GET /uploads/{batchId}/export?type=reconciliation&format=pdf
+GET /uploads/{batchId}/export?type=activity&format=xls
 ```
+
+The activity export also supports `format=xlsx`. Existing exports default to CSV when `format` is omitted.
 
 Downloads and exports require `responseType: 'blob'` and the authorization token:
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exports\CscsActivityExport;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\CscsUploadRequest;
 use App\Jobs\PostCscsBatchJob;
@@ -10,8 +11,11 @@ use App\Models\CscsApprovalPolicy;
 use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
+use App\Models\CscsWorkflowEvent;
+use App\Models\ShareClass;
 use App\Services\AdminNotificationService;
 use App\Services\CscsImportService;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -21,6 +25,8 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Maatwebsite\Excel\Excel as ExcelWriter;
+use Maatwebsite\Excel\Facades\Excel;
 
 class CscsUploadController extends Controller
 {
@@ -219,8 +225,12 @@ class CscsUploadController extends Controller
     public function exceptions(Request $request, int $batchId): JsonResponse
     {
         $this->batch($batchId);
+        if (! $request->filled('status') && $request->filled('resolution_status')) {
+            $request->merge(['status' => strtoupper((string) $request->query('resolution_status'))]);
+        }
         $validated = $request->validate([
             'status' => ['nullable', 'string', 'max:40'],
+            'resolution_status' => ['nullable', 'string', 'max:40'],
             'exception_code' => ['nullable', 'string', 'max:60'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('cscs.max_page_size', 100)],
         ]);
@@ -255,6 +265,82 @@ class CscsUploadController extends Controller
         $batch = $this->batch($batchId);
 
         return response()->json(['data' => ['status' => $batch->workflow_status, 'snapshot_hash' => $batch->snapshot_hash, 'reconciliation' => $batch->reconciliation, 'risk_flags' => $batch->risk_flags]]);
+    }
+
+    public function postingReadiness(int $batchId): JsonResponse
+    {
+        return response()->json(['data' => $this->service->postingReadiness($batchId)]);
+    }
+
+    public function verificationSummary(int $batchId): JsonResponse
+    {
+        $batch = CscsUploadBatch::with('register')->findOrFail($batchId);
+        $postedRows = CscsUploadRow::where('batch_id', $batchId)
+            ->where('resolution_status', 'POSTED')
+            ->get();
+        $reconciliation = $batch->reconciliation ?? [];
+        $verification = $reconciliation['post_verification'] ?? null;
+
+        return response()->json(['data' => [
+            'batch_id' => $batch->id,
+            'status' => $batch->workflow_status,
+            'verification_status' => data_get($verification, 'status', $batch->workflow_status === 'POSTED' ? 'PENDING' : 'NOT_POSTED'),
+            'posted_at' => $batch->posted_at,
+            'metrics' => [
+                'records_posted' => $postedRows->count(),
+                'transaction_groups_posted' => $postedRows->pluck('tran_no')->filter()->unique()->count(),
+                'failed_rows' => CscsUploadRow::where('batch_id', $batchId)->where('status', 'posting_failed')->count(),
+                'total_debit' => data_get($verification, 'total_debit', '0.000000'),
+                'total_credit' => data_get($verification, 'total_credit', '0.000000'),
+                'net_movement' => data_get($verification, 'net_movement', '0.000000'),
+                'shareholder_records_updated' => $postedRows->pluck('sra_id')->filter()->unique()->count(),
+                'new_accounts_created' => $postedRows->where('match_method', 'proposed_new_account')->pluck('sra_id')->filter()->unique()->count(),
+                'exceptions_resolved' => (int) data_get($reconciliation, 'replay_rows', 0) + (int) data_get($reconciliation, 'excluded_rows', 0),
+                'replay_transactions' => (int) data_get($reconciliation, 'replay_rows', 0),
+            ],
+            'approved_totals' => [
+                'total_debit' => data_get($reconciliation, 'total_debit'),
+                'total_credit' => data_get($reconciliation, 'total_credit'),
+                'net_movement' => data_get($reconciliation, 'net_movement'),
+                'ready_rows' => data_get($reconciliation, 'ready_rows'),
+            ],
+            'checks' => data_get($verification, 'checks', []),
+            'verified_at' => data_get($verification, 'verified_at'),
+        ]]);
+    }
+
+    public function comments(Request $request, int $batchId): JsonResponse
+    {
+        $this->batch($batchId);
+        $validated = $request->validate([
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        return response()->json(
+            CscsWorkflowEvent::with('actor')
+                ->where('batch_id', $batchId)
+                ->whereNotNull('comment')
+                ->latest('id')
+                ->paginate($validated['per_page'] ?? 50)
+        );
+    }
+
+    public function storeComment(Request $request, int $batchId): JsonResponse
+    {
+        $batch = $this->batch($batchId);
+        $validated = $request->validate(['comment' => ['required', 'string', 'min:1', 'max:1000']]);
+        $event = CscsWorkflowEvent::create([
+            'batch_id' => $batch->id,
+            'event_type' => 'COMMENT_ADDED',
+            'from_status' => $batch->workflow_status,
+            'to_status' => $batch->workflow_status,
+            'actor_id' => $request->user()?->id,
+            'comment' => $validated['comment'],
+            'metadata' => ['kind' => 'review_comment'],
+            'created_at' => now(),
+        ])->load('actor');
+
+        return response()->json(['message' => 'Comment posted', 'data' => $event], 201);
     }
 
     public function submit(Request $request, int $batchId): JsonResponse
@@ -406,8 +492,48 @@ class CscsUploadController extends Controller
 
     public function export(Request $request, int $batchId)
     {
-        $batch = $this->batch($batchId);
-        $type = $request->validate(['type' => ['nullable', Rule::in(['rows', 'exceptions', 'reconciliation', 'preview', 'posting'])]])['type'] ?? 'rows';
+        $batch = CscsUploadBatch::with(['register', 'events.actor', 'approvalActions.actor'])->findOrFail($batchId);
+        $validated = $request->validate([
+            'type' => ['nullable', Rule::in(['rows', 'exceptions', 'reconciliation', 'preview', 'posting', 'audit', 'activity'])],
+            'format' => ['nullable', Rule::in(['csv', 'pdf', 'xls', 'xlsx'])],
+        ]);
+        $type = $validated['type'] ?? 'rows';
+        $format = $validated['format'] ?? 'csv';
+
+        if ($format === 'pdf') {
+            if (! in_array($type, ['audit', 'reconciliation'], true)) {
+                throw ValidationException::withMessages(['format' => ['PDF is supported for audit and reconciliation reports.']]);
+            }
+            $summary = $type === 'reconciliation' ? ($batch->reconciliation ?? []) : ($batch->summary ?? []);
+            $pdf = Pdf::loadView('exports.cscs-report', [
+                'type' => $type,
+                'title' => $type === 'audit' ? 'CSCS Audit Report' : 'CSCS Reconciliation Report',
+                'batch' => $batch,
+                'summary' => $summary,
+                'verification' => data_get($batch->reconciliation, 'post_verification'),
+                'events' => $batch->events->sortBy('id'),
+                'approvals' => $batch->approvalActions->sortBy('id'),
+            ])->setPaper('a4', 'portrait');
+
+            return $pdf->download("cscs_{$batchId}_{$type}.pdf");
+        }
+
+        if (in_array($format, ['xls', 'xlsx'], true)) {
+            if ($type !== 'activity') {
+                throw ValidationException::withMessages(['format' => ['Excel format is supported for the activity report.']]);
+            }
+            $writer = $format === 'xls' ? ExcelWriter::XLS : ExcelWriter::XLSX;
+
+            return Excel::download(
+                new CscsActivityExport($batch->events->sortBy('id')->values()),
+                "cscs_{$batchId}_activity.{$format}",
+                $writer
+            );
+        }
+
+        if ($type === 'audit') {
+            throw ValidationException::withMessages(['format' => ['The audit report is available as PDF.']]);
+        }
         $rows = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement');
         if ($type === 'exceptions') {
             $rows->whereNotNull('exception_code');
@@ -424,6 +550,11 @@ class CscsUploadController extends Controller
                     if (! is_array($value)) {
                         fputcsv($out, [$key, $value]);
                     }
+                }
+            } elseif ($type === 'activity') {
+                fputcsv($out, ['event_id', 'date', 'event', 'from_status', 'to_status', 'actor', 'actor_email', 'comment']);
+                foreach ($batch->events->sortBy('id') as $event) {
+                    fputcsv($out, [$event->id, optional($event->created_at)->toIso8601String(), $event->event_type, $event->from_status, $event->to_status, $event->actor?->name ?? $event->actor?->full_name, $event->actor?->email, $event->comment]);
                 }
             } else {
                 fputcsv($out, ['row_id', 'transaction_number', 'sequence', 'date', 'security_code', 'identifier_type', 'identifier', 'sign', 'quantity', 'resolution_status', 'exception_code', 'before', 'delta', 'after', 'actual_before', 'actual_after']);
@@ -497,7 +628,7 @@ class CscsUploadController extends Controller
             'share_class_id' => ['required', 'integer', 'exists:share_classes,id'],
             'is_active' => ['sometimes', 'boolean'],
         ]);
-        $belongs = \App\Models\ShareClass::whereKey($validated['share_class_id'])->where('register_id', $validated['register_id'])->exists();
+        $belongs = ShareClass::whereKey($validated['share_class_id'])->where('register_id', $validated['register_id'])->exists();
         if (! $belongs) {
             throw ValidationException::withMessages(['share_class_id' => ['The share class does not belong to the selected register.']]);
         }

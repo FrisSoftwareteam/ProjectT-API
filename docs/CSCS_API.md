@@ -236,6 +236,10 @@ Query body:
 | POST | `/uploads/{batchId}/post` | `cscs.post` |
 | POST | `/uploads/{batchId}/retry-posting` | `cscs.post` |
 | GET | `/uploads/{batchId}/posting-status` | `cscs.view` |
+| GET | `/uploads/{batchId}/posting-readiness` | `cscs.view` |
+| GET | `/uploads/{batchId}/verification-summary` | `cscs.view` |
+| GET | `/uploads/{batchId}/comments` | `cscs.view` |
+| POST | `/uploads/{batchId}/comments` | CSCS review/reconcile/approve/post permission |
 
 Posting returns `202 Accepted` and dispatches a unique job to the `cscs` queue. Run a worker in production:
 
@@ -269,6 +273,16 @@ Supported types:
 - `reconciliation`
 - `preview`
 - `posting`
+- `audit`
+- `activity`
+
+Optional `format` values are `csv`, `pdf`, `xls`, and `xlsx`. PDF is available for `audit` and `reconciliation`; Excel is available for `activity`. Examples:
+
+```text
+GET /uploads/{batchId}/export?type=audit&format=pdf
+GET /uploads/{batchId}/export?type=reconciliation&format=pdf
+GET /uploads/{batchId}/export?type=activity&format=xls
+```
 
 Exports and source downloads require `cscs.export`.
 

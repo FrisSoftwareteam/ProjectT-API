@@ -290,6 +290,10 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/uploads/{batchId}/revalidate', [CscsUploadController::class, 'revalidate'])->middleware('permission:cscs.reconcile');
         Route::post('/uploads/{batchId}/reconcile', [CscsUploadController::class, 'revalidate'])->middleware('permission:cscs.reconcile');
         Route::get('/uploads/{batchId}/reconciliation', [CscsUploadController::class, 'reconciliation'])->middleware('permission:cscs.view');
+        Route::get('/uploads/{batchId}/posting-readiness', [CscsUploadController::class, 'postingReadiness'])->middleware('permission:cscs.view');
+        Route::get('/uploads/{batchId}/verification-summary', [CscsUploadController::class, 'verificationSummary'])->middleware('permission:cscs.view');
+        Route::get('/uploads/{batchId}/comments', [CscsUploadController::class, 'comments'])->middleware('permission:cscs.view');
+        Route::post('/uploads/{batchId}/comments', [CscsUploadController::class, 'storeComment'])->middleware('permission:cscs.review|cscs.reconcile|cscs.approve|cscs.post');
         Route::post('/uploads/{batchId}/submit', [CscsUploadController::class, 'submit'])->middleware(['permission:cscs.submit', 'throttle:20,1']);
         Route::post('/uploads/{batchId}/query', [CscsUploadController::class, 'raiseQuery'])->middleware('permission:cscs.review');
         Route::post('/uploads/{batchId}/respond-to-query', [CscsUploadController::class, 'respondToQuery'])->middleware('permission:cscs.reconcile');

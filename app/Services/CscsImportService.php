@@ -908,6 +908,87 @@ class CscsImportService
     }
 
     /** @return array<string, mixed> */
+    public function postingReadiness(int $batchId): array
+    {
+        $batch = CscsUploadBatch::with('register')->findOrFail($batchId);
+        $rows = CscsUploadRow::where('batch_id', $batch->id)
+            ->where('file_type', 'movement')
+            ->get();
+        $readyRows = $rows->where('resolution_status', 'READY');
+
+        $snapshotUnchanged = filled($batch->snapshot_hash)
+            && hash_equals((string) $batch->snapshot_hash, $this->snapshotHash($batch->id));
+        $securityMappingsValid = $readyRows->groupBy('sec_code')->every(function (Collection $securityRows, string|int $securityCode) use ($batch): bool {
+            $mapping = CscsSecurityMapping::where('security_code', (string) $securityCode)
+                ->where('is_active', true)
+                ->first();
+
+            return $mapping
+                && (int) $mapping->register_id === (int) $batch->register_id
+                && (int) $mapping->share_class_id === (int) $securityRows->first()->proposed_share_class_id;
+        });
+        $accountMappingsValid = $readyRows->every(function (CscsUploadRow $row) use ($batch): bool {
+            if (! $row->proposed_share_class_id) {
+                return false;
+            }
+            if (! $row->proposed_sra_id) {
+                return filled($row->identifier_type) && filled($row->identifier_value);
+            }
+
+            return ShareholderRegisterAccount::whereKey($row->proposed_sra_id)
+                ->where('register_id', $batch->register_id)
+                ->exists();
+        });
+        $holdingsCurrent = $readyRows
+            ->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id)
+            ->every(function (Collection $effectRows): bool {
+                $first = $effectRows->first();
+                $current = $first->proposed_sra_id
+                    ? SharePosition::where('sra_id', $first->proposed_sra_id)
+                        ->where('share_class_id', $first->proposed_share_class_id)
+                        ->value('quantity') ?? 0
+                    : 0;
+
+                return bccomp($this->decimal($current), $this->decimal($first->proposed_before_qty ?? 0), self::SCALE) === 0;
+            });
+        $movementsNotPosted = $readyRows->every(fn (CscsUploadRow $row): bool => ! $row->replay_key
+            || ! CscsUploadRow::where('fingerprint', $row->replay_key)
+                ->where('status', 'posted')
+                ->where('id', '!=', $row->id)
+                ->exists());
+        $blockingExceptions = $rows
+            ->whereNotIn('resolution_status', ['READY', 'CONFIRMED_REPLAY', 'RULE_EXCLUDED', 'POSTED'])
+            ->count();
+        $statusAllowsPosting = in_array($batch->workflow_status, ['APPROVED_AWAITING_POST', 'POSTING_FAILED'], true);
+
+        $checks = [
+            'status_allows_posting' => ['passed' => $statusAllowsPosting, 'label' => 'Batch approved for posting'],
+            'snapshot_hash_unchanged' => ['passed' => $snapshotUnchanged, 'label' => 'Snapshot hash unchanged'],
+            'security_mappings_valid' => ['passed' => $securityMappingsValid, 'label' => 'Security mappings active and unchanged'],
+            'account_mappings_valid' => ['passed' => $accountMappingsValid, 'label' => 'Account mappings remain valid'],
+            'holdings_current' => ['passed' => $holdingsCurrent, 'label' => 'Current holdings match the approved snapshot'],
+            'movements_not_posted' => ['passed' => $movementsNotPosted, 'label' => 'Movements have not already been posted'],
+            'no_blocking_exceptions' => ['passed' => $blockingExceptions === 0, 'label' => 'No blocking exceptions remain'],
+        ];
+
+        return [
+            'batch_id' => $batch->id,
+            'status' => $batch->workflow_status,
+            'snapshot_hash' => $batch->snapshot_hash,
+            'ready' => collect($checks)->every(fn (array $check): bool => $check['passed']),
+            'checks' => $checks,
+            'summary' => [
+                'records_to_post' => $readyRows->count(),
+                'affected_accounts' => $readyRows
+                    ->map(fn (CscsUploadRow $row) => $row->proposed_sra_id ?: 'new:'.$row->identifier_value)
+                    ->unique()
+                    ->count(),
+                'blocking_exceptions' => $blockingExceptions,
+            ],
+        ];
+    }
+
+    /** @return array<string, mixed> */
     public function post(int $batchId, AdminUser $actor, ?string $comment = null): array
     {
         $batch = CscsUploadBatch::findOrFail($batchId);
