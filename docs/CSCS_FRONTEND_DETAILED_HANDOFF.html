@@ -1,0 +1,559 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>CSCS Screens — Detailed Frontend API Handoff</title>
+    <style>
+        @page { margin: 38px 42px 46px; }
+        * { box-sizing: border-box; }
+        body { color: #17233c; font-family: DejaVu Sans, Arial, sans-serif; font-size: 9.2px; line-height: 1.44; margin: 0; }
+        h1 { color: #103a75; font-size: 25px; line-height: 1.2; margin: 0 0 8px; }
+        h2 { border-bottom: 2px solid #d8e4f2; color: #103a75; font-size: 15px; margin: 20px 0 9px; padding-bottom: 5px; }
+        h3 { color: #285685; font-size: 11px; margin: 13px 0 5px; }
+        h4 { color: #334f72; font-size: 9.5px; margin: 9px 0 4px; }
+        p { margin: 4px 0 8px; }
+        ul, ol { margin: 4px 0 9px; padding-left: 18px; }
+        li { margin: 2px 0; }
+        table { border-collapse: collapse; margin: 7px 0 11px; width: 100%; }
+        th { background: #e6eef8; color: #174475; font-weight: bold; text-align: left; }
+        th, td { border: 1px solid #d4dfec; padding: 5px 6px; vertical-align: top; }
+        tr:nth-child(even) td { background: #fafbfd; }
+        code { background: #eef3f8; color: #153d6d; font-family: DejaVu Sans Mono, monospace; font-size: 7.6px; padding: 1px 3px; }
+        td code { white-space: normal; word-wrap: break-word; }
+        pre { background: #13243d; border-radius: 4px; color: #f0f5fc; font-family: DejaVu Sans Mono, monospace; font-size: 7.2px; line-height: 1.43; margin: 6px 0 10px; padding: 8px 10px; white-space: pre-wrap; word-wrap: break-word; }
+        .cover { padding-top: 74px; }
+        .eyebrow { color: #2c69aa; font-size: 8.5px; font-weight: bold; letter-spacing: 1.1px; margin-bottom: 13px; text-transform: uppercase; }
+        .lead { color: #4f5f72; font-size: 11.5px; line-height: 1.56; margin: 15px 0 22px; max-width: 510px; }
+        .status { background: #eaf8f0; border: 1px solid #b9e3ca; border-radius: 4px; color: #11643e; font-size: 10.5px; font-weight: bold; padding: 10px 12px; }
+        .meta { border-top: 1px solid #d9e3ef; color: #66768a; margin-top: 38px; padding-top: 11px; }
+        .callout { background: #f3f7fb; border-left: 4px solid #3473b7; margin: 8px 0 11px; padding: 8px 10px; }
+        .success { background: #edf9f2; border-left-color: #15925b; }
+        .warning { background: #fff7e8; border-left-color: #d88c13; }
+        .danger { background: #fff0ef; border-left-color: #c43d36; }
+        .page { page-break-before: always; }
+        .avoid { page-break-inside: avoid; }
+        .tag { background: #e7f5ed; border-radius: 10px; color: #14764a; display: inline-block; font-size: 7.5px; font-weight: bold; padding: 2px 7px; }
+        .muted { color: #69788a; }
+        .small { font-size: 8px; }
+        .flow { background: #f7f9fc; border: 1px solid #d9e3ef; font-family: DejaVu Sans Mono, monospace; font-size: 7.6px; line-height: 1.7; padding: 8px 10px; }
+        .two-col { width: 100%; }
+        .two-col td { border: 0; padding: 0 7px 0 0; width: 50%; }
+        .two-col td:last-child { padding: 0 0 0 7px; }
+        .compact { font-size: 8.4px; line-height: 1.32; }
+        .compact h2 { margin: 14px 0 7px; }
+        .compact li { margin: 1px 0; }
+        .compact th, .compact td { padding: 3px 5px; }
+        .compact pre { line-height: 1.3; margin-bottom: 7px; padding: 6px 8px; }
+        .footer { bottom: 15px; color: #8491a1; font-size: 6.8px; left: 42px; position: fixed; right: 42px; text-align: right; }
+    </style>
+</head>
+<body>
+    <div class="footer">Project T · CSCS detailed frontend API handoff · 1 September 2026</div>
+
+    <section class="cover">
+        <div class="eyebrow">Response to annotated CSCS upload screens</div>
+        <h1>Detailed Frontend<br>API Integration Handoff</h1>
+        <p class="lead">A screen-by-screen implementation guide covering every data panel, filter, button and workflow concern raised in the supplied PDF. It includes the exact endpoints, payloads, response shapes and frontend sequencing needed to deliver the reconciliation, checker review, posting authorization and verification experience.</p>
+        <div class="status">Backend status: all endpoints required by the proposed screens are available.</div>
+        <div class="meta">
+            <strong>API base:</strong> <code>{{base_url}}/api/cscs</code><br>
+            <strong>Authentication:</strong> Sanctum bearer token<br>
+            <strong>Postman:</strong> <code>docs/postman/ProjectT-API.postman_collection.json</code><br>
+            <strong>Audience:</strong> Project T frontend implementation team
+        </div>
+    </section>
+
+    <section class="page">
+        <h2>1. What this answers from the annotated PDF</h2>
+        <table>
+            <thead><tr><th>Concern raised</th><th>Answer</th></tr></thead>
+            <tbody>
+                <tr><td>Which endpoint loads the reconciliation transaction table?</td><td><code>GET /uploads/{batchId}/transactions?page=1&amp;per_page=50</code></td></tr>
+                <tr><td>Which endpoint loads the selected transaction card?</td><td><code>GET /uploads/{batchId}/transactions/{transactionNumber}</code></td></tr>
+                <tr><td>Which endpoint supplies batch totals/status cards?</td><td><code>GET /uploads/{batchId}</code>; optionally use <code>/preview</code> for a combined response.</td></tr>
+                <tr><td>Where does the exception detail panel get its data?</td><td>Use the selected row from <code>GET /uploads/{batchId}/exceptions</code>. Fetch transaction detail only when full debit/credit context is needed.</td></tr>
+                <tr><td>What payload confirms an account mapping?</td><td>Use the exception resolution endpoint with <code>resolution_type=MAP_ACCOUNT</code>, the selected <code>register_account_id</code>, and a reason.</td></tr>
+                <tr><td>What endpoints power replay, exclusion and cancellation?</td><td>Replay and exclusion use the same exception resolution endpoint. Cancellation uses <code>POST /uploads/{batchId}/cancel</code>.</td></tr>
+                <tr><td>How is the checker screen populated?</td><td>Combine preview, transactions, approvals, events and comments. These reads can run in parallel.</td></tr>
+                <tr><td>How are posting checks shown before authorization?</td><td><code>GET /uploads/{batchId}/posting-readiness</code> returns a top-level readiness decision and every individual check.</td></tr>
+                <tr><td>How is the final verification screen populated?</td><td><code>GET /uploads/{batchId}/verification-summary</code> provides one consolidated response.</td></tr>
+                <tr><td>Are the proposed PDF, CSV and Excel reports available?</td><td>Yes. They are all served through <code>GET /uploads/{batchId}/export</code> with <code>type</code> and <code>format</code>.</td></tr>
+            </tbody>
+        </table>
+
+        <h2>2. Global request and response rules</h2>
+        <h3>Headers</h3>
+        <pre>Accept: application/json
+Authorization: Bearer &lt;token&gt;
+Content-Type: application/json   // JSON mutations only</pre>
+        <p>For report downloads, request a blob/binary response. For the original file upload, use browser <code>FormData</code> and allow the browser to create the multipart boundary.</p>
+
+        <h3>Three response envelopes</h3>
+        <table>
+            <thead><tr><th>Kind</th><th>Shape</th></tr></thead>
+            <tbody>
+                <tr><td>Single-record read</td><td><code>{ "data": { ... } }</code></td></tr>
+                <tr><td>Mutation</td><td><code>{ "success": true, "message": "...", "data": { ... } }</code></td></tr>
+                <tr><td>Paginated read</td><td><code>{ "current_page": 1, "data": [], "last_page": 1, "per_page": 50, "total": 0, "meta": { ... } }</code></td></tr>
+            </tbody>
+        </table>
+        <div class="callout warning"><strong>Quantity handling:</strong> share quantities are returned as decimal strings such as <code>"248889.000000"</code>. Do not convert them to JavaScript floating-point numbers for equality or financial calculations. Display with the returned <code>meta.unit_precision</code>.</div>
+    </section>
+
+    <section class="page">
+        <h2>3. Screen 1 — Reconciliation workspace</h2>
+        <h3>Recommended initial load</h3>
+        <pre>const [batch, preview, transactions] = await Promise.all([
+  api.get(`/api/cscs/uploads/${batchId}`),
+  api.get(`/api/cscs/uploads/${batchId}/preview`),
+  api.get(`/api/cscs/uploads/${batchId}/transactions`, {
+    params: { page: 1, per_page: 50 }
+  })
+]);</pre>
+        <p>Load exceptions immediately when the design displays an exception count, or lazily when the user continues to the exception workbench.</p>
+
+        <table>
+            <thead><tr><th>UI area</th><th>Source</th><th>Fields to use</th></tr></thead>
+            <tbody>
+                <tr><td>Header/status</td><td><code>GET /uploads/{batchId}</code></td><td><code>workflow_status</code>, <code>business_reference</code>, <code>description</code>, <code>allowed_actions</code></td></tr>
+                <tr><td>Debit/credit cards</td><td>Batch <code>summary</code> or <code>reconciliation</code></td><td><code>total_debit</code>, <code>total_credit</code>, <code>net_movement</code></td></tr>
+                <tr><td>Exception/transaction cards</td><td>Batch summary + transaction metadata</td><td><code>unresolved_exceptions</code>, <code>transaction_groups</code>, <code>meta.transaction_counts</code></td></tr>
+                <tr><td>Transaction table</td><td><code>GET /transactions</code></td><td><code>transaction_number</code>, <code>quantity</code>, account objects, <code>risk</code>, <code>resolution</code>, balance and flags</td></tr>
+                <tr><td>Selected transaction</td><td><code>GET /transactions/{transactionNumber}</code></td><td>Same summary fields plus full <code>legs</code></td></tr>
+                <tr><td>Account impact preview</td><td><code>GET /account-effects</code></td><td>Named shareholder/account/class plus current/debit/credit/net/proposed quantities</td></tr>
+                <tr><td>Security mapping</td><td><code>GET /preview</code></td><td><code>data.security_mappings</code></td></tr>
+            </tbody>
+        </table>
+
+        <h3>Transaction filters</h3>
+        <pre>GET /api/cscs/uploads/{batchId}/transactions
+  ?search=2606160005615022
+  &amp;balance_status=BALANCED
+  &amp;is_flagged=false
+  &amp;resolution_status=READY
+  &amp;security_code=STANBIC
+  &amp;trade_date_from=2026-06-16
+  &amp;trade_date_to=2026-06-16
+  &amp;page=1&amp;per_page=50</pre>
+        <p>All filters are optional and are applied before pagination. Use <code>meta.transaction_counts</code> for the All/Balanced/Unbalanced/Flagged tabs; do not calculate those totals from the current page.</p>
+
+        <h3>Representative transaction object</h3>
+        <pre>{
+  "transaction_number": "2606160005615022",
+  "trade_date": "2026-06-16",
+  "security_code": "STANBIC",
+  "quantity": "248889.000000",
+  "quantity_mismatch": false,
+  "debit_total": "248889.000000",
+  "credit_total": "248889.000000",
+  "net_total": "0.000000",
+  "leg_count": 2,
+  "is_balanced": true,
+  "balance_status": "BALANCED",
+  "is_flagged": false,
+  "flag_reasons": [],
+  "risk": { "level": "LOW", "label": "Low", "reasons": [] },
+  "resolution": { "status": "READY", "label": "Ready", "action_required": false },
+  "debit_account": {
+    "register_account_id": 445,
+    "shareholder_name": "Debit Holder",
+    "register_account_number": "SRA-00000445",
+    "chn": "C111111111",
+    "current_quantity": "300000.000000",
+    "proposed_quantity": "51111.000000"
+  },
+  "credit_account": { "register_account_id": 446, "shareholder_name": "Credit Holder" },
+  "status": ["READY"],
+  "legs": [ /* full staged movement rows */ ]
+}</pre>
+    </section>
+
+    <section>
+        <h2>4. Screen 1 — Exception resolution workbench</h2>
+        <h3>List endpoint</h3>
+        <pre>GET /api/cscs/uploads/{batchId}/exceptions
+  ?resolution_status=UNRESOLVED&amp;search=C111111111&amp;page=1&amp;per_page=10</pre>
+        <p>Both <code>status</code> and <code>resolution_status</code> are accepted. Search matches transaction, identifier, code, message or row number. Use <code>meta.exception_counts</code> for the Total, Blocking, Warning, Resolved and Remaining cards.</p>
+
+        <h3>Detail panel behavior</h3>
+        <ol>
+            <li>Store the clicked exception row as <code>selectedException</code>.</li>
+            <li>Render <code>severity</code>, <code>is_blocking</code>, <code>parsed_record</code>, <code>suggested_resolution</code>, <code>allowed_resolution_types</code>, <code>matched_account</code> and <code>resolution_history</code> directly from that object.</li>
+            <li>If the design needs both movement legs, call <code>GET /transactions/{selectedException.tran_no}</code>.</li>
+            <li>After any resolution, clear the selection and refresh exceptions, batch, preview and transaction counts.</li>
+        </ol>
+
+        <h3>Confirm an existing account mapping</h3>
+        <pre>POST /api/cscs/uploads/{batchId}/exceptions/{exceptionId}/resolve
+
+{
+  "resolution_type": "MAP_ACCOUNT",
+  "register_account_id": 445,
+  "reason": "Confirmed against the shareholder register."
+}</pre>
+        <div class="callout"><strong>Required:</strong> <code>register_account_id</code> is the internal shareholder-register-account ID. Find it with <code>GET /api/shareholders?register_id={registerId}&amp;search={query}</code>; search accepts names, shareholder numbers, CHNs and CSCS numbers.</div>
+
+        <table>
+            <thead><tr><th>Button</th><th><code>resolution_type</code></th><th>Additional rule</th></tr></thead>
+            <tbody>
+                <tr><td>Confirm Mapping</td><td><code>MAP_ACCOUNT</code></td><td><code>register_account_id</code> required; account must belong to the batch register.</td></tr>
+                <tr><td>Mark as Replay</td><td><code>CONFIRM_REPLAY</code></td><td>A matching previously posted movement must exist.</td></tr>
+                <tr><td>Exclude Record</td><td><code>RULE_EXCLUDED</code></td><td>Applies a documented exclusion to the complete transaction group.</td></tr>
+            </tbody>
+        </table>
+        <pre>// Replay
+{ "resolution_type": "CONFIRM_REPLAY",
+  "reason": "Confirmed as an already posted CSCS movement." }
+
+// Exclusion
+{ "resolution_type": "RULE_EXCLUDED",
+  "reason": "Excluded under the approved documented CSCS rule." }</pre>
+        <p>Every resolution reason is required and must contain 10–1000 characters. A successful response states that revalidation is required.</p>
+
+        <h3>Creating a new shareholder/account from the panel</h3>
+        <div class="flow">POST /api/shareholders
+  → receive shareholder.id
+  → POST /api/shareholders/{shareholderId}/register-accounts
+  → receive registerAccount.id
+  → POST CSCS exception resolve with MAP_ACCOUNT + registerAccount.id
+  → POST /api/cscs/uploads/{batchId}/reconcile</div>
+        <div class="callout warning"><strong>Do not stop after account creation.</strong> The CSCS exception is unresolved until the final <code>MAP_ACCOUNT</code> call succeeds.</div>
+    </section>
+
+    <section>
+        <h2>5. Completing the maker workflow</h2>
+        <table>
+            <thead><tr><th>Button</th><th>Request</th><th>Frontend result</th></tr></thead>
+            <tbody>
+                <tr><td>Revalidate / Reconcile</td><td><code>POST /uploads/{batchId}/reconcile</code><br><code>{ "comment": "All groups reviewed" }</code></td><td>Refresh the batch. Continue only when status becomes <code>RECONCILED</code>.</td></tr>
+                <tr><td>Submit for Approval</td><td><code>POST /uploads/{batchId}/submit</code></td><td>Status becomes <code>PENDING_APPROVAL</code> and a revision snapshot is frozen.</td></tr>
+                <tr><td>Cancel Batch</td><td><code>POST /uploads/{batchId}/cancel</code> with a required 10+ character comment</td><td>Status becomes <code>CANCELLED</code>; the batch is final/read-only.</td></tr>
+                <tr><td>Save &amp; Continue Later</td><td>No API call required</td><td>All staged data and successful resolutions are already persisted. Navigate away after pending requests finish.</td></tr>
+            </tbody>
+        </table>
+
+        <h3>Submission gate</h3>
+        <p>Before enabling submission, confirm all of the following from the refreshed batch:</p>
+        <ul>
+            <li><code>workflow_status === "RECONCILED"</code>;</li>
+            <li><code>summary.unresolved_exceptions === 0</code>;</li>
+            <li>debit and credit totals match;</li>
+            <li><code>snapshot_hash</code> is present; and</li>
+            <li><code>allowed_actions</code> contains <code>submit</code>.</li>
+        </ul>
+
+        <h3>Authoritative button list</h3>
+        <pre>{
+  "data": {
+    "id": 101,
+    "workflow_status": "DRAFT_REVIEW",
+    "allowed_actions": ["view", "resolve", "revalidate", "cancel"]
+  }
+}</pre>
+        <p>Always combine <code>allowed_actions</code> with the frontend permission model. Refresh it after every mutation because workflow state and actor separation can change what is legal.</p>
+
+        <h2>6. Workflow states the UI must understand</h2>
+        <div class="flow">PROCESSING → DRAFT_REVIEW → RECONCILED → PENDING_APPROVAL
+                                      ├→ QUERY_RAISED → DRAFT_REVIEW
+                                      ├→ REJECTED
+                                      └→ APPROVED_AWAITING_POST
+                                           → POSTING_QUEUED → POSTING
+                                               ├→ POSTED
+                                               └→ POSTING_FAILED
+                                           → STALE → DRAFT_REVIEW
+DRAFT_REVIEW / RECONCILED / QUERY_RAISED / STALE → CANCELLED</div>
+        <table>
+            <thead><tr><th>Status</th><th>Recommended UI</th></tr></thead>
+            <tbody>
+                <tr><td><code>PROCESSING</code></td><td>Progress screen; poll batch details.</td></tr>
+                <tr><td><code>DRAFT_REVIEW</code>, <code>QUERY_RAISED</code>, <code>STALE</code></td><td>Maker workspace and exception tools.</td></tr>
+                <tr><td><code>PENDING_APPROVAL</code></td><td>Read-only checker review with approve/query/reject.</td></tr>
+                <tr><td><code>APPROVED_AWAITING_POST</code></td><td>Posting authorization for an eligible non-maker.</td></tr>
+                <tr><td><code>POSTING_QUEUED</code>, <code>POSTING</code></td><td>Disable mutations and poll posting status.</td></tr>
+                <tr><td><code>POSTED</code></td><td>Final verification and reports.</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section>
+        <h2>7. Screen 2 — Checker review</h2>
+        <h3>Load these reads in parallel</h3>
+        <pre>const [batch, preview, transactions, approvals, events, comments] =
+  await Promise.all([
+    api.get(`/api/cscs/uploads/${batchId}`),
+    api.get(`/api/cscs/uploads/${batchId}/preview`),
+    api.get(`/api/cscs/uploads/${batchId}/transactions`, { params: { per_page: 50 } }),
+    api.get(`/api/cscs/uploads/${batchId}/approvals`),
+    api.get(`/api/cscs/uploads/${batchId}/events`),
+    api.get(`/api/cscs/uploads/${batchId}/comments`)
+  ]);</pre>
+
+        <table>
+            <thead><tr><th>Mockup section</th><th>Implementation</th></tr></thead>
+            <tbody>
+                <tr><td>Batch Metadata &amp; Origins</td><td><code>preview.data.batch</code>, including files, timestamps, revision, register and submitter information.</td></tr>
+                <tr><td>Reconciliation Summary</td><td><code>batch.reconciliation</code> or <code>GET /reconciliation</code>.</td></tr>
+                <tr><td>Proposed Holdings Preview</td><td><code>preview.data.account_effects</code>.</td></tr>
+                <tr><td>Transaction Groups</td><td>Paginated <code>GET /transactions</code>.</td></tr>
+                <tr><td>Proposed New Accounts</td><td><code>preview.data.proposed_new_accounts</code>, including the proposed master profile.</td></tr>
+                <tr><td>Security Mapping Checks</td><td><code>preview.data.security_mappings</code>; final posting checks come from posting readiness.</td></tr>
+                <tr><td>Risk &amp; Exceptions Checks</td><td><code>preview.data.review_summary.exceptions</code> and <code>checks</code>.</td></tr>
+                <tr><td>Approval Timeline</td><td><code>preview.data.approval_timeline</code> or the standalone events/approvals reads.</td></tr>
+                <tr><td>Comments &amp; Review Notes</td><td><code>preview.data.comments</code> or paginated <code>GET /comments</code>.</td></tr>
+            </tbody>
+        </table>
+
+        <h3>Standalone comment</h3>
+        <pre>POST /api/cscs/uploads/{batchId}/comments
+{ "comment": "Please verify the attached CSCS instruction reference." }</pre>
+        <p>The response is HTTP <code>201</code>. Refresh the comments endpoint afterward; it is paginated and newest-first.</p>
+
+        <h3>Checker buttons</h3>
+        <pre>// Approve
+POST /api/cscs/uploads/{batchId}/approve
+{ "comment": "Files, balances and holding effects verified." }
+
+// Raise Query
+POST /api/cscs/uploads/{batchId}/query
+{ "comment": "Please confirm the selected account mapping.",
+  "transaction_numbers": ["2606160005615022"],
+  "row_ids": [501] }
+
+// Reject
+POST /api/cscs/uploads/{batchId}/reject
+{ "comment": "Source movement details require correction." }</pre>
+        <div class="callout warning"><strong>Approval is not posting.</strong> Approval changes the batch to <code>APPROVED_AWAITING_POST</code> after all required approval steps. It does not update live holdings and should not immediately show a “successfully posted” message.</div>
+    </section>
+
+    <section class="page">
+        <h2>8. Screen 3 — Posting authorization</h2>
+        <h3>Preflight endpoint for the modal</h3>
+        <pre>GET /api/cscs/uploads/{batchId}/posting-readiness</pre>
+        <h3>Representative response</h3>
+        <pre>{
+  "data": {
+    "batch_id": 101,
+    "status": "APPROVED_AWAITING_POST",
+    "snapshot_hash": "9e2f...",
+    "ready": true,
+    "checks": {
+      "status_allows_posting": {
+        "passed": true, "label": "Batch approved for posting"
+      },
+      "snapshot_hash_unchanged": {
+        "passed": true, "label": "Snapshot hash unchanged"
+      },
+      "security_mappings_valid": {
+        "passed": true, "label": "Security mappings active and unchanged"
+      },
+      "account_mappings_valid": {
+        "passed": true, "label": "Account mappings remain valid"
+      },
+      "holdings_current": {
+        "passed": true, "label": "Current holdings match the approved snapshot"
+      },
+      "movements_not_posted": {
+        "passed": true, "label": "Movements have not already been posted"
+      },
+      "no_blocking_exceptions": {
+        "passed": true, "label": "No blocking exceptions remain"
+      }
+    },
+    "summary": {
+      "records_to_post": 1250,
+      "affected_accounts": 847,
+      "blocking_exceptions": 0
+    },
+    "posting_policy": {
+      "is_irreversible": true,
+      "correction_method": "CONTROLLED_REVERSAL",
+      "rollback_window_hours": null
+    }
+  }
+}</pre>
+        <p>Render each check using its supplied label. Disable “Authorize Posting” when any check fails, <code>data.ready</code> is false, or the batch response does not include <code>post</code> in <code>allowed_actions</code>.</p>
+
+        <h3>Authorization request</h3>
+        <pre>POST /api/cscs/uploads/{batchId}/post
+{ "comment": "Approved for controlled posting." }</pre>
+        <p>A successful request returns HTTP <code>202 Accepted</code> with status <code>POSTING_QUEUED</code>. The user’s acknowledgement checkbox and operational comment are frontend fields; submit the comment after the checkbox has been checked.</p>
+
+        <div class="callout danger"><strong>Segregation of duties:</strong> the maker can never post their own batch. The active policy may also require the poster to be different from the checker. A 403 response is final authorization feedback, not a condition to bypass or retry automatically.</div>
+    </section>
+
+    <section class="page">
+        <h2>9. Posting monitor and final verification</h2>
+        <h3>Poll posting status</h3>
+        <pre>GET /api/cscs/uploads/{batchId}/posting-status</pre>
+        <pre>const active = new Set(['POSTING_QUEUED', 'POSTING']);
+
+async function pollPosting(batchId, signal) {
+  while (!signal.aborted) {
+    const { data: response } = await api.get(
+      `/api/cscs/uploads/${batchId}/posting-status`, { signal }
+    );
+    const posting = response.data;
+    if (!active.has(posting.status)) return posting;
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  }
+}</pre>
+        <table>
+            <thead><tr><th>Result</th><th>Frontend action</th></tr></thead>
+            <tbody>
+                <tr><td><code>POSTED</code></td><td>Stop polling and load verification summary.</td></tr>
+                <tr><td><code>POSTING_FAILED</code></td><td>Show sanitized <code>failure_reason</code>. Offer retry only when <code>allowed_actions</code> permits posting.</td></tr>
+                <tr><td><code>STALE</code></td><td>Return the batch to the maker; holdings or snapshot changed and reconciliation/approval must repeat.</td></tr>
+            </tbody>
+        </table>
+        <p>Cancel the polling request when the component unmounts. Never run automatic posting retries in a loop.</p>
+
+        <h3>Screen 4 endpoint</h3>
+        <pre>GET /api/cscs/uploads/{batchId}/verification-summary</pre>
+        <h3>Representative response</h3>
+        <pre>{
+  "data": {
+    "batch_id": 101,
+    "status": "POSTED",
+    "verification_status": "VERIFIED",
+    "posted_at": "2026-08-31T12:45:00Z",
+    "metrics": {
+      "records_posted": 1250,
+      "transaction_groups_posted": 625,
+      "failed_rows": 0,
+      "duplicate_prevention_blocks": 0,
+      "total_debit": "156400.000000",
+      "total_credit": "156400.000000",
+      "net_movement": "0.000000",
+      "shareholder_records_updated": 847,
+      "new_accounts_created": 3,
+      "exceptions_resolved": 12,
+      "replay_transactions": 0
+    },
+    "approved_totals": {
+      "total_debit": "156400.000000",
+      "total_credit": "156400.000000",
+      "net_movement": "0.000000",
+      "ready_rows": 1250
+    },
+    "comparison": [
+      { "metric": "total_debit", "approved": "156400.000000",
+        "actual": "156400.000000", "variance": "0.000000",
+        "status": "MATCHED", "matched": true }
+    ],
+    "checks": {
+      "posted_row_count": true,
+      "share_transaction_count": true,
+      "unique_replay_fingerprints": true,
+      "debit_total": true,
+      "credit_total": true,
+      "net_movement": true,
+      "holding_effects": true
+    },
+    "all_checks_passed": true,
+    "verified_at": "2026-08-31T12:45:01Z"
+  }
+}</pre>
+        <p>Only render the green verified state when <code>verification_status === "VERIFIED"</code> and <code>all_checks_passed</code> is true. Render the reconciliation table directly from <code>comparison</code>; approved, actual, variance and status are already supplied.</p>
+    </section>
+
+    <section>
+        <h2>10. Screen 4 — Reports and downloads</h2>
+        <table>
+            <thead><tr><th>Card in design</th><th>Request</th><th>Response</th></tr></thead>
+            <tbody>
+                <tr><td>Audit Report</td><td><code>GET /uploads/{batchId}/export?type=audit&amp;format=pdf</code></td><td>PDF</td></tr>
+                <tr><td>Posting Report</td><td><code>GET /uploads/{batchId}/export?type=posting&amp;format=csv</code></td><td>CSV</td></tr>
+                <tr><td>Reconciliation Report</td><td><code>GET /uploads/{batchId}/export?type=reconciliation&amp;format=pdf</code></td><td>PDF</td></tr>
+                <tr><td>Activity Log</td><td><code>GET /uploads/{batchId}/export?type=activity&amp;format=xls</code></td><td>Excel XLS</td></tr>
+            </tbody>
+        </table>
+        <p><code>format=xlsx</code> is also supported for activity. CSV types also include <code>rows</code>, <code>exceptions</code>, <code>reconciliation</code>, <code>preview</code>, <code>posting</code> and <code>activity</code>.</p>
+
+        <h3>Browser download helper</h3>
+        <pre>async function downloadCscsReport(batchId, type, format) {
+  const response = await api.get(
+    `/api/cscs/uploads/${batchId}/export`,
+    { params: { type, format }, responseType: 'blob' }
+  );
+
+  const disposition = response.headers['content-disposition'] || '';
+  const match = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] || `cscs_${batchId}_${type}.${format}`;
+  const url = URL.createObjectURL(response.data);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}</pre>
+        <div class="callout"><strong>Authorization:</strong> report downloads require <code>cscs.export</code>. Do not attempt to open the URL in an unauthenticated browser tab if authentication is provided only through a bearer header.</div>
+
+        <h2>11. Permissions by action</h2>
+        <table>
+            <thead><tr><th>Capability</th><th>Permission</th></tr></thead>
+            <tbody>
+                <tr><td>Read batch, transactions, preview, history, comments and verification</td><td><code>cscs.view</code></td></tr>
+                <tr><td>Resolve exceptions and reconcile</td><td><code>cscs.reconcile</code></td></tr>
+                <tr><td>Submit or cancel maker-owned batch</td><td><code>cscs.submit</code></td></tr>
+                <tr><td>Raise checker query</td><td><code>cscs.review</code></td></tr>
+                <tr><td>Approve or reject</td><td><code>cscs.approve</code></td></tr>
+                <tr><td>Authorize posting</td><td><code>cscs.post</code></td></tr>
+                <tr><td>Download reports/source files</td><td><code>cscs.export</code></td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <section class="compact">
+        <h2>12. Error handling contract</h2>
+        <table>
+            <thead><tr><th>Status</th><th>Meaning</th><th>Required UI behavior</th></tr></thead>
+            <tbody>
+                <tr><td>401</td><td>Token missing or expired</td><td>End the session or refresh authentication.</td></tr>
+                <tr><td>403</td><td>Permission or maker-checker separation failure</td><td>Disable the action and display the API message.</td></tr>
+                <tr><td>404</td><td>Batch, row, account, transaction or file not found</td><td>Clear stale selection or return to the batch list.</td></tr>
+                <tr><td>422</td><td>Validation/state/reconciliation/readiness failure</td><td>Show validation errors and refresh current batch state.</td></tr>
+                <tr><td>429</td><td>Rate limit exceeded</td><td>Prevent repeated clicks and retry after a delay.</td></tr>
+                <tr><td>500</td><td>Sanitized technical failure</td><td>Show the safe message/reference; do not expose raw stack data.</td></tr>
+            </tbody>
+        </table>
+        <h3>Laravel validation example</h3>
+        <pre>{
+  "message": "The reason field is required.",
+  "errors": {
+    "reason": ["The reason field is required."]
+  }
+}</pre>
+        <p>Use a shared error helper that checks <code>response.data.errors</code>, then <code>response.data.message</code>, and finally a generic fallback.</p>
+
+        <h2>13. Implementation checklist</h2>
+        <ol>
+            <li>Use the numeric batch ID returned by the upload/import response.</li>
+            <li>Load batch, preview and transactions in parallel.</li>
+            <li>Use server pagination and <code>meta.transaction_counts</code>.</li>
+            <li>Use <code>meta.exception_counts</code> for exception cards and tabs.</li>
+            <li>Use decimal strings and register precision for quantities.</li>
+            <li>Render buttons from <code>allowed_actions</code> plus frontend permissions.</li>
+            <li>Refresh relevant reads after every successful mutation.</li>
+            <li>Complete shareholder creation → account creation → CSCS mapping as one UI sequence.</li>
+            <li>Reconcile before allowing submission.</li>
+            <li>Keep approval and posting as distinct steps and messages.</li>
+            <li>Call posting readiness immediately before displaying/confirming posting.</li>
+            <li>Poll posting status only while queued or posting; cancel on unmount.</li>
+            <li>Show verified success only from verification summary.</li>
+            <li>Download reports as authenticated blobs.</li>
+            <li>Test 403, 404, 422, 429 and stale-snapshot behavior.</li>
+        </ol>
+
+        <h2>14. Postman and supporting references</h2>
+        <ul>
+            <li><code>docs/postman/ProjectT-API.postman_collection.json</code> — importable collection containing every registered API route.</li>
+            <li>Set collection variables <code>base_url</code>, <code>token</code>, <code>batchId</code>, <code>exceptionId</code> and <code>transactionNumber</code>.</li>
+            <li>For report requests, set <code>cscs_export_type</code> and <code>cscs_export_format</code>.</li>
+            <li><code>docs/CSCS_FRONTEND_INTEGRATION_GUIDE.md</code> — full operational frontend sequence.</li>
+            <li><code>docs/CSCS_API.md</code> — backend contract and workflow controls.</li>
+        </ul>
+
+        <div class="callout success"><strong>Final answer to the annotated request:</strong> the enriched API now supplies UI-ready transaction accounts/risk/resolution, exception severity/counts/suggestions/history, named review data, posting policy, and final approved-versus-actual comparison rows. No panel in the four supplied screens requires mock-only data.</div>
+    </section>
+</body>
+</html>

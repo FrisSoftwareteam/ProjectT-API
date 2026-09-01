@@ -2,9 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Http\Controllers\Api\Admin\ShareholderController;
 use App\Http\Controllers\Api\CscsUploadController;
 use App\Jobs\ProcessCscsImportJob;
 use App\Models\AdminUser;
+use App\Models\Company;
 use App\Models\CscsApprovalPolicy;
 use App\Models\CscsBatchSnapshot;
 use App\Models\CscsSecurityMapping;
@@ -53,7 +55,8 @@ class CscsWorkflowTest extends TestCase
         $this->maker = $this->admin('maker@example.test');
         $this->checker = $this->admin('checker@example.test');
         $this->poster = $this->admin('poster@example.test');
-        $this->register = Register::create(['company_id' => 1, 'register_code' => 'STANBIC', 'name' => 'Stanbic Register', 'status' => 'active']);
+        $company = Company::create(['issuer_code' => 'STANBIC', 'name' => 'Stanbic Test PLC', 'status' => 'active']);
+        $this->register = Register::create(['company_id' => $company->id, 'register_code' => 'STANBIC', 'name' => 'Stanbic Register', 'status' => 'active']);
         $this->shareClass = ShareClass::create(['register_id' => $this->register->id, 'class_code' => 'ORD', 'name' => 'Ordinary Shares']);
         CscsSecurityMapping::create(['security_code' => 'STANBIC', 'register_id' => $this->register->id, 'share_class_id' => $this->shareClass->id, 'is_active' => true]);
         $this->debitAccount = $this->account('C111111111', 'debit@example.test', '08000000001', '300000.000000');
@@ -63,7 +66,7 @@ class CscsWorkflowTest extends TestCase
     protected function tearDown(): void
     {
         foreach (array_reverse([
-            'admin_users', 'registers', 'share_classes', 'shareholders', 'shareholder_register_accounts',
+            'admin_users', 'companies', 'registers', 'share_classes', 'shareholders', 'shareholder_cautions', 'shareholder_register_accounts',
             'sra_external_identifiers', 'share_positions', 'share_transactions', 'cscs_upload_batches',
             'cscs_upload_rows', 'cscs_security_mappings', 'cscs_approval_policies',
             'cscs_approval_actions', 'cscs_workflow_events',
@@ -306,6 +309,13 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame('BALANCED', $balancedPayload['balance_status']);
         $this->assertFalse($balancedPayload['is_flagged']);
         $this->assertSame([], $balancedPayload['flag_reasons']);
+        $this->assertSame('248889.000000', $balancedPayload['quantity']);
+        $this->assertSame('LOW', $balancedPayload['risk']['level']);
+        $this->assertSame('READY', $balancedPayload['resolution']['status']);
+        $this->assertFalse($balancedPayload['resolution']['action_required']);
+        $this->assertSame($this->debitAccount->id, $balancedPayload['debit_account']['register_account_id']);
+        $this->assertSame('C111111111', $balancedPayload['debit_account']['chn']);
+        $this->assertSame($this->creditAccount->id, $balancedPayload['credit_account']['register_account_id']);
 
         $listPayload = $controller->transactions(Request::create('/api/cscs/transactions'), $balanced['batch_id'])->getData(true);
         $this->assertSame('BALANCED', $listPayload['data'][0]['balance_status']);
@@ -330,6 +340,9 @@ class CscsWorkflowTest extends TestCase
         $this->assertContains('UNBALANCED_TRANSACTION', $unbalancedPayload['flag_reasons']);
         $this->assertContains('UNBALANCED_QUANTITY', $unbalancedPayload['flag_reasons']);
         $this->assertContains('UNRESOLVED', $unbalancedPayload['flag_reasons']);
+        $this->assertTrue($unbalancedPayload['quantity_mismatch']);
+        $this->assertSame('HIGH', $unbalancedPayload['risk']['level']);
+        $this->assertTrue($unbalancedPayload['resolution']['action_required']);
 
         $listPayload = $controller->transactions(Request::create('/api/cscs/transactions'), $unbalanced['batch_id'])->getData(true);
         $this->assertSame('UNBALANCED', $listPayload['data'][0]['balance_status']);
@@ -376,6 +389,40 @@ class CscsWorkflowTest extends TestCase
         )->getData(true);
         $this->assertSame('BALANCED', $filtered['meta']['applied_filters']['balance_status']);
         $this->assertFalse($filtered['meta']['applied_filters']['is_flagged']);
+    }
+
+    public function test_preview_exposes_ui_ready_review_objects(): void
+    {
+        $batch = $this->stageBatch();
+        $payload = app(CscsUploadController::class)->preview(
+            Request::create('/api/cscs/preview', 'GET'),
+            $batch['batch_id']
+        )->getData(true)['data'];
+
+        $this->assertSame('Stanbic Test PLC', $payload['batch']['register']['company']['name']);
+        $this->assertSame('maker@example.test', $payload['batch']['uploader']['email']);
+        $this->assertCount(2, $payload['account_effects']);
+        $this->assertSame('Test Holder', $payload['account_effects'][0]['shareholder_name']);
+        $this->assertSame('ORD', $payload['account_effects'][0]['share_class_code']);
+        $this->assertSame(2, $payload['review_summary']['affected_accounts']);
+        $this->assertSame(1, $payload['review_summary']['security_mappings']['verified']);
+        $this->assertTrue($payload['review_summary']['checks']['security_mappings_complete']);
+        $this->assertArrayHasKey('approval_timeline', $payload);
+        $this->assertArrayHasKey('comments', $payload);
+    }
+
+    public function test_shareholder_search_finds_register_accounts_by_chn(): void
+    {
+        $payload = app(ShareholderController::class)->index(
+            Request::create('/api/shareholders', 'GET', [
+                'register_id' => $this->register->id,
+                'search' => 'C111111111',
+            ])
+        )->getData(true);
+
+        $this->assertSame(1, $payload['total']);
+        $this->assertSame($this->debitAccount->shareholder_id, $payload['data'][0]['id']);
+        $this->assertSame('C111111111', $payload['data'][0]['register_accounts'][0]['chn']);
     }
 
     public function test_balanced_transaction_can_still_be_filtered_as_flagged(): void
@@ -557,6 +604,8 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame(2, $ready['summary']['records_to_post']);
         $this->assertTrue($ready['checks']['snapshot_hash_unchanged']['passed']);
         $this->assertTrue($ready['checks']['holdings_current']['passed']);
+        $this->assertSame('CONTROLLED_REVERSAL', $ready['posting_policy']['correction_method']);
+        $this->assertNull($ready['posting_policy']['rollback_window_hours']);
 
         SharePosition::where('sra_id', $this->debitAccount->id)->update(['quantity' => '299999.000000']);
         $stale = $this->service->postingReadiness($batch->id);
@@ -580,6 +629,12 @@ class CscsWorkflowTest extends TestCase
 
         $this->assertSame(1, $payload['total']);
         $this->assertSame('UNRESOLVED', $payload['data'][0]['resolution_status']);
+        $this->assertSame('WARNING', $payload['data'][0]['severity']);
+        $this->assertTrue($payload['data'][0]['is_blocking']);
+        $this->assertSame('DEBIT', $payload['data'][0]['parsed_record']['direction']);
+        $this->assertContains('MAP_ACCOUNT', $payload['data'][0]['allowed_resolution_types']);
+        $this->assertSame(1, $payload['meta']['exception_counts']['warnings']);
+        $this->assertSame(1, $payload['meta']['exception_counts']['remaining']);
     }
 
     public function test_review_comments_are_stored_and_returned_with_workflow_notes(): void
@@ -604,6 +659,35 @@ class CscsWorkflowTest extends TestCase
         ]);
     }
 
+    public function test_resolved_exceptions_remain_visible_with_counts_and_history(): void
+    {
+        $result = $this->stageBatch();
+        $row = CscsUploadRow::where('batch_id', $result['batch_id'])->where('tran_seq', '0')->firstOrFail();
+        $row->update([
+            'resolution_status' => 'UNRESOLVED',
+            'exception_code' => 'ACCOUNT_REVIEW_REQUIRED',
+            'error_message' => 'The account requires a manual decision.',
+        ]);
+        $request = Request::create('/api/cscs/exceptions/resolve', 'POST', [
+            'resolution_type' => 'RULE_EXCLUDED',
+            'reason' => 'The source instruction explicitly excludes this transaction group.',
+        ]);
+        $request->setUserResolver(fn () => $this->maker);
+        app(CscsUploadController::class)->resolveException($request, $result['batch_id'], $row->id);
+
+        $payload = app(CscsUploadController::class)->exceptions(
+            Request::create('/api/cscs/exceptions', 'GET', ['resolution_status' => 'RULE_EXCLUDED']),
+            $result['batch_id']
+        )->getData(true);
+        $resolved = collect($payload['data'])->firstWhere('id', $row->id);
+
+        $this->assertSame(2, $payload['meta']['exception_counts']['resolved']);
+        $this->assertSame(0, $payload['meta']['exception_counts']['remaining']);
+        $this->assertSame('INFO', $resolved['severity']);
+        $this->assertFalse($resolved['is_blocking']);
+        $this->assertSame('EXCEPTION_RESOLVED', $resolved['resolution_history'][0]['event_type']);
+    }
+
     public function test_posted_batch_exposes_verification_summary_and_report_downloads(): void
     {
         $batch = $this->stageAndSubmit();
@@ -615,6 +699,10 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame('VERIFIED', $summary['verification_status']);
         $this->assertSame(2, $summary['metrics']['records_posted']);
         $this->assertSame(1, $summary['metrics']['transaction_groups_posted']);
+        $this->assertSame(0, $summary['metrics']['duplicate_prevention_blocks']);
+        $this->assertTrue($summary['all_checks_passed']);
+        $this->assertCount(7, $summary['comparison']);
+        $this->assertNotContains(false, collect($summary['comparison'])->pluck('matched')->all(), true);
 
         $pdf = $controller->export(
             Request::create('/api/cscs/export', 'GET', ['type' => 'audit', 'format' => 'pdf']),
@@ -717,6 +805,14 @@ class CscsWorkflowTest extends TestCase
             $t->boolean('is_active');
             $t->timestamps();
         });
+        Schema::create('companies', function (Blueprint $t) {
+            $t->id();
+            $t->string('issuer_code');
+            $t->string('name');
+            $t->string('status');
+            $t->timestamps();
+            $t->softDeletes();
+        });
         Schema::create('registers', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('company_id');
@@ -751,10 +847,17 @@ class CscsWorkflowTest extends TestCase
             $t->string('status');
             $t->timestamps();
         });
+        Schema::create('shareholder_cautions', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('shareholder_id');
+            $t->timestamp('removed_at')->nullable();
+            $t->timestamps();
+        });
         Schema::create('shareholder_register_accounts', function (Blueprint $t) {
             $t->id();
             $t->unsignedBigInteger('shareholder_id');
             $t->unsignedBigInteger('register_id');
+            $t->unsignedBigInteger('shareholder_category_id')->nullable();
             $t->string('shareholder_no')->nullable();
             $t->string('chn')->nullable();
             $t->string('cscs_account_no')->nullable();

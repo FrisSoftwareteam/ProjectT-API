@@ -3655,7 +3655,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/exceptions?status=UNRESOLVED&per_page=50",
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/exceptions?resolution_status=UNRESOLVED&search=C111111111&per_page=50",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -3668,8 +3668,13 @@
                             ],
                             "query": [
                                 {
-                                    "key": "status",
+                                    "key": "resolution_status",
                                     "value": "UNRESOLVED",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "C111111111",
                                     "disabled": false
                                 },
                                 {
@@ -3679,7 +3684,7 @@
                                 }
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@exceptions`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@exceptions`.\n\nEach exception includes severity, blocking state, parsed record values, allowed and suggested resolutions, matched account, and resolution history. `meta.exception_counts` contains total, blocking, warning, resolved, and remaining counts.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -3964,7 +3969,7 @@
                                 "preview"
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@preview`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@preview`.\n\nConsolidated checker payload containing named account effects, proposed new accounts, security mappings, review summary, approval timeline, and comments.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -4417,7 +4422,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/transactions?page=1&per_page=50",
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/transactions?balance_status=BALANCED&is_flagged=false&page=1&per_page=50",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -4430,6 +4435,16 @@
                             ],
                             "query": [
                                 {
+                                    "key": "balance_status",
+                                    "value": "BALANCED",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "is_flagged",
+                                    "value": "false",
+                                    "disabled": false
+                                },
+                                {
                                     "key": "page",
                                     "value": "1",
                                     "disabled": false
@@ -4441,7 +4456,7 @@
                                 }
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@transactions`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@transactions`.\n\nEach transaction includes UI-ready `debit_account`, `credit_account`, `quantity`, `risk`, and `resolution` objects in addition to totals, flags, and raw legs.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -4469,7 +4484,7 @@
                                 "{{transactionNumber}}"
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@transaction`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@transaction`.\n\nReturns the same UI-ready transaction contract as the list: account display objects, quantity, risk, resolution, totals, flags, and raw legs.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -4496,7 +4511,7 @@
                                 "verification-summary"
                             ]
                         },
-                        "description": "Backend action: `CscsUploadController@verificationSummary`.\n\nUse this consolidated response for the post-posting verification screen. Display success only when `data.verification_status` is `VERIFIED`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                        "description": "Backend action: `CscsUploadController@verificationSummary`.\n\nUse this consolidated response for the post-posting verification screen. `data.comparison` contains approved, actual, variance, status, and matched values. Display success only when `data.verification_status` is `VERIFIED` and `data.all_checks_passed` is true.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 }
@@ -7158,7 +7173,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/shareholders?search=Ada&register_id={{register_id}}&share_class_id={{share_class_id}}",
+                            "raw": "{{base_url}}/api/shareholders?search=C111111111&register_id={{register_id}}&share_class_id={{share_class_id}}",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -7169,7 +7184,7 @@
                             "query": [
                                 {
                                     "key": "search",
-                                    "value": "Ada",
+                                    "value": "C111111111",
                                     "disabled": false
                                 },
                                 {
@@ -7184,7 +7199,7 @@
                                 }
                             ]
                         },
-                        "description": "Backend action: `ShareholderController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.view"
+                        "description": "Backend action: `ShareholderController@index`.\n\n`search` matches shareholder names/contact fields and also shareholder numbers, CHNs, and CSCS account numbers. Use `register_id` when resolving a CSCS exception.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.view"
                     },
                     "response": []
                 },

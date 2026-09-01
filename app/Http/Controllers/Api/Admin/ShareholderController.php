@@ -10,13 +10,13 @@ use App\Http\Requests\ShareholderAddressUpdateRequest;
 use App\Http\Requests\ShareholderIdentityRequest;
 use App\Http\Requests\ShareholderMandateRequest;
 use App\Http\Requests\ShareholderRequest;
+use App\Models\Register;
 use App\Models\Shareholder;
 use App\Models\ShareholderAddress;
 use App\Models\ShareholderCategory;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
-use App\Models\Register;
 use App\Services\ShareholderAccountNumberService;
 use App\Services\ShareholderBulkImportService;
 use Illuminate\Http\JsonResponse;
@@ -53,7 +53,12 @@ class ShareholderController extends Controller
                     ->orWhere('middle_name', 'like', $like)
                     ->orWhere('email', 'like', $like)
                     ->orWhere('phone', 'like', $like)
-                    ->orWhere('account_no', 'like', $like);
+                    ->orWhere('account_no', 'like', $like)
+                    ->orWhereHas('registerAccounts', function ($accountQuery) use ($like) {
+                        $accountQuery->where('shareholder_no', 'like', $like)
+                            ->orWhere('chn', 'like', $like)
+                            ->orWhere('cscs_account_no', 'like', $like);
+                    });
             });
         }
 
@@ -160,7 +165,7 @@ class ShareholderController extends Controller
         ], 201);
     }
 
-    public function storeWithDetails(\Illuminate\Http\Request $request)
+    public function storeWithDetails(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'shareholder' => 'required|array',

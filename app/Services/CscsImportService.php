@@ -11,6 +11,7 @@ use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
 use App\Models\CscsWorkflowEvent;
+use App\Models\ShareClass;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
@@ -985,6 +986,12 @@ class CscsImportService
                     ->count(),
                 'blocking_exceptions' => $blockingExceptions,
             ],
+            'posting_policy' => [
+                'is_irreversible' => true,
+                'correction_method' => 'CONTROLLED_REVERSAL',
+                'rollback_window_hours' => null,
+                'message' => 'Posting changes live holdings. Corrections require the controlled reversal workflow; no automatic rollback window is configured.',
+            ],
         ];
     }
 
@@ -1108,12 +1115,24 @@ class CscsImportService
     /** @return Collection<int, array<string, mixed>> */
     public function accountEffects(int $batchId): Collection
     {
-        return CscsUploadRow::where('batch_id', $batchId)
+        $rows = CscsUploadRow::where('batch_id', $batchId)
             ->whereIn('resolution_status', ['READY', 'POSTED'])
+            ->get();
+        $accounts = ShareholderRegisterAccount::with('shareholder')
+            ->whereIn('id', $rows->pluck('proposed_sra_id')->filter()->unique())
             ->get()
+            ->keyBy('id');
+        $shareClasses = ShareClass::whereIn('id', $rows->pluck('proposed_share_class_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
+
+        return $rows
             ->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id)
-            ->map(function (Collection $rows) {
+            ->map(function (Collection $rows) use ($accounts, $shareClasses) {
                 $first = $rows->first();
+                $account = $first->proposed_sra_id ? $accounts->get($first->proposed_sra_id) : null;
+                $shareClass = $first->proposed_share_class_id ? $shareClasses->get($first->proposed_share_class_id) : null;
+                $profile = data_get($first->extra_details, 'master_profile', []);
                 $debit = $this->zero();
                 $credit = $this->zero();
                 foreach ($rows as $row) {
@@ -1126,14 +1145,23 @@ class CscsImportService
 
                 return [
                     'register_account_id' => $first->proposed_sra_id,
+                    'shareholder_id' => $account?->shareholder_id,
+                    'shareholder_name' => $account?->shareholder?->full_name ?? data_get($profile, 'full_name'),
+                    'shareholder_account_number' => $account?->shareholder?->account_no,
+                    'register_account_number' => $account?->shareholder_no,
+                    'chn' => $account?->chn ?? ($first->identifier_type === 'chn' ? $first->identifier_value : null),
+                    'cscs_account_number' => $account?->cscs_account_no ?? ($first->identifier_type === 'cscs_account_no' ? $first->identifier_value : null),
                     'identifier_value' => $first->identifier_value,
                     'share_class_id' => $first->proposed_share_class_id,
+                    'share_class_code' => $shareClass?->class_code,
+                    'share_class_name' => $shareClass?->name,
                     'current_quantity' => $first->proposed_before_qty,
                     'total_debit' => $debit,
                     'total_credit' => $credit,
                     'net_movement' => bcsub($credit, $debit, self::SCALE),
                     'proposed_quantity' => $first->proposed_after_qty,
                     'is_new_account' => ! $first->proposed_sra_id,
+                    'proposed_profile' => ! $first->proposed_sra_id ? $profile : null,
                     'row_count' => $rows->count(),
                 ];
             })->values();

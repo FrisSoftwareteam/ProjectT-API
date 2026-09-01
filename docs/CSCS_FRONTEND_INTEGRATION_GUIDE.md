@@ -200,6 +200,8 @@ The individual transaction endpoint includes explicit UI fields in addition to t
 {
   "data": {
     "transaction_number": "2606160005615022",
+    "quantity": "248889.000000",
+    "quantity_mismatch": false,
     "debit_total": "248889.000000",
     "credit_total": "248889.000000",
     "net_total": "0.000000",
@@ -207,13 +209,30 @@ The individual transaction endpoint includes explicit UI fields in addition to t
     "balance_status": "BALANCED",
     "is_flagged": false,
     "flag_reasons": [],
+    "risk": { "level": "LOW", "label": "Low", "reasons": [] },
+    "resolution": { "status": "READY", "label": "Ready", "action_required": false },
+    "debit_account": {
+      "register_account_id": 445,
+      "shareholder_name": "Debit Holder",
+      "register_account_number": "SRA-00000445",
+      "chn": "C111111111",
+      "current_quantity": "300000.000000",
+      "proposed_quantity": "51111.000000",
+      "is_new_account": false
+    },
+    "credit_account": {
+      "register_account_id": 446,
+      "shareholder_name": "Credit Holder",
+      "chn": "C222222222",
+      "is_new_account": false
+    },
     "status": ["READY"],
     "legs": []
   }
 }
 ```
 
-`balance_status` is `BALANCED` or `UNBALANCED`. `is_flagged` is true when the transaction is unbalanced, contains an exception, or has a leg outside the normal `READY`/`POSTED` states. `flag_reasons` contains the applicable exception and resolution codes. These three fields are returned by both the paginated `/transactions` endpoint and the individual `/transactions/{transactionNumber}` endpoint.
+`balance_status` is `BALANCED` or `UNBALANCED`. `is_flagged` is true when the transaction is unbalanced, contains an exception, or has a leg outside the normal `READY`/`POSTED` states. `flag_reasons` contains the applicable exception and resolution codes. The `risk`, `resolution`, `debit_account`, and `credit_account` objects are returned by both transaction endpoints; the frontend does not need to join register-account IDs to render the table.
 
 ### Step 4 — Render actions from the batch response
 
@@ -234,8 +253,26 @@ Render a button only when its action is present and the user has the matching fr
 ### Step 5 — Resolve all exceptions
 
 ```http
-GET /api/cscs/uploads/{batchId}/exceptions?status=UNRESOLVED&per_page=50
+GET /api/cscs/uploads/{batchId}/exceptions?resolution_status=UNRESOLVED&search=C111111111&per_page=50
 ```
+
+`status` and `resolution_status` are equivalent filters. Search matches transaction number, identifier, exception code, error message, or source row number. Each result includes `severity`, `is_blocking`, `exception_label`, `parsed_record`, `matched_account`, `allowed_resolution_types`, `suggested_resolution`, and `resolution_history`. The response also provides full-batch cards independently of pagination:
+
+```json
+{
+  "meta": {
+    "exception_counts": {
+      "total": 10,
+      "blocking": 5,
+      "warnings": 2,
+      "resolved": 3,
+      "remaining": 7
+    }
+  }
+}
+```
+
+Resolved rows remain in this endpoint so the Resolved tab and audit trail do not disappear after revalidation.
 
 Manual account mapping:
 
@@ -251,7 +288,7 @@ POST /api/cscs/uploads/{batchId}/exceptions/{exceptionId}/resolve
 }
 ```
 
-Obtain `register_account_id` from the application's existing shareholder/register-account lookup. It must belong to the batch register.
+Obtain `register_account_id` from `GET /api/shareholders?register_id={registerId}&search={query}`. Search accepts shareholder names/contact information as well as shareholder numbers, CHNs, and CSCS account numbers. The selected account must belong to the batch register.
 
 Replay or exclusion alternatives:
 
@@ -328,6 +365,8 @@ GET /api/cscs/uploads/{batchId}/comments
 
 Post a standalone review note with `POST /api/cscs/uploads/{batchId}/comments` and a JSON body containing `comment`. The comments read also includes comments recorded with workflow actions.
 
+The preview is the UI-ready checker aggregate. It includes named `account_effects`, `proposed_new_accounts`, mappings with register/share-class details, `review_summary`, `approval_timeline`, and `comments`. Batch metadata includes `register.company` and the `uploader`, `reconciler`, `submitter`, `approver`, `rejector`, and `poster` actor objects when available.
+
 ### Step 9 — Checker approves
 
 ```http
@@ -358,6 +397,8 @@ GET /api/cscs/uploads/{batchId}/posting-readiness
 ```
 
 Require `data.ready === true` and render the individual checks returned under `data.checks`. This read validates the snapshot, security and account mappings, opening holdings, replay protection, blocking exceptions, and current workflow state without changing the batch.
+
+Render the warning from `data.posting_policy`. There is no automatic 24-hour rollback window: a posted correction uses the controlled reversal workflow.
 
 ```http
 POST /api/cscs/uploads/{batchId}/post
@@ -409,7 +450,7 @@ For the consolidated success screen, load:
 GET /api/cscs/uploads/{batchId}/verification-summary
 ```
 
-Show posting as verified only when `data.verification_status` is `VERIFIED`.
+Show posting as verified only when `data.verification_status` is `VERIFIED` and `data.all_checks_passed` is true. Render the reconciliation table directly from `data.comparison`; every row contains `approved`, `actual`, `variance`, `status`, and `matched`. The top cards are available under `data.metrics`, including `duplicate_prevention_blocks`.
 
 ## 5. Alternative branches
 

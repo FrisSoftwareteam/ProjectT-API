@@ -96,11 +96,11 @@ The second approval step is activated when total debit is at or above the config
 | GET | `/uploads/{batchId}/rows` | Movement rows |
 | GET | `/uploads/{batchId}/rows/{rowId}` | One staged row |
 | GET | `/uploads/{batchId}/master-records` | Parsed master records |
-| GET | `/uploads/{batchId}/transactions` | Paginated transaction groups with balance status and flag reasons |
-| GET | `/uploads/{batchId}/transactions/{transactionNumber}` | Debit/credit legs plus balance status and flag reasons for one transaction |
-| GET | `/uploads/{batchId}/account-effects` | Proposed holding effects |
-| GET | `/uploads/{batchId}/preview` | Complete maker/checker preview |
-| GET | `/uploads/{batchId}/exceptions` | Blocking and resolved exceptions |
+| GET | `/uploads/{batchId}/transactions` | UI-ready transaction groups with debit/credit accounts, risk, resolution, balance and flags |
+| GET | `/uploads/{batchId}/transactions/{transactionNumber}` | The same UI-ready contract plus raw debit/credit legs for one transaction |
+| GET | `/uploads/{batchId}/account-effects` | Named proposed holding effects and proposed-account profiles |
+| GET | `/uploads/{batchId}/preview` | Complete maker/checker preview with actors, review summary, timeline and comments |
+| GET | `/uploads/{batchId}/exceptions` | Blocking/resolved exceptions with severity, suggestions, history and summary counts |
 | GET | `/uploads/{batchId}/files` | Private source-file metadata |
 | GET | `/uploads/{batchId}/files/{fileIndex}/download` | Authorized source-file download |
 | GET | `/uploads/{batchId}/related-batches` | Original/reversal batch links |
@@ -121,6 +121,18 @@ per_page=50
 ```
 
 `meta.transaction_counts` always reports counts across the complete batch, while `total`, `current_page`, and `data` describe the filtered result.
+
+Exception query parameters:
+
+```text
+status=UNRESOLVED                         # legacy filter name
+resolution_status=UNRESOLVED              # preferred alias
+exception_code=DEBIT_ACCOUNT_NOT_FOUND
+search=transaction, identifier, code, message, or row number
+per_page=50
+```
+
+`meta.exception_counts` reports `total`, `blocking`, `warnings`, `resolved`, and `remaining` across the complete batch. Resolved rows remain available for the Resolved tab and audit history.
 
 Upload uses `multipart/form-data`:
 
