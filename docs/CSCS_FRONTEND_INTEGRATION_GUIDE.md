@@ -691,3 +691,14 @@ Batch list
 ```
 
 Always refresh the batch and use `allowed_actions`. Do not maintain a separate client-side state machine that can drift from the API.
+
+
+## Other shareholder accounts in balancing and replay confirmation
+
+Each item in `account_effects` (both the preview and account-effects responses) now includes an additive `other_accounts` array. Existing balance fields retain their meaning. The array contains other register accounts linked to the same shareholder ID; it is empty when there are no other accounts or the row proposes a new account.
+
+Each other account includes `register_account_id`, `register_account_number`, `register_id`, `register_name`, `chn`, `cscs_account_number`, `status`, `same_register`, and `holdings`. Each holding contains `share_class_id`, `share_class_code`, `share_class_name`, `quantity` (six-decimal string), and `holding_mode`.
+
+Display these accounts alongside the selected account for review. Do not sum their quantities into the selected account's balance or combine different share classes. Accounts from another register are informational: `MAP_ACCOUNT` still requires an account in the batch's register. Account discovery uses the existing shareholder ID, not a name similarity match.
+
+After `MAP_ACCOUNT`, call revalidation before proceeding; recording a mapping does not certify sufficient holdings. `CONFIRM_REPLAY` now rejects an incomplete transaction or any transaction where either leg has no matching posted movement, with a validation error under `resolution_type`. A successful confirmation applies to the complete movement group atomically. Continue to revalidate after recording the resolution.

@@ -851,37 +851,44 @@ class CscsImportService
     /** @return array<string, mixed> */
     public function resolveException(int $batchId, int $rowId, int $actorId, array $resolution): array
     {
-        $batch = CscsUploadBatch::findOrFail($batchId);
-        $this->assertMaker($batch, $actorId);
-        $this->assertState($batch, ['DRAFT_REVIEW', 'QUERY_RAISED', 'STALE']);
-        $row = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->findOrFail($rowId);
-        $type = $resolution['resolution_type'];
-        $updates = [
-            'resolved_by' => $actorId,
-            'resolved_at' => now(),
-            'resolution_reason' => $resolution['reason'],
-        ];
-        if ($type === 'MAP_ACCOUNT') {
-            $sra = ShareholderRegisterAccount::where('register_id', $batch->register_id)->findOrFail($resolution['register_account_id']);
-            $updates += ['proposed_sra_id' => $sra->id, 'match_method' => 'manual_mapping', 'resolution_status' => 'UNRESOLVED'];
-        } elseif ($type === 'RULE_EXCLUDED') {
-            $updates += ['resolution_status' => 'RULE_EXCLUDED', 'exception_code' => null, 'error_message' => 'Excluded by documented rule'];
-        } elseif ($type === 'CONFIRM_REPLAY') {
-            if (! $this->isPostedReplay($row)) {
-                throw ValidationException::withMessages(['resolution_type' => ['No matching posted movement leg was found.']]);
+        return DB::transaction(function () use ($batchId, $rowId, $actorId, $resolution) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['DRAFT_REVIEW', 'QUERY_RAISED', 'STALE']);
+            $row = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->findOrFail($rowId);
+            $type = $resolution['resolution_type'];
+            $updates = [
+                'resolved_by' => $actorId,
+                'resolved_at' => now(),
+                'resolution_reason' => $resolution['reason'],
+            ];
+            if ($type === 'MAP_ACCOUNT') {
+                $sra = ShareholderRegisterAccount::where('register_id', $batch->register_id)->findOrFail($resolution['register_account_id']);
+                $updates += ['proposed_sra_id' => $sra->id, 'match_method' => 'manual_mapping', 'resolution_status' => 'UNRESOLVED'];
+            } elseif ($type === 'RULE_EXCLUDED') {
+                $updates += ['resolution_status' => 'RULE_EXCLUDED', 'exception_code' => null, 'error_message' => 'Excluded by documented rule'];
+            } elseif ($type === 'CONFIRM_REPLAY') {
+                $group = CscsUploadRow::where('batch_id', $batchId)
+                    ->where('file_type', 'movement')
+                    ->where('tran_no', $row->tran_no)
+                    ->lockForUpdate()->get();
+                if (! $row->tran_no || $this->validateTransactionGroup($group)
+                    || ! $group->every(fn (CscsUploadRow $leg) => $this->isPostedReplay($leg))) {
+                    throw ValidationException::withMessages(['resolution_type' => ['Every leg of a complete transaction must match a previously posted movement before confirming replay.']]);
+                }
+                $updates += ['resolution_status' => 'CONFIRMED_REPLAY', 'exception_code' => null];
             }
-            $updates += ['resolution_status' => 'CONFIRMED_REPLAY', 'exception_code' => null];
-        }
-        $from = $batch->workflow_status;
-        if (in_array($type, ['RULE_EXCLUDED', 'CONFIRM_REPLAY'], true) && $row->tran_no) {
-            CscsUploadRow::where('batch_id', $batch->id)->where('tran_no', $row->tran_no)->update($updates);
-        } else {
-            $row->update($updates);
-        }
-        $batch->update(['snapshot_hash' => null, 'workflow_status' => 'DRAFT_REVIEW']);
-        $this->event($batch, 'EXCEPTION_RESOLVED', $from, 'DRAFT_REVIEW', $actorId, $resolution['reason'], ['row_id' => $row->id, 'type' => $type]);
+            $from = $batch->workflow_status;
+            if (in_array($type, ['RULE_EXCLUDED', 'CONFIRM_REPLAY'], true) && $row->tran_no) {
+                CscsUploadRow::where('batch_id', $batch->id)->where('file_type', 'movement')->where('tran_no', $row->tran_no)->update($updates);
+            } else {
+                $row->update($updates);
+            }
+            $batch->update(['snapshot_hash' => null, 'workflow_status' => 'DRAFT_REVIEW']);
+            $this->event($batch, 'EXCEPTION_RESOLVED', $from, 'DRAFT_REVIEW', $actorId, $resolution['reason'], ['row_id' => $row->id, 'type' => $type]);
 
-        return ['row' => $row->fresh(), 'batch' => $this->batchResult($batch->fresh())];
+            return ['row' => $row->fresh(), 'batch' => $this->batchResult($batch->fresh())];
+        });
     }
 
     /** @return array<string, mixed> */
@@ -1126,9 +1133,13 @@ class CscsImportService
             ->get()
             ->keyBy('id');
 
+        $otherAccounts = ShareholderRegisterAccount::with(['register', 'sharePositions.shareClass'])
+            ->whereIn('shareholder_id', $accounts->pluck('shareholder_id')->unique())
+            ->orderBy('id')->get()->groupBy('shareholder_id');
+
         return $rows
             ->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id)
-            ->map(function (Collection $rows) use ($accounts, $shareClasses) {
+            ->map(function (Collection $rows) use ($accounts, $shareClasses, $otherAccounts) {
                 $first = $rows->first();
                 $account = $first->proposed_sra_id ? $accounts->get($first->proposed_sra_id) : null;
                 $shareClass = $first->proposed_share_class_id ? $shareClasses->get($first->proposed_share_class_id) : null;
@@ -1162,6 +1173,25 @@ class CscsImportService
                     'proposed_quantity' => $first->proposed_after_qty,
                     'is_new_account' => ! $first->proposed_sra_id,
                     'proposed_profile' => ! $first->proposed_sra_id ? $profile : null,
+                    'other_accounts' => ($account ? $otherAccounts->get($account->shareholder_id, collect()) : collect())
+                        ->reject(fn (ShareholderRegisterAccount $other) => $other->id === $account->id)
+                        ->map(fn (ShareholderRegisterAccount $other) => [
+                            'register_account_id' => $other->id,
+                            'register_account_number' => $other->shareholder_no,
+                            'register_id' => $other->register_id,
+                            'register_name' => $other->register?->name,
+                            'chn' => $other->chn,
+                            'cscs_account_number' => $other->cscs_account_no,
+                            'status' => $other->status,
+                            'same_register' => (int) $other->register_id === (int) $account->register_id,
+                            'holdings' => $other->sharePositions->map(fn (SharePosition $position) => [
+                                'share_class_id' => $position->share_class_id,
+                                'share_class_code' => $position->shareClass?->class_code,
+                                'share_class_name' => $position->shareClass?->name,
+                                'quantity' => $this->decimal($position->quantity),
+                                'holding_mode' => $position->holding_mode,
+                            ])->values()->all(),
+                        ])->values()->all(),
                     'row_count' => $rows->count(),
                 ];
             })->values();

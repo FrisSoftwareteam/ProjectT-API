@@ -18,6 +18,7 @@ use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
 use App\Services\CscsImportService;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
@@ -717,6 +718,144 @@ class CscsWorkflowTest extends TestCase
         );
         $this->assertStringContainsString('.xls', (string) $excel->headers->get('content-disposition'));
         $this->assertGreaterThan(0, $excel->getFile()->getSize());
+    }
+
+    public function test_manual_mapping_survives_revalidation(): void
+    {
+        $batch = $this->stageBatch();
+        $target = $this->account('C333333333', 'other@example.test', '08000000003', '500000.000000');
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => $target->id, 'reason' => 'Verify manual mapping selection',
+        ]);
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->assertSame($target->id, $row->fresh()->proposed_sra_id);
+        $this->assertSame('READY', $row->fresh()->resolution_status);
+        $this->assertSame('251111.000000', $row->fresh()->proposed_after_qty);
+    }
+
+    public function test_partial_replay_must_be_rejected_at_confirmation(): void
+    {
+        $batch = $this->stageBatch();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+        $prior = $row->replicate();
+        $prior->fingerprint = $row->replay_key;
+        $prior->status = 'posted';
+        $prior->tran_no = 'prior-posted-transaction';
+        $prior->save();
+        $this->expectException(ValidationException::class);
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'CONFIRM_REPLAY', 'reason' => 'Verify every leg was previously posted',
+        ]);
+    }
+
+    public function test_manual_mapping_does_not_bypass_insufficient_holdings(): void
+    {
+        $batch = $this->stageBatch();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => $this->creditAccount->id,
+            'reason' => 'Verify insufficient holdings remain blocked',
+        ]);
+        // Remove the credit so the selected account cannot fund the debit from this batch.
+        CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '+')->update([
+            'proposed_sra_id' => $this->debitAccount->id, 'match_method' => 'manual_mapping',
+        ]);
+        try {
+            $this->service->reconcile($batch['batch_id'], $this->maker->id);
+            $this->fail('Insufficient holdings must block reconciliation.');
+        } catch (ValidationException $e) {
+            $this->assertSame('INSUFFICIENT_HOLDING', $row->fresh()->exception_code);
+        }
+        $this->assertDatabaseCount('share_transactions', 0);
+    }
+
+    public function test_manual_mapping_rejects_an_account_from_another_register(): void
+    {
+        $batch = $this->stageBatch();
+        $register = Register::create(['company_id' => $this->register->company_id, 'register_code' => 'OTHER', 'name' => 'Other Register', 'status' => 'active']);
+        $other = ShareholderRegisterAccount::create([
+            'shareholder_id' => $this->debitAccount->shareholder_id, 'register_id' => $register->id,
+            'shareholder_no' => 'OTHER-ACCOUNT', 'status' => 'active',
+        ]);
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+        try {
+            $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+                'resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => $other->id,
+                'reason' => 'Verify cross register mapping is rejected',
+            ]);
+            $this->fail('Accounts from another register must not be mapped.');
+        } catch (ModelNotFoundException $e) {
+            $this->assertSame($this->debitAccount->id, $row->fresh()->proposed_sra_id);
+            $this->assertNull($row->fresh()->resolved_at);
+        }
+    }
+
+    public function test_complete_replay_is_confirmed_without_changing_holdings(): void
+    {
+        $source = $this->stageAndSubmit();
+        $this->service->approve($source->id, $this->checker);
+        $this->service->post($source->id, $this->poster);
+        $batch = $source->replicate();
+        $batch->workflow_status = 'DRAFT_REVIEW';
+        $batch->business_reference = 'REPLAY-TEST';
+        $batch->save();
+        foreach (CscsUploadRow::where('batch_id', $source->id)->where('file_type', 'movement')->get() as $posted) {
+            $copy = $posted->replicate();
+            $copy->batch_id = $batch->id;
+            $copy->fingerprint = null;
+            $copy->status = 'pending';
+            $copy->resolution_status = 'UNRESOLVED';
+            $copy->save();
+        }
+        $this->service->resolveException($batch->id, $copy->id, $this->maker->id, [
+            'resolution_type' => 'CONFIRM_REPLAY', 'reason' => 'Confirm both previously posted legs',
+        ]);
+        $this->assertSame(2, CscsUploadRow::where('batch_id', $batch->id)->where('resolution_status', 'CONFIRMED_REPLAY')->count());
+        $this->service->reconcile($batch->id, $this->maker->id);
+        $this->assertCount(0, $this->service->accountEffects($batch->id));
+        $this->assertDatabaseCount('share_transactions', 2);
+        $this->assertSame('51111.000000', SharePosition::where('sra_id', $this->debitAccount->id)->value('quantity'));
+    }
+
+    public function test_replay_without_a_posted_match_leaves_rows_unchanged(): void
+    {
+        $batch = $this->stageBatch();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('file_type', 'movement')->firstOrFail();
+        try {
+            $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+                'resolution_type' => 'CONFIRM_REPLAY', 'reason' => 'Attempt to confirm unposted movement',
+            ]);
+            $this->fail('Unposted movements must not be confirmed as replay.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('resolution_type', $e->errors());
+        }
+        $this->assertNull($row->fresh()->resolved_at);
+        $this->assertSame('READY', $row->fresh()->resolution_status);
+        $this->assertDatabaseCount('share_transactions', 0);
+    }
+
+    public function test_balancing_preview_includes_only_same_shareholders_other_accounts_without_combining_holdings(): void
+    {
+        $batch = $this->stageBatch();
+        $register = Register::create(['company_id' => $this->register->company_id, 'register_code' => 'OTHER', 'name' => 'Other Register', 'status' => 'active']);
+        $class = ShareClass::create(['register_id' => $register->id, 'class_code' => 'PREF', 'name' => 'Preference']);
+        $other = ShareholderRegisterAccount::create([
+            'shareholder_id' => $this->debitAccount->shareholder_id, 'register_id' => $register->id,
+            'shareholder_no' => 'OTHER-ACCOUNT', 'chn' => 'C333333333', 'status' => 'active',
+        ]);
+        SharePosition::create(['sra_id' => $other->id, 'share_class_id' => $class->id, 'quantity' => '900000.123456', 'holding_mode' => 'demat']);
+        $payload = app(CscsUploadController::class)->preview(Request::create('/api/cscs/preview'), $batch['batch_id'])->getData(true)['data'];
+        $effects = collect($payload['account_effects']);
+        $debit = $effects->firstWhere('register_account_id', $this->debitAccount->id);
+        $this->assertCount(2, $effects);
+        $this->assertCount(1, $debit['other_accounts']);
+        $this->assertSame($other->id, $debit['other_accounts'][0]['register_account_id']);
+        $this->assertFalse($debit['other_accounts'][0]['same_register']);
+        $this->assertSame('900000.123456', $debit['other_accounts'][0]['holdings'][0]['quantity']);
+        $this->assertSame('300000.000000', $debit['current_quantity']);
+        $this->assertSame('51111.000000', $debit['proposed_quantity']);
+        $this->assertSame([], $effects->firstWhere('register_account_id', $this->creditAccount->id)['other_accounts']);
     }
 
     private function stageAndSubmit(): CscsUploadBatch
