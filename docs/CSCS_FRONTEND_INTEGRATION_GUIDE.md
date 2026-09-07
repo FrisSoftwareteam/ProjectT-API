@@ -1,5 +1,7 @@
 # CSCS Frontend Integration Guide
 
+> Integration update: new submissions now require explicit financial-preview confirmation by default. See [CSCS Figmake API handoff](CSCS_FIGMAKE_API_HANDOFF.md) for the updated sequence, new endpoints, rollout settings and supported prototype mappings.
+
 This is the frontend implementation sequence for the CSCS upload, reconciliation, maker-checker approval, posting, and correction workflow.
 
 Related resources:

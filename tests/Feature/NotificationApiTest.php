@@ -114,6 +114,19 @@ class NotificationApiTest extends TestCase
         $this->assertSame('Configured channels', $notification->toMail($user)->subject);
     }
 
+    public function test_bulk_read_is_scoped_to_the_current_users_notifications(): void
+    {
+        $user = $this->createAdmin('owner@example.com');
+        $other = $this->createAdmin('other@example.com');
+        $user->notifyNow(new InternalAdminNotification($this->payload('Owner')));
+        $other->notifyNow(new InternalAdminNotification($this->payload('Other')));
+        $this->withoutMiddleware()->actingAs($user, 'sanctum')->patchJson('/api/notifications/read', [
+            'ids' => [$user->unreadNotifications()->first()->id, $other->unreadNotifications()->first()->id],
+        ])->assertOk()->assertJsonPath('data.marked_read', 1);
+        $this->assertSame(1, $other->unreadNotifications()->count());
+        $this->assertSame(0, $user->unreadNotifications()->count());
+    }
+
     private function createAdmin(string $email): AdminUser
     {
         return AdminUser::query()->create([

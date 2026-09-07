@@ -4,6 +4,8 @@ namespace Tests\Feature;
 
 use App\Http\Controllers\Api\Admin\ShareholderController;
 use App\Http\Controllers\Api\CscsUploadController;
+use App\Http\Middleware\CscsApiContract;
+use App\Jobs\PostCscsBatchJob;
 use App\Jobs\ProcessCscsImportJob;
 use App\Models\AdminUser;
 use App\Models\Company;
@@ -17,6 +19,7 @@ use App\Models\ShareClass;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
+use App\Services\AdminNotificationService;
 use App\Services\CscsImportService;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\Schema\Blueprint;
@@ -25,6 +28,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
@@ -94,6 +98,7 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame('248889.000000', $reconciled['summary']['total_credit']);
         $this->assertSame('0.000000', $reconciled['summary']['net_movement']);
 
+        $this->service->confirmFinancialPreview($result['batch_id'], $this->maker->id, CscsUploadBatch::findOrFail($result['batch_id'])->snapshot_hash);
         $this->service->submit($result['batch_id'], $this->maker->id, 'Submit balanced batch');
         $approved = $this->service->approve($result['batch_id'], $this->checker, 'Independent review complete');
         $this->assertSame('APPROVED_AWAITING_POST', $approved['status']);
@@ -587,6 +592,7 @@ class CscsWorkflowTest extends TestCase
         ], $this->register->id, $this->maker->id);
 
         $this->service->reconcile($result['batch_id'], $this->maker->id);
+        $this->service->confirmFinancialPreview($result['batch_id'], $this->maker->id, CscsUploadBatch::findOrFail($result['batch_id'])->snapshot_hash);
         $submitted = $this->service->submit($result['batch_id'], $this->maker->id);
 
         $this->assertContains('NEW_ACCOUNT', $submitted['risk_flags']);
@@ -858,10 +864,312 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame([], $effects->firstWhere('register_account_id', $this->creditAccount->id)['other_accounts']);
     }
 
+    public function test_posting_request_rejects_failed_readiness_without_queuing(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker);
+        SharePosition::where('sra_id', $this->debitAccount->id)->update(['quantity' => '299999.000000']);
+        try {
+            $this->service->queueForPosting($batch->id, $this->poster);
+            $this->fail('Stale holdings must not be queued.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('pre_posting_checks', $e->errors());
+            $this->assertSame('APPROVED_AWAITING_POST', $batch->fresh()->workflow_status);
+            $this->assertDatabaseCount('share_transactions', 0);
+        }
+    }
+
+    public function test_worker_rechecks_account_register_after_queueing(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker);
+        $this->service->queueForPosting($batch->id, $this->poster);
+        $other = Register::create(['company_id' => $this->register->company_id, 'register_code' => 'OTHER', 'name' => 'Other', 'status' => 'active']);
+        $this->debitAccount->update(['register_id' => $other->id]);
+        try {
+            $this->service->post($batch->id, $this->poster);
+            $this->fail('Changed mappings must prevent posting.');
+        } catch (ValidationException $e) {
+            $this->assertArrayHasKey('pre_posting_checks', $e->errors());
+            $this->assertSame('STALE', $batch->fresh()->workflow_status);
+            $this->assertDatabaseCount('share_transactions', 0);
+            $this->assertSame('300000.000000', SharePosition::where('sra_id', $this->debitAccount->id)->value('quantity'));
+        }
+    }
+
+    public function test_account_identity_change_requires_a_new_review(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker);
+        $this->debitAccount->update(['chn' => 'C999999999']);
+        $this->assertFalse($this->service->postingReadiness($batch->id)['checks']['account_mappings_valid']['passed']);
+        $this->expectException(ValidationException::class);
+        $this->service->queueForPosting($batch->id, $this->poster);
+    }
+
+    public function test_frozen_account_is_blocked_during_reconciliation(): void
+    {
+        $this->debitAccount->update(['status' => 'frozen']);
+        $batch = $this->stageBatch();
+        $this->assertDatabaseHas('cscs_upload_rows', ['batch_id' => $batch['batch_id'], 'exception_code' => 'ACCOUNT_FROZEN']);
+        $this->assertDatabaseCount('share_transactions', 0);
+    }
+
+    public function test_posting_redelivery_does_not_duplicate_movements(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker);
+        $this->service->queueForPosting($batch->id, $this->poster);
+        $this->service->post($batch->id, $this->poster);
+        $this->assertSame('POSTED', $this->service->post($batch->id, $this->poster)['status']);
+        $this->assertDatabaseCount('share_transactions', 2);
+        $this->assertSame('51111.000000', SharePosition::where('sra_id', $this->debitAccount->id)->value('quantity'));
+    }
+
+    public function test_unconfirmed_preview_cannot_be_submitted(): void
+    {
+        $batch = $this->stageBatch();
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->expectException(ValidationException::class);
+        $this->service->submit($batch['batch_id'], $this->maker->id);
+    }
+
+    public function test_confirmation_rejects_the_wrong_snapshot_hash(): void
+    {
+        $batch = $this->stageBatch();
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->expectException(ValidationException::class);
+        $this->service->confirmFinancialPreview($batch['batch_id'], $this->maker->id, str_repeat('0', 64));
+    }
+
+    public function test_revalidation_invalidates_previous_preview_confirmation(): void
+    {
+        $batch = $this->stageBatch();
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->service->confirmFinancialPreview($batch['batch_id'], $this->maker->id, CscsUploadBatch::find($batch['batch_id'])->snapshot_hash);
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->expectException(ValidationException::class);
+        $this->service->submit($batch['batch_id'], $this->maker->id);
+    }
+
+    public function test_query_references_must_belong_to_the_batch(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->expectException(ValidationException::class);
+        $this->service->raiseQuery($batch->id, $this->checker->id, 'Review the referenced row', ['scope' => 'ROW', 'reference_id' => '999999']);
+    }
+
+    public function test_query_resolution_does_not_bypass_revision_increment(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $row = CscsUploadRow::where('batch_id', $batch->id)->where('sign', '-')->firstOrFail();
+        $this->service->raiseQuery($batch->id, $this->checker->id, 'Review the selected account', ['scope' => 'ACCOUNT', 'reference_id' => (string) $this->debitAccount->id]);
+        $this->service->resolveException($batch->id, $row->id, $this->maker->id, ['resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => $this->debitAccount->id, 'reason' => 'Account mapping checked again']);
+        $this->assertSame('QUERY_RAISED', $batch->fresh()->workflow_status);
+        $this->service->respondToQuery($batch->id, $this->maker->id, 'The selected account has been checked');
+        $this->assertSame(2, $batch->fresh()->revision);
+        $this->assertNull($batch->fresh()->snapshot_hash);
+    }
+
+    public function test_group_resolution_audit_is_available_on_both_legs_with_actor_role(): void
+    {
+        $batch = $this->stageBatch();
+        $rows = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('file_type', 'movement')->get();
+        $this->service->resolveException($batch['batch_id'], $rows->first()->id, $this->maker->id, ['resolution_type' => 'RULE_EXCLUDED', 'reason' => 'Documented transaction group exclusion']);
+        foreach ($rows as $row) {
+            $data = app(CscsUploadController::class)->row($batch['batch_id'], $row->id)->getData(true)['data'];
+            $this->assertCount(1, $data['resolution_history']);
+            $this->assertSame('MAKER', $data['resolution_history'][0]['actor_role']);
+            $this->assertSame(1, $data['resolution_history'][0]['metadata']['revision']);
+        }
+    }
+
+    public function test_dashboard_security_totals_and_exception_filters_are_batch_wide(): void
+    {
+        $batch = $this->stageBatch();
+        $controller = app(CscsUploadController::class);
+        $summary = $controller->dashboardSummary(Request::create('/'))->getData(true)['data'];
+        $this->assertSame(1, $summary['counts']['DRAFT_REVIEW']);
+        $preview = $controller->preview(Request::create('/'), $batch['batch_id'])->getData(true)['data'];
+        $this->assertSame('248889.000000', $preview['security_totals'][0]['total_debit']);
+        $this->assertSame('0.000000', $preview['security_totals'][0]['net_movement']);
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+        $row->update(['exception_code' => 'INSUFFICIENT_HOLDING', 'resolution_status' => 'UNRESOLVED']);
+        $exceptions = $controller->exceptions(Request::create('/', 'GET', ['severity' => 'CRITICAL', 'status' => 'PENDING']), $batch['batch_id'])->getData(true);
+        $this->assertSame(1, $exceptions['pagination']['total']);
+        $this->assertSame($row->id, $exceptions['data'][0]['id']);
+    }
+
+    public function test_failed_atomic_batch_exposes_retry_even_when_failed_row_count_is_zero(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $batch->update(['workflow_status' => 'POSTING_FAILED', 'failure_reason' => 'Temporary database failure']);
+        $data = app(CscsUploadController::class)->verificationSummary($batch->id)->getData(true)['data'];
+        $this->assertTrue($data['retry']['can_retry']);
+        $this->assertSame('BATCH', $data['retry']['scope']);
+        $this->assertSame(2, $data['retry']['unposted_rows']);
+        $this->assertSame(0, $data['metrics']['failed_rows']);
+    }
+
+    public function test_staged_shareholder_creation_posts_only_after_confirmation_and_approval(): void
+    {
+        $batch = $this->stageUnknownCredit();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '+')->firstOrFail();
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'CREATE_SHAREHOLDER', 'reason' => 'Verified new shareholder identity',
+            'profile' => ['full_name' => 'New Holder', 'email' => 'new@example.test', 'phone' => '08000000009'],
+        ]);
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->assertDatabaseCount('shareholders', 2);
+        $this->assertDatabaseCount('shareholder_register_accounts', 2);
+        $this->assertTrue($this->service->accountEffects($batch['batch_id'])->firstWhere('identifier_value', 'C999999999')['is_new_account']);
+        $this->service->confirmFinancialPreview($batch['batch_id'], $this->maker->id, CscsUploadBatch::find($batch['batch_id'])->snapshot_hash);
+        $this->service->submit($batch['batch_id'], $this->maker->id);
+        $this->service->approve($batch['batch_id'], $this->checker);
+        $this->service->post($batch['batch_id'], $this->poster);
+        $this->assertDatabaseCount('shareholders', 3);
+        $this->assertDatabaseCount('shareholder_register_accounts', 3);
+        $this->assertDatabaseCount('share_transactions', 2);
+    }
+
+    public function test_staged_account_creation_uses_the_selected_existing_shareholder(): void
+    {
+        $batch = $this->stageUnknownCredit();
+        $holder = Shareholder::create(['account_no' => 'EXISTING-3', 'holder_type' => 'individual', 'full_name' => 'Existing Holder', 'first_name' => 'Existing', 'last_name' => 'Holder', 'email' => 'existing@example.test', 'phone' => '08000000009', 'status' => 'active']);
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '+')->firstOrFail();
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, ['resolution_type' => 'CREATE_ACCOUNT', 'shareholder_id' => $holder->id, 'reason' => 'Create account for verified existing shareholder']);
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->assertDatabaseCount('shareholder_register_accounts', 2);
+        $this->service->confirmFinancialPreview($batch['batch_id'], $this->maker->id, CscsUploadBatch::find($batch['batch_id'])->snapshot_hash);
+        $this->service->submit($batch['batch_id'], $this->maker->id);
+        $this->service->approve($batch['batch_id'], $this->checker);
+        $this->service->post($batch['batch_id'], $this->poster);
+        $this->assertDatabaseCount('shareholders', 3);
+        $this->assertDatabaseHas('shareholder_register_accounts', ['shareholder_id' => $holder->id, 'chn' => 'C999999999']);
+    }
+
+    public function test_optional_holdings_age_limit_is_enforced_without_changing_default_behavior(): void
+    {
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker);
+        $this->assertTrue($this->service->postingReadiness($batch->id)['ready']);
+        config()->set('cscs.holdings_max_age_hours', 24);
+        $this->assertFalse($this->service->postingReadiness($batch->id)['checks']['holdings_current']['passed']);
+        SharePosition::query()->update(['last_updated_at' => now()]);
+        $this->assertTrue($this->service->postingReadiness($batch->id)['ready']);
+    }
+
+    public function test_new_api_routes_and_confirmation_aliases_are_wired(): void
+    {
+        $batch = $this->stageBatch();
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $hash = CscsUploadBatch::find($batch['batch_id'])->snapshot_hash;
+        $this->withoutMiddleware()->actingAs($this->maker, 'sanctum');
+        $this->getJson('/api/cscs/uploads/summary')->assertOk()->assertJsonPath('data.total', 1);
+        $this->getJson('/api/cscs/uploads/'.$batch['batch_id'].'/process/status')->assertOk()->assertJsonPath('data.status', 'DONE');
+        $this->getJson('/api/cscs/shareholders/'.$this->debitAccount->shareholder_id.'/accounts?register_id='.$this->register->id)
+            ->assertOk()->assertJsonPath('data.accounts.0.can_map', true);
+        $this->postJson('/api/cscs/uploads/'.$batch['batch_id'].'/save-draft', ['notes' => 'Review in progress'])->assertOk();
+        $this->assertSame('Review in progress', data_get(CscsUploadBatch::find($batch['batch_id'])->summary, 'review_draft.notes'));
+        $request = Request::create('/', 'POST', ['snapshotHash' => $hash, 'confirmedByMaker' => true, 'pageSize' => 20]);
+        app(CscsApiContract::class)->handle($request, function ($request) use ($batch) {
+            $request->setUserResolver(fn () => $this->maker);
+            $this->assertSame(20, $request->input('per_page'));
+
+            return app(CscsUploadController::class)->confirmFinancialPreview($request, $batch['batch_id']);
+        });
+        $this->postJson('/api/cscs/uploads/'.$batch['batch_id'].'/submit')->assertOk();
+    }
+
+    public function test_cscs_errors_keep_existing_fields_and_add_machine_readable_codes(): void
+    {
+        $batch = $this->stageBatch();
+        $this->withoutMiddleware()->actingAs($this->maker, 'sanctum')
+            ->postJson('/api/cscs/uploads/'.$batch['batch_id'].'/submit')
+            ->assertStatus(422)->assertJsonPath('error.code', 'BATCH_STATE_CONFLICT')->assertJsonStructure(['message', 'errors']);
+    }
+
+    public function test_report_links_are_signed_and_reject_tampering(): void
+    {
+        $batch = $this->stageBatch();
+        $data = app(CscsUploadController::class)->downloadReport(Request::create('/', 'POST', ['type' => 'reconciliation', 'format' => 'pdf']), $batch['batch_id'])->getData(true)['data'];
+        $this->assertTrue(URL::hasValidSignature(Request::create($data['download_url'])));
+        $this->assertFalse(URL::hasValidSignature(Request::create($data['download_url'].'&type=audit')));
+        $this->assertTrue($data['requires_authentication']);
+    }
+
+    public function test_configured_trade_date_window_creates_a_blocking_exception(): void
+    {
+        config()->set('cscs.trade_date_min', '2099-01-01');
+        $batch = $this->stageBatch();
+        $this->assertSame(2, CscsUploadRow::where('batch_id', $batch['batch_id'])->where('exception_code', 'DATE_OUT_OF_RANGE')->count());
+    }
+
+    public function test_configured_name_check_requires_an_audited_manual_mapping(): void
+    {
+        config()->set('cscs.validate_holder_names', true);
+        $batch = $this->stageBatch();
+        $rows = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('file_type', 'movement')->get();
+        $this->assertSame(2, $rows->where('exception_code', 'NAME_MISMATCH')->count());
+        foreach ($rows as $row) {
+            $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+                'resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => $row->sign === '-' ? $this->debitAccount->id : $this->creditAccount->id,
+                'reason' => 'Identity verified despite name spelling difference',
+            ]);
+        }
+        $this->assertSame('RECONCILED', $this->service->reconcile($batch['batch_id'], $this->maker->id)['status']);
+    }
+
+    public function test_modified_creation_proposal_invalidates_the_confirmed_snapshot(): void
+    {
+        $batch = $this->stageUnknownCredit();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '+')->firstOrFail();
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'CREATE_SHAREHOLDER', 'reason' => 'Verified new shareholder identity',
+            'profile' => ['full_name' => 'New Holder', 'email' => 'new@example.test', 'phone' => '08000000009'],
+        ]);
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $this->service->confirmFinancialPreview($batch['batch_id'], $this->maker->id, CscsUploadBatch::find($batch['batch_id'])->snapshot_hash);
+        $extra = $row->fresh()->extra_details;
+        $extra['account_proposal']['profile']['full_name'] = 'Another Holder';
+        $row->update(['extra_details' => $extra]);
+        $this->expectException(ValidationException::class);
+        $this->service->submit($batch['batch_id'], $this->maker->id);
+    }
+
+    public function test_stale_notification_and_worker_redelivery_do_not_change_posted_data(): void
+    {
+        $notifications = \Mockery::mock(AdminNotificationService::class);
+        $notifications->shouldReceive('sendToRoles')->once()->withArgs(fn ($roles, $event, ...$rest) => $event === 'CSCS_STALE');
+        $this->app->instance(AdminNotificationService::class, $notifications);
+        $batch = $this->stageAndSubmit();
+        $this->service->approve($batch->id, $this->checker);
+        $this->debitAccount->update(['status' => 'frozen']);
+        try {
+            $this->service->post($batch->id, $this->poster);
+            $this->fail('Frozen account must not post.');
+        } catch (ValidationException) {
+            $this->assertSame('STALE', $batch->fresh()->workflow_status);
+        }
+        $this->debitAccount->update(['status' => 'active']);
+        $batch->update(['workflow_status' => 'POSTED']);
+        (new PostCscsBatchJob($batch->id, $this->poster->id))->handle($this->service, $notifications);
+        $this->assertDatabaseCount('share_transactions', 0);
+    }
+
+    private function stageUnknownCredit(): array
+    {
+        $movement = $this->movementLine('2606160005615099', '0', '-', 'C111111111', '100')."\r\n"
+            .$this->movementLine('2606160005615099', '1', '+', 'C999999999', '100')."\r\n";
+
+        return $this->service->import([UploadedFile::fake()->createWithContent('unknown-credit.txt', $movement)], $this->register->id, $this->maker->id);
+    }
+
     private function stageAndSubmit(): CscsUploadBatch
     {
         $result = $this->stageBatch();
         $this->service->reconcile($result['batch_id'], $this->maker->id);
+        $this->service->confirmFinancialPreview($result['batch_id'], $this->maker->id, CscsUploadBatch::findOrFail($result['batch_id'])->snapshot_hash);
         $this->service->submit($result['batch_id'], $this->maker->id);
 
         return CscsUploadBatch::findOrFail($result['batch_id']);

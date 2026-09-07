@@ -28,9 +28,13 @@ use App\Http\Controllers\Api\ProbateCaseController;
 use App\Http\Controllers\Api\ShareAllocationController;
 use App\Http\Controllers\Api\ShareholderMergeController;
 use App\Http\Controllers\Api\ShareholderRegisterAccountController;
+use App\Http\Controllers\Api\ShareLotController;
+use App\Http\Controllers\Api\SharePositionController;
+use App\Http\Controllers\Api\ShareTransactionController;
 use App\Http\Controllers\Api\ShareTransferController;
 use App\Http\Controllers\Api\SraGuardianController;
 use App\Http\Controllers\Api\UserActivityLogController;
+use App\Http\Middleware\CscsApiContract;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -62,6 +66,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     Route::prefix('notifications')->group(function () {
         Route::get('/', [NotificationController::class, 'index']);
         Route::get('/unread-count', [NotificationController::class, 'unreadCount']);
+        Route::patch('/read', [NotificationController::class, 'markSelectedAsRead']);
         Route::post('/read-all', [NotificationController::class, 'markAllAsRead']);
         Route::post('/{notificationId}/read', [NotificationController::class, 'markAsRead']);
         Route::delete('/{notificationId}', [NotificationController::class, 'destroy']);
@@ -246,27 +251,28 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
 
     // Share data endpoints
     Route::prefix('share-positions')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\SharePositionController::class, 'index'])->middleware('permission:shares.view');
-        Route::get('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'show'])->middleware('permission:shares.view');
-        Route::put('/{sharePosition}', [\App\Http\Controllers\Api\SharePositionController::class, 'update'])->middleware('permission:shares.edit');
+        Route::get('/', [SharePositionController::class, 'index'])->middleware('permission:shares.view');
+        Route::get('/{sharePosition}', [SharePositionController::class, 'show'])->middleware('permission:shares.view');
+        Route::put('/{sharePosition}', [SharePositionController::class, 'update'])->middleware('permission:shares.edit');
     });
 
     Route::prefix('share-lots')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\ShareLotController::class, 'index'])->middleware('permission:shares.view');
-        Route::get('/{shareLot}', [\App\Http\Controllers\Api\ShareLotController::class, 'show'])->middleware('permission:shares.view');
+        Route::get('/', [ShareLotController::class, 'index'])->middleware('permission:shares.view');
+        Route::get('/{shareLot}', [ShareLotController::class, 'show'])->middleware('permission:shares.view');
     });
 
     Route::prefix('share-transactions')->group(function () {
-        Route::get('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'index'])->middleware('permission:shares.view');
-        Route::post('/', [\App\Http\Controllers\Api\ShareTransactionController::class, 'store'])->middleware('permission:shares.edit');
-        Route::get('/{shareTransaction}', [\App\Http\Controllers\Api\ShareTransactionController::class, 'show'])->middleware('permission:shares.view');
+        Route::get('/', [ShareTransactionController::class, 'index'])->middleware('permission:shares.view');
+        Route::post('/', [ShareTransactionController::class, 'store'])->middleware('permission:shares.edit');
+        Route::get('/{shareTransaction}', [ShareTransactionController::class, 'show'])->middleware('permission:shares.view');
     });
 
+    Route::get('/share-transfers/activity-log', [ShareTransferController::class, 'activityLog'])->middleware('permission:shares.transfer');
     Route::post('/share-transfers', [ShareTransferController::class, 'store'])->middleware('permission:shares.transfer');
     Route::post('/shareholders/merge', [ShareholderMergeController::class, 'store'])->middleware('permission:shareholders.edit');
 
     // CSCS staged reconciliation and maker-checker workflow
-    Route::prefix('cscs')->group(function () {
+    Route::prefix('cscs')->middleware(CscsApiContract::class)->group(function () {
         Route::post('/import', [CscsUploadController::class, 'import'])->middleware(['permission:cscs.upload', 'throttle:5,1']);
 
         Route::get('/security-mappings', [CscsUploadController::class, 'securityMappings'])->middleware('permission:cscs.view');
@@ -276,8 +282,14 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::get('/approval-policy', [CscsUploadController::class, 'approvalPolicy'])->middleware('permission:cscs.view');
         Route::put('/approval-policy', [CscsUploadController::class, 'updateApprovalPolicy'])->middleware('permission:cscs.admin');
 
+        Route::get('/uploads/summary', [CscsUploadController::class, 'dashboardSummary'])->middleware('permission:cscs.view');
+        Route::get('/shareholders/{shareholderId}/accounts', [CscsUploadController::class, 'shareholderAccounts'])->middleware('permission:cscs.view');
         Route::get('/uploads', [CscsUploadController::class, 'index'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}', [CscsUploadController::class, 'show'])->middleware('permission:cscs.view');
+        Route::get('/uploads/{batchId}/process/status', [CscsUploadController::class, 'processingStatus'])->middleware('permission:cscs.view');
+        Route::post('/uploads/{batchId}/save-draft', [CscsUploadController::class, 'saveDraft'])->middleware('permission:cscs.reconcile');
+        Route::post('/uploads/{batchId}/confirm-financial-preview', [CscsUploadController::class, 'confirmFinancialPreview'])->middleware('permission:cscs.reconcile');
+        Route::get('/uploads/{batchId}/exceptions/{rowId}', [CscsUploadController::class, 'row'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/rows', [CscsUploadController::class, 'rows'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/rows/{rowId}', [CscsUploadController::class, 'row'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/master-records', [CscsUploadController::class, 'masterRecords'])->middleware('permission:cscs.view');
@@ -310,6 +322,8 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::get('/uploads/{batchId}/snapshots', [CscsUploadController::class, 'snapshots'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/files', [CscsUploadController::class, 'files'])->middleware('permission:cscs.view');
         Route::get('/uploads/{batchId}/files/{fileIndex}/download', [CscsUploadController::class, 'downloadFile'])->middleware('permission:cscs.export');
+        Route::post('/uploads/{batchId}/download-report', [CscsUploadController::class, 'downloadReport'])->middleware('permission:cscs.export');
+        Route::get('/uploads/{batchId}/reports/download', [CscsUploadController::class, 'export'])->name('cscs.report.download')->middleware(['permission:cscs.export', 'signed']);
         Route::get('/uploads/{batchId}/export', [CscsUploadController::class, 'export'])->middleware('permission:cscs.export');
     });
 

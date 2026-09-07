@@ -13,6 +13,7 @@ use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
 use App\Models\CscsWorkflowEvent;
 use App\Models\ShareClass;
+use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Services\AdminNotificationService;
 use App\Services\CscsImportService;
@@ -25,6 +26,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use Maatwebsite\Excel\Excel as ExcelWriter;
@@ -65,6 +67,7 @@ class CscsUploadController extends Controller
             'status' => ['nullable', 'string', 'max:40'],
             'register_id' => ['nullable', 'integer', 'exists:registers,id'],
             'business_reference' => ['nullable', 'string', 'max:100'],
+            'search' => ['nullable', 'string', 'max:100'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('cscs.max_page_size', 100)],
         ]);
         $query = CscsUploadBatch::query()->with('register')->withCount(['rows', 'rows as unresolved_exceptions_count' => fn ($q) => $q
@@ -73,7 +76,76 @@ class CscsUploadController extends Controller
         $query->when($validated['register_id'] ?? null, fn ($q, $v) => $q->where('register_id', $v));
         $query->when($validated['business_reference'] ?? null, fn ($q, $v) => $q->where('business_reference', 'like', '%'.$v.'%'));
 
-        return response()->json($query->latest('id')->paginate($validated['per_page'] ?? 15));
+        $query->when($validated['search'] ?? null, fn ($q, $v) => $q->where(fn ($nested) => $nested
+            ->where('business_reference', 'like', '%'.$v.'%')->orWhere('description', 'like', '%'.$v.'%')->orWhere('id', $v)));
+        $paginator = $query->latest('id')->paginate($validated['per_page'] ?? 15);
+
+        return response()->json($paginator->toArray() + ['pagination' => $this->pagination($paginator)]);
+    }
+
+    public function dashboardSummary(Request $request): JsonResponse
+    {
+        $validated = $request->validate(['register_id' => ['nullable', 'integer', 'exists:registers,id']]);
+        $query = CscsUploadBatch::query();
+        $query->when($validated['register_id'] ?? null, fn ($q, $id) => $q->where('register_id', $id));
+        $counts = $query->select('workflow_status')->selectRaw('COUNT(*) as aggregate')->groupBy('workflow_status')->pluck('aggregate', 'workflow_status')->map(fn ($n) => (int) $n);
+
+        return response()->json(['data' => ['total' => $counts->sum(), 'counts' => $counts]]);
+    }
+
+    public function processingStatus(int $batchId): JsonResponse
+    {
+        $batch = $this->batch($batchId);
+        $processing = $batch->workflow_status === 'PROCESSING';
+        $failed = in_array($batch->workflow_status, ['PROCESSING_FAILED', 'CANCELLED'], true);
+
+        return response()->json(['data' => [
+            'batch_id' => $batchId, 'status' => $processing ? 'PROCESSING' : ($failed ? 'FAILED' : 'DONE'),
+            'workflow_status' => $batch->workflow_status,
+            'progress' => (int) data_get($batch->summary, 'processing_percent', 0),
+            'draft_review_ready' => ! $processing && ! $failed,
+            'error_message' => $batch->failure_reason,
+        ]]);
+    }
+
+    public function saveDraft(Request $request, int $batchId): JsonResponse
+    {
+        $data = $request->validate([
+            'selected_transaction' => ['nullable', 'string', 'max:32'],
+            'selected_exception_id' => ['nullable', 'integer'],
+            'notes' => ['nullable', 'string', 'max:1000'],
+        ]);
+
+        return $this->success('Review draft saved', $this->service->saveDraft($batchId, (int) $request->user()->id, $data));
+    }
+
+    public function confirmFinancialPreview(Request $request, int $batchId): JsonResponse
+    {
+        $data = $request->validate([
+            'confirmed_by_maker' => ['required', 'accepted'],
+            'snapshot_hash' => ['required', 'string', 'size:64'],
+        ]);
+
+        return $this->success('Financial preview confirmed', $this->service->confirmFinancialPreview($batchId, (int) $request->user()->id, $data['snapshot_hash']));
+    }
+
+    public function shareholderAccounts(Request $request, int $shareholderId): JsonResponse
+    {
+        $shareholder = Shareholder::findOrFail($shareholderId);
+        $data = $request->validate(['register_id' => ['nullable', 'integer', 'exists:registers,id']]);
+        $accounts = ShareholderRegisterAccount::with(['register', 'sharePositions.shareClass'])
+            ->where('shareholder_id', $shareholder->id)->orderBy('id')->get()->map(fn ($account) => [
+                'register_account_id' => $account->id, 'register_account_number' => $account->shareholder_no,
+                'register_id' => $account->register_id, 'register_name' => $account->register?->name,
+                'chn' => $account->chn, 'cscs_account_number' => $account->cscs_account_no, 'status' => $account->status,
+                'can_map' => $account->status === 'active' && isset($data['register_id']) && (int) $account->register_id === (int) $data['register_id'],
+                'holdings' => $account->sharePositions->map(fn ($position) => [
+                    'share_class_id' => $position->share_class_id, 'share_class_code' => $position->shareClass?->class_code,
+                    'quantity' => $position->quantity, 'holding_mode' => $position->holding_mode,
+                ])->values(),
+            ]);
+
+        return response()->json(['data' => ['shareholder_id' => $shareholder->id, 'name' => $shareholder->full_name, 'total_accounts' => $accounts->count(), 'accounts' => $accounts]]);
     }
 
     public function show(Request $request, int $batchId): JsonResponse
@@ -232,6 +304,10 @@ class CscsUploadController extends Controller
             'account_effects' => $accountEffects,
             'proposed_new_accounts' => $accountEffects->where('is_new_account', true)->values(),
             'security_mappings' => $securityMappings,
+            'security_totals' => $this->securityTotals($batchId),
+            'transactions_endpoint' => '/api/cscs/uploads/'.$batchId.'/transactions',
+            'preview_confirmation' => data_get($batch->reconciliation, 'preview_confirmation'),
+            'confirmation_required' => (bool) config('cscs.require_preview_confirmation', true),
             'review_summary' => $this->reviewSummary($batch, $accountEffects, $securityMappings),
             'approval_timeline' => $batch->events->values(),
             'comments' => $batch->events->whereNotNull('comment')->values(),
@@ -245,6 +321,7 @@ class CscsUploadController extends Controller
             $request->merge(['status' => strtoupper((string) $request->query('resolution_status'))]);
         }
         $validated = $request->validate([
+            'severity' => ['nullable', Rule::in(['CRITICAL', 'WARNING', 'INFO'])],
             'status' => ['nullable', 'string', 'max:40'],
             'resolution_status' => ['nullable', 'string', 'max:40'],
             'exception_code' => ['nullable', 'string', 'max:60'],
@@ -257,7 +334,14 @@ class CscsUploadController extends Controller
                 ->orWhereNotNull('resolved_at'));
         $allExceptionRows = (clone $baseQuery)->orderBy('id')->get();
         $query = (clone $baseQuery)->orderBy('id');
-        $query->when($validated['status'] ?? null, fn ($q, $v) => $q->where('resolution_status', $v));
+        if (in_array($validated['status'] ?? null, ['PENDING', 'RESOLVED'], true)) {
+            $query->whereIn('id', $allExceptionRows->filter(fn ($row) => $this->isBlockingException($row) === ($validated['status'] === 'PENDING'))->pluck('id'));
+        } else {
+            $query->when($validated['status'] ?? null, fn ($q, $v) => $q->where('resolution_status', $v));
+        }
+        if (isset($validated['severity'])) {
+            $query->whereIn('id', $allExceptionRows->filter(fn ($row) => $this->exceptionSeverity($row) === $validated['severity'])->pluck('id'));
+        }
         $query->when($validated['exception_code'] ?? null, fn ($q, $v) => $q->where('exception_code', $v));
         $query->when($validated['search'] ?? null, function ($q, $search): void {
             $q->where(function ($nested) use ($search): void {
@@ -286,7 +370,12 @@ class CscsUploadController extends Controller
     public function resolveException(Request $request, int $batchId, int $exceptionId): JsonResponse
     {
         $validated = $request->validate([
-            'resolution_type' => ['required', Rule::in(['MAP_ACCOUNT', 'RULE_EXCLUDED', 'CONFIRM_REPLAY'])],
+            'resolution_type' => ['required', Rule::in(['MAP_ACCOUNT', 'RULE_EXCLUDED', 'CONFIRM_REPLAY', 'CREATE_SHAREHOLDER', 'CREATE_ACCOUNT'])],
+            'shareholder_id' => ['required_if:resolution_type,CREATE_ACCOUNT', 'nullable', 'integer', 'exists:shareholders,id'],
+            'profile' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'nullable', 'array:full_name,email,phone'],
+            'profile.full_name' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'string', 'max:255'],
+            'profile.email' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'email', 'max:255'],
+            'profile.phone' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'string', 'max:30'],
             'register_account_id' => ['required_if:resolution_type,MAP_ACCOUNT', 'nullable', 'integer', 'exists:shareholder_register_accounts,id'],
             'reason' => ['required', 'string', 'min:10', 'max:1000'],
         ]);
@@ -347,6 +436,8 @@ class CscsUploadController extends Controller
         return response()->json(['data' => [
             'batch_id' => $batch->id,
             'status' => $batch->workflow_status,
+            'retry' => ['scope' => 'BATCH', 'can_retry' => $batch->workflow_status === 'POSTING_FAILED', 'endpoint' => '/api/cscs/uploads/'.$batchId.'/retry-posting', 'failure_reason' => $batch->failure_reason, 'unposted_rows' => $movementRows->where('resolution_status', 'READY')->count()],
+            'processing_time_seconds' => $batch->posting_started_at && $batch->posted_at ? (int) $batch->posting_started_at->diffInSeconds($batch->posted_at) : null,
             'verification_status' => data_get($verification, 'status', $batch->workflow_status === 'POSTED' ? 'PENDING' : 'NOT_POSTED'),
             'posted_at' => $batch->posted_at,
             'metrics' => [
@@ -407,7 +498,7 @@ class CscsUploadController extends Controller
             'to_status' => $batch->workflow_status,
             'actor_id' => $request->user()?->id,
             'comment' => $validated['comment'],
-            'metadata' => ['kind' => 'review_comment'],
+            'metadata' => ['kind' => 'review_comment', 'revision' => $batch->revision, 'actor_role' => (int) $batch->uploaded_by === (int) $request->user()->id ? 'MAKER' : 'CHECKER'],
             'created_at' => now(),
         ])->load('actor');
 
@@ -427,12 +518,14 @@ class CscsUploadController extends Controller
     {
         $validated = $request->validate([
             'comment' => ['required', 'string', 'min:10', 'max:1000'],
+            'scope' => ['nullable', Rule::in(['BATCH', 'TRANSACTION', 'ROW', 'ACCOUNT', 'EXCEPTION', 'MAPPING'])],
+            'reference_id' => ['nullable', 'string', 'max:64'],
             'transaction_numbers' => ['nullable', 'array', 'max:100'],
             'transaction_numbers.*' => ['string', 'max:32'],
             'row_ids' => ['nullable', 'array', 'max:100'],
             'row_ids.*' => ['integer'],
         ]);
-        $context = ['transaction_numbers' => $validated['transaction_numbers'] ?? [], 'row_ids' => $validated['row_ids'] ?? []];
+        $context = ['scope' => $validated['scope'] ?? 'BATCH', 'reference_id' => $validated['reference_id'] ?? null, 'transaction_numbers' => $validated['transaction_numbers'] ?? [], 'row_ids' => $validated['row_ids'] ?? []];
         $data = $this->service->raiseQuery($batchId, (int) $request->user()->id, $validated['comment'], $context);
         $this->notify([], 'CSCS_QUERY_RAISED', 'Query raised on CSCS batch', $batchId, $request->user()->id, [$this->batch($batchId)->uploaded_by]);
 
@@ -559,6 +652,29 @@ class CscsUploadController extends Controller
         abort_unless(Storage::exists($files[$fileIndex]['path']), 404);
 
         return Storage::download($files[$fileIndex]['path'], basename($files[$fileIndex]['name']));
+    }
+
+    public function downloadReport(Request $request, int $batchId): JsonResponse
+    {
+        $this->batch($batchId);
+        $data = $request->validate([
+            'type' => ['required', Rule::in(['rows', 'exceptions', 'reconciliation', 'preview', 'posting', 'audit', 'activity'])],
+            'format' => ['required', Rule::in(['csv', 'pdf', 'xls', 'xlsx'])],
+        ]);
+        $valid = match ($data['format']) {
+            'pdf' => in_array($data['type'], ['audit', 'reconciliation'], true),
+            'xls', 'xlsx' => $data['type'] === 'activity',
+            default => $data['type'] !== 'audit',
+        };
+        if (! $valid) {
+            throw ValidationException::withMessages(['format' => ['Unsupported report and format combination.']]);
+        }
+        $expires = now()->addMinutes(10);
+
+        return response()->json(['data' => [
+            'download_url' => URL::temporarySignedRoute('cscs.report.download', $expires, ['batchId' => $batchId] + $data),
+            'expires_at' => $expires->toIso8601String(), 'requires_authentication' => true,
+        ]]);
     }
 
     public function export(Request $request, int $batchId)
@@ -806,7 +922,7 @@ class CscsUploadController extends Controller
     private function transactionRiskLevel(bool $isBalanced, Collection $rows, Collection $flagReasons): string
     {
         $criticalCodes = [
-            'INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW', 'GROUP_STRUCTURAL_ERROR',
+            'ACCOUNT_FROZEN', 'ACCOUNT_PROPOSAL_CHANGED', 'INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW', 'GROUP_STRUCTURAL_ERROR',
             'PARTIAL_GROUP_EXCLUSION', 'PARTIAL_REPLAY', 'INSUFFICIENT_HOLDING',
         ];
         if ($rows->pluck('exception_code')->filter()->intersect($criticalCodes)->isNotEmpty()) {
@@ -827,6 +943,7 @@ class CscsUploadController extends Controller
     private function exceptionPayload(CscsUploadRow $row, Collection $accounts, Collection $history): array
     {
         $payload = $row->toArray();
+        $payload['exception_status'] = $this->isBlockingException($row) ? 'PENDING' : 'RESOLVED';
         $payload['severity'] = $this->exceptionSeverity($row);
         $payload['is_blocking'] = $this->isBlockingException($row);
         $payload['exception_label'] = $this->humanizeCode($row->exception_code);
@@ -855,7 +972,15 @@ class CscsUploadController extends Controller
             ->where('event_type', 'EXCEPTION_RESOLVED')
             ->orderBy('id')
             ->get()
-            ->groupBy(fn (CscsWorkflowEvent $event) => (int) data_get($event->metadata, 'row_id'));
+            ->reduce(function (Collection $history, CscsWorkflowEvent $event) {
+                foreach (data_get($event->metadata, 'row_ids', [data_get($event->metadata, 'row_id')]) as $id) {
+                    if ($id) {
+                        $history->getOrPut((int) $id, fn () => collect())->push($event);
+                    }
+                }
+
+                return $history;
+            }, collect());
     }
 
     private function isBlockingException(CscsUploadRow $row): bool
@@ -869,7 +994,7 @@ class CscsUploadController extends Controller
             return 'INFO';
         }
         $critical = [
-            'INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW', 'GROUP_STRUCTURAL_ERROR',
+            'ACCOUNT_FROZEN', 'ACCOUNT_PROPOSAL_CHANGED', 'INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW', 'GROUP_STRUCTURAL_ERROR',
             'PARTIAL_GROUP_EXCLUSION', 'PARTIAL_REPLAY', 'INSUFFICIENT_HOLDING',
             'DEBIT_ACCOUNT_NOT_FOUND', 'AMBIGUOUS_MASTER_RECORD', 'AMBIGUOUS_PROFILE_MATCH',
         ];
@@ -883,13 +1008,13 @@ class CscsUploadController extends Controller
             return [];
         }
         if (in_array($row->exception_code, ['DEBIT_ACCOUNT_NOT_FOUND', 'ACCOUNT_NOT_FOUND', 'AMBIGUOUS_PROFILE_MATCH', 'AMBIGUOUS_MASTER_RECORD'], true)) {
-            return ['MAP_ACCOUNT', 'RULE_EXCLUDED'];
+            return array_merge(['MAP_ACCOUNT', 'RULE_EXCLUDED'], $row->sign === '+' ? ['CREATE_SHAREHOLDER', 'CREATE_ACCOUNT'] : []);
         }
         if (in_array($row->exception_code, ['REPLAY_DETECTED', 'DUPLICATE_MOVEMENT'], true)) {
             return ['CONFIRM_REPLAY', 'RULE_EXCLUDED'];
         }
 
-        return ['MAP_ACCOUNT', 'RULE_EXCLUDED', 'CONFIRM_REPLAY'];
+        return array_merge(['MAP_ACCOUNT', 'RULE_EXCLUDED', 'CONFIRM_REPLAY'], $row->sign === '+' ? ['CREATE_SHAREHOLDER', 'CREATE_ACCOUNT'] : []);
     }
 
     private function suggestedExceptionResolution(CscsUploadRow $row): ?array
@@ -929,6 +1054,24 @@ class CscsUploadController extends Controller
             'resolved' => $rows->count() - $blocking->count(),
             'remaining' => $blocking->count(),
         ];
+    }
+
+    private function securityTotals(int $batchId): array
+    {
+        return CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')
+            ->whereIn('resolution_status', ['READY', 'POSTED'])->get()->groupBy('sec_code')->map(function ($rows, $code) {
+                $debit = '0.000000';
+                $credit = '0.000000';
+                foreach ($rows as $row) {
+                    if ($row->sign === '-') {
+                        $debit = bcadd($debit, $row->volume, 6);
+                    } else {
+                        $credit = bcadd($credit, $row->volume, 6);
+                    }
+                }
+
+                return ['security_code' => $code, 'total_debit' => $debit, 'total_credit' => $credit, 'net_movement' => bcsub($credit, $debit, 6)];
+            })->values()->all();
     }
 
     private function reviewSummary(CscsUploadBatch $batch, Collection $effects, Collection $securityMappings): array
@@ -1092,9 +1235,15 @@ class CscsUploadController extends Controller
         return $payload;
     }
 
+    private function pagination(LengthAwarePaginator $paginator): array
+    {
+        return ['total' => $paginator->total(), 'page' => $paginator->currentPage(), 'pageSize' => $paginator->perPage(), 'totalPages' => $paginator->lastPage()];
+    }
+
     private function paginatedWithPrecision(LengthAwarePaginator $paginator, int $batchId, array $meta = []): JsonResponse
     {
         $payload = $paginator->toArray();
+        $payload['pagination'] = $this->pagination($paginator);
         $payload['meta'] = array_merge($this->precisionMeta($batchId), $meta);
 
         return response()->json($payload);

@@ -47,6 +47,14 @@ class NotificationController extends Controller
         ]);
     }
 
+    public function markSelectedAsRead(Request $request): JsonResponse
+    {
+        $data = $request->validate(['ids' => ['required', 'array', 'min:1', 'max:100'], 'ids.*' => ['required', 'string', 'distinct', 'max:64']]);
+        $count = $request->user()->unreadNotifications()->whereIn('id', $data['ids'])->update(['read_at' => now()]);
+
+        return response()->json(['success' => true, 'data' => ['marked_read' => $count]]);
+    }
+
     public function markAllAsRead(Request $request): JsonResponse
     {
         $request->user()->unreadNotifications()->update(['read_at' => now()]);
