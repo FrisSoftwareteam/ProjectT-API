@@ -6,6 +6,7 @@ use App\Models\Shareholder;
 use App\Models\ShareholderIdentity;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class ShareholderIdentityApiTest extends TestCase
@@ -71,10 +72,10 @@ class ShareholderIdentityApiTest extends TestCase
         $this->withoutMiddleware()
             ->putJson(
                 "/api/shareholders/{$shareholder->id}/identities/{$identity->id}",
-                $this->payload(['id_value' => 'NEW-VALUE'])
+                $this->payload(['id_value' => '22222222222'])
             )
             ->assertOk()
-            ->assertJsonPath('id_value', 'NEW-VALUE')
+            ->assertJsonPath('id_value', '22222222222')
             ->assertJsonPath('shareholder_id', $shareholder->id);
     }
 
@@ -82,19 +83,19 @@ class ShareholderIdentityApiTest extends TestCase
     {
         $owner = $this->createShareholder('owner');
         $other = $this->createShareholder('other');
-        $identity = $this->createIdentity($owner, 'OWNER-VALUE');
+        $identity = $this->createIdentity($owner, '11111111111');
 
         $this->withoutMiddleware()
             ->putJson(
                 "/api/shareholders/{$other->id}/identities/{$identity->id}",
-                $this->payload(['id_value' => 'CHANGED'])
+                $this->payload(['id_value' => '33333333333'])
             )
             ->assertNotFound();
 
         $this->assertDatabaseHas('shareholder_identities', [
             'id' => $identity->id,
             'shareholder_id' => $owner->id,
-            'id_value' => 'OWNER-VALUE',
+            'id_value' => '11111111111',
         ]);
     }
 
@@ -110,6 +111,61 @@ class ShareholderIdentityApiTest extends TestCase
             )
             ->assertUnprocessable()
             ->assertJsonValidationErrors('shareholder_id');
+    }
+
+    public static function validIdentificationProvider(): array
+    {
+        return [
+            'nin' => ['nin', '12345678901'],
+            'drivers_license' => ['drivers_license', 'ABC123456789'],
+            'passport' => ['passport', 'A12345678'],
+            'cac_cert with prefix' => ['cac_cert', 'RC123456'],
+            'cac_cert without prefix' => ['cac_cert', '12345678'],
+            'bvn unrestricted' => ['bvn', 'anything-goes'],
+        ];
+    }
+
+    #[DataProvider('validIdentificationProvider')]
+    public function test_identity_accepts_correctly_formatted_id_value(string $idType, string $idValue): void
+    {
+        $shareholder = $this->createShareholder('valid-'.$idType);
+
+        $this->withoutMiddleware()
+            ->postJson(
+                "/api/shareholders/{$shareholder->id}/identities",
+                $this->payload(['id_type' => $idType, 'id_value' => $idValue])
+            )
+            ->assertOk()
+            ->assertJsonPath('id_value', $idValue);
+    }
+
+    public static function invalidIdentificationProvider(): array
+    {
+        return [
+            'nin too short' => ['nin', '1234567890'],
+            'nin with letters' => ['nin', '1234567890A'],
+            'drivers_license too short' => ['drivers_license', 'ABC12345678'],
+            'drivers_license with symbol' => ['drivers_license', 'ABC12345678!'],
+            'passport missing letter' => ['passport', '123456789'],
+            'passport too many digits' => ['passport', 'A123456789'],
+            'cac_cert too short' => ['cac_cert', '1234'],
+            'cac_cert too long' => ['cac_cert', '123456789'],
+            'cac_cert invalid prefix' => ['cac_cert', 'XX123456'],
+        ];
+    }
+
+    #[DataProvider('invalidIdentificationProvider')]
+    public function test_identity_rejects_incorrectly_formatted_id_value(string $idType, string $idValue): void
+    {
+        $shareholder = $this->createShareholder('invalid-'.$idType.'-'.strlen($idValue));
+
+        $this->withoutMiddleware()
+            ->postJson(
+                "/api/shareholders/{$shareholder->id}/identities",
+                $this->payload(['id_type' => $idType, 'id_value' => $idValue])
+            )
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('id_value');
     }
 
     private function createShareholder(string $suffix): Shareholder

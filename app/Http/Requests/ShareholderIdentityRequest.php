@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Models\Shareholder;
+use App\Rules\ValidIdentificationNumber;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -32,7 +33,7 @@ class ShareholderIdentityRequest extends FormRequest
             // Kept optional for existing clients; ownership comes from the nested route.
             'shareholder_id' => ['sometimes', 'integer', Rule::in([$shareholderId])],
             'id_type' => 'required|in:passport,drivers_license,nin,bvn,cac_cert,other',
-            'id_value' => 'required|string|max:100',
+            'id_value' => ['required', 'string', 'max:100', new ValidIdentificationNumber($this->input('id_type'))],
             'issued_on' => 'nullable|date',
             'expires_on' => 'nullable|date',
             'verified_status' => 'required|in:pending,verified,rejected',

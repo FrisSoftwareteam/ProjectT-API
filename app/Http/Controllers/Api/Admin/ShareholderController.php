@@ -17,6 +17,7 @@ use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\Register;
+use App\Rules\ValidIdentificationNumber;
 use App\Services\ShareholderAccountNumberService;
 use App\Services\ShareholderBulkImportService;
 use Illuminate\Http\JsonResponse;
@@ -331,6 +332,22 @@ class ShareholderController extends Controller
             }
             if ($primaryCount === 0) {
                 $validator->errors()->add('addresses', 'At least one address must be marked as primary.');
+            }
+
+            $identities = (array) $request->input('identities', []);
+            foreach ($identities as $index => $identity) {
+                $idType = $identity['id_type'] ?? null;
+                $idValue = $identity['id_value'] ?? null;
+
+                if ($idType === null || $idValue === null) {
+                    continue;
+                }
+
+                (new ValidIdentificationNumber($idType))->validate(
+                    "identities.{$index}.id_value",
+                    $idValue,
+                    fn ($message) => $validator->errors()->add("identities.{$index}.id_value", $message)
+                );
             }
         });
 
