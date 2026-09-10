@@ -331,14 +331,12 @@ class CscsUploadController extends Controller
                 'path' => $request->url(), 'query' => $request->query(),
             ]);
 
-            return $this->paginatedWithPrecision($paginator, $batchId, ['account_effects' => $meta]);
+            return $this->paginatedWithPrecision($paginator, $batchId, ['account_effects' => $meta] + $meta);
         }
 
         return response()->json([
             'data' => $filtered,
-            'meta' => array_merge($this->precisionMeta($batchId), [
-                'account_effects' => $meta,
-            ]),
+            'meta' => array_merge($this->precisionMeta($batchId), ['account_effects' => $meta] + $meta),
         ]);
     }
 

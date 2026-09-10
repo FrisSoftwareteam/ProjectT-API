@@ -848,6 +848,7 @@ class CscsWorkflowTest extends TestCase
         $controller = app(CscsUploadController::class);
         $payload = $controller->accountEffects(Request::create('/'), $batch['batch_id'])->getData(true);
         $this->assertSame([], $payload['data']);
+        $this->assertSame('UNRESOLVED_EXCEPTIONS', $payload['meta']['empty_reason']);
         $this->assertSame('UNRESOLVED_EXCEPTIONS', $payload['meta']['account_effects']['empty_reason']);
         $this->assertSame(2, $payload['meta']['account_effects']['exception_counts']['UNKNOWN_SECURITY']);
         $preview = $controller->preview(Request::create('/'), $batch['batch_id'])->getData(true);
@@ -857,6 +858,7 @@ class CscsWorkflowTest extends TestCase
         $this->service->reconcile($batch['batch_id'], $this->maker->id);
         $payload = $controller->accountEffects(Request::create('/'), $batch['batch_id'])->getData(true);
         $this->assertCount(2, $payload['data']);
+        $this->assertNull($payload['meta']['empty_reason']);
         $this->assertNull($payload['meta']['account_effects']['empty_reason']);
         $this->assertFalse($payload['meta']['account_effects']['paginated']);
     }
