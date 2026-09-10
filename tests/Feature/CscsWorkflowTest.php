@@ -841,6 +841,26 @@ class CscsWorkflowTest extends TestCase
         $this->assertDatabaseCount('share_transactions', 0);
     }
 
+    public function test_empty_account_effects_explain_blocking_exceptions_and_recover_after_reconciliation(): void
+    {
+        CscsSecurityMapping::query()->update(['is_active' => false]);
+        $batch = $this->stageBatch();
+        $controller = app(CscsUploadController::class);
+        $payload = $controller->accountEffects(Request::create('/'), $batch['batch_id'])->getData(true);
+        $this->assertSame([], $payload['data']);
+        $this->assertSame('UNRESOLVED_EXCEPTIONS', $payload['meta']['account_effects']['empty_reason']);
+        $this->assertSame(2, $payload['meta']['account_effects']['exception_counts']['UNKNOWN_SECURITY']);
+        $preview = $controller->preview(Request::create('/'), $batch['batch_id'])->getData(true);
+        $this->assertSame($payload['meta']['account_effects']['empty_reason'], $preview['data']['account_effects_meta']['empty_reason']);
+
+        CscsSecurityMapping::query()->update(['is_active' => true]);
+        $this->service->reconcile($batch['batch_id'], $this->maker->id);
+        $payload = $controller->accountEffects(Request::create('/'), $batch['batch_id'])->getData(true);
+        $this->assertCount(2, $payload['data']);
+        $this->assertNull($payload['meta']['account_effects']['empty_reason']);
+        $this->assertFalse($payload['meta']['account_effects']['paginated']);
+    }
+
     public function test_balancing_preview_includes_only_same_shareholders_other_accounts_without_combining_holdings(): void
     {
         $batch = $this->stageBatch();

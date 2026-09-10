@@ -196,6 +196,10 @@ GET /api/cscs/uploads/{batchId}/snapshots
 
 Show file names/hashes/encoding, record and duplicate counts, transaction groups, debit/credit totals, unresolved exceptions, opening and proposed holdings, risk flags, revision, approval step, immutable snapshots, and audit events.
 
+`GET /uploads/{batchId}/account-effects` returns all eligible account effects; it is not paginated and `per_page` is ignored. Only `READY` and `POSTED` movement rows contribute to financial effects. An empty array does not mean the batch is ready for submission or has no uploaded records.
+
+Use `meta.account_effects` (also `data.account_effects_meta` in `/preview`) to explain empty results: `workflow_status`, `movement_row_counts`, `exception_counts`, and `empty_reason`. Reasons are `PROCESSING`, `NO_MOVEMENT_ROWS`, `UNRESOLVED_EXCEPTIONS`, `ALL_MOVEMENTS_EXCLUDED_OR_REPLAYED`, or `NO_ELIGIBLE_MOVEMENTS`; the reason is null when effects exist. For unresolved exceptions, display the exception counts and link to `exceptions_endpoint`. Resolve the blockers and reconcile through the existing workflow before refreshing the preview. Use the preview's workflow checks for submission readiness, never the presence or absence of account effects alone.
+
 The individual transaction endpoint includes explicit UI fields in addition to the existing totals and legs:
 
 ```json

@@ -1298,6 +1298,7 @@ class CscsImportService
     public function accountEffects(int $batchId): Collection
     {
         $rows = CscsUploadRow::where('batch_id', $batchId)
+            ->where('file_type', 'movement')
             ->whereIn('resolution_status', ['READY', 'POSTED'])
             ->get();
         $accounts = ShareholderRegisterAccount::with('shareholder')
@@ -1329,6 +1330,13 @@ class CscsImportService
                     }
                 }
 
+                $isNewAccount = ! $first->proposed_sra_id && $first->match_method === 'proposed_new_account';
+                $riskReasons = $rows->pluck('exception_code')->filter()->unique()->values();
+                if ($isNewAccount) {
+                    $riskReasons->push('NEW_ACCOUNT');
+                }
+                $riskLevel = $riskReasons->isEmpty() ? 'LOW' : 'MEDIUM';
+
                 return [
                     'register_account_id' => $first->proposed_sra_id,
                     'shareholder_id' => $account?->shareholder_id,
@@ -1351,7 +1359,9 @@ class CscsImportService
                     'total_credit' => $credit,
                     'net_movement' => bcsub($credit, $debit, self::SCALE),
                     'proposed_quantity' => $first->proposed_after_qty,
-                    'is_new_account' => ! $first->proposed_sra_id,
+                    'is_new_account' => $isNewAccount,
+                    'is_flagged' => $riskReasons->isNotEmpty(),
+                    'risk' => ['level' => $riskLevel, 'label' => ucfirst(strtolower($riskLevel)), 'reasons' => $riskReasons->all()],
                     'proposed_profile' => ! $first->proposed_sra_id ? $profile : null,
                     'other_accounts' => ($account ? $otherAccounts->get($account->shareholder_id, collect()) : collect())
                         ->reject(fn (ShareholderRegisterAccount $other) => $other->id === $account->id)
