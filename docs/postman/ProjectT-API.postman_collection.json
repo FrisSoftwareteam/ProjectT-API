@@ -2,7 +2,7 @@
     "info": {
         "_postman_id": "1aa59e6a-c071-48fa-a4cc-projecttapi001",
         "name": "ProjectT API - Complete Collection",
-        "description": "Generated from Laravel's registered API routes. Includes all 243 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
+        "description": "Generated from Laravel's registered API routes. Includes all 244 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "auth": {
@@ -3823,6 +3823,47 @@
                             ]
                         },
                         "description": "Backend action: `CscsUploadController@exceptions`.\n\nEach exception includes severity, blocking state, parsed record values, allowed and suggested resolutions, matched account, and resolution history. `meta.exception_counts` contains total, blocking, warning, resolved, and remaining counts.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Cscs Upload - Bulk Map Accounts",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/exceptions/bulk-map-accounts",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "exceptions",
+                                "bulk-map-accounts"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@bulkMapAccounts`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.reconcile",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"reason\": \"Account mappings confirmed against the shareholder register\",\n    \"mappings\": [\n        {\n            \"row_id\": 1,\n            \"register_account_id\": \"{{sra_id}}\"\n        },\n        {\n            \"row_id\": 2,\n            \"register_account_id\": \"{{sra_id}}\"\n        }\n    ]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
                     },
                     "response": []
                 },

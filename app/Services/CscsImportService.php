@@ -560,6 +560,13 @@ class CscsImportService
 
                     continue;
                 }
+                $splitAccountIds = collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()->all();
+                if ($splitAccountIds && ShareholderRegisterAccount::whereIn('id', $splitAccountIds)->where('status', 'active')->count() !== count($splitAccountIds)) {
+                    $this->failRow($row, 'ACCOUNT_FROZEN', 'One or more selected register accounts are not active.');
+                    $groupReady = false;
+
+                    continue;
+                }
                 $sourceName = data_get($row->extra_details, 'master_profile.full_name');
                 if (config('cscs.validate_holder_names', false) && $sourceName && $account['sra_id'] && $account['method'] !== 'manual_mapping') {
                     $holderName = ShareholderRegisterAccount::with('shareholder')->find($account['sra_id'])?->shareholder?->full_name;
@@ -603,22 +610,26 @@ class CscsImportService
                 } else {
                     $totalCredit = bcadd($totalCredit, $quantity, self::SCALE);
                 }
-                $key = ($row->proposed_sra_id ? 'sra:'.$row->proposed_sra_id : 'new:'.$row->identifier_value)
-                    .':class:'.$mapping->share_class_id;
-                $effects[$key] ??= [
-                    'sra_id' => $row->proposed_sra_id,
-                    'identifier' => $row->identifier_value,
-                    'share_class_id' => (int) $mapping->share_class_id,
-                    'debit' => $this->zero(),
-                    'credit' => $this->zero(),
-                    'rows' => [],
-                ];
-                $effects[$key][$row->sign === '-' ? 'debit' : 'credit'] = bcadd(
-                    $effects[$key][$row->sign === '-' ? 'debit' : 'credit'],
-                    $quantity,
-                    self::SCALE
-                );
-                $effects[$key]['rows'][] = $row->id;
+                foreach ($this->rowAccountAllocations($row) as $allocation) {
+                    $allocationQuantity = $row->sign === '-' ? $allocation['quantity'] : $quantity;
+                    $sraId = $row->sign === '-' ? $allocation['register_account_id'] : $row->proposed_sra_id;
+                    $key = ($sraId ? 'sra:'.$sraId : 'new:'.$row->identifier_value)
+                        .':class:'.$mapping->share_class_id;
+                    $effects[$key] ??= [
+                        'sra_id' => $sraId,
+                        'identifier' => $row->identifier_value,
+                        'share_class_id' => (int) $mapping->share_class_id,
+                        'debit' => $this->zero(),
+                        'credit' => $this->zero(),
+                        'rows' => [],
+                    ];
+                    $effects[$key][$row->sign === '-' ? 'debit' : 'credit'] = bcadd(
+                        $effects[$key][$row->sign === '-' ? 'debit' : 'credit'],
+                        $allocationQuantity,
+                        self::SCALE
+                    );
+                    $effects[$key]['rows'][] = $row->id;
+                }
             }
             $readyGroups++;
             $advanceValidationGroup();
@@ -646,10 +657,25 @@ class CscsImportService
 
                 continue;
             }
-            CscsUploadRow::whereIn('id', $effect['rows'])->update([
-                'proposed_before_qty' => $before,
-                'proposed_after_qty' => $after,
-            ]);
+            foreach (CscsUploadRow::whereIn('id', $effect['rows'])->get() as $effectRow) {
+                $extra = $effectRow->extra_details ?? [];
+                if (is_array(data_get($extra, 'manual_account_allocations')) && $effect['sra_id']) {
+                    $extra['manual_account_allocations'] = collect($extra['manual_account_allocations'])
+                        ->map(function (array $allocation) use ($effect, $before, $after) {
+                            if ((int) $allocation['register_account_id'] === (int) $effect['sra_id']) {
+                                $allocation['proposed_before_qty'] = $before;
+                                $allocation['proposed_after_qty'] = $after;
+                            }
+
+                            return $allocation;
+                        })->all();
+                }
+                $effectRow->update([
+                    'extra_details' => $extra,
+                    'proposed_before_qty' => $before,
+                    'proposed_after_qty' => $after,
+                ]);
+            }
             $processedEffects++;
             if ($trackImportProgress) {
                 $percent = 95 + (int) floor(($processedEffects / max(1, count($effects))) * 4);
@@ -959,9 +985,15 @@ class CscsImportService
                 'resolution_reason' => $resolution['reason'],
             ];
             if ($type === 'MAP_ACCOUNT') {
-                $sra = ShareholderRegisterAccount::where('register_id', $batch->register_id)->findOrFail($resolution['register_account_id']);
+                $allocations = $this->manualAccountAllocations($batch, $row, $resolution);
+                $sra = ShareholderRegisterAccount::where('register_id', $batch->register_id)->findOrFail($allocations[0]['register_account_id']);
                 $extra = $row->extra_details ?? [];
                 unset($extra['account_proposal']);
+                if (count($allocations) > 1) {
+                    $extra['manual_account_allocations'] = $allocations;
+                } else {
+                    unset($extra['manual_account_allocations']);
+                }
                 $updates += ['extra_details' => $extra, 'proposed_sra_id' => $sra->id, 'match_method' => 'manual_mapping', 'resolution_status' => 'UNRESOLVED'];
             } elseif (in_array($type, ['CREATE_SHAREHOLDER', 'CREATE_ACCOUNT'], true)) {
                 if ($row->sign !== '+') {
@@ -1012,6 +1044,74 @@ class CscsImportService
 
             return ['row' => $row->fresh(), 'batch' => $this->batchResult($batch->fresh())];
         });
+    }
+
+    /**
+     * @return array<int, array{register_account_id: int, quantity: string}>
+     */
+    private function manualAccountAllocations(CscsUploadBatch $batch, CscsUploadRow $row, array $resolution): array
+    {
+        if (! empty($resolution['account_allocations'])) {
+            if ($row->sign !== '-') {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['Split account mapping is only supported for debit rows.'],
+                ]);
+            }
+
+            $allocations = collect($resolution['account_allocations'])->map(fn (array $allocation) => [
+                'register_account_id' => (int) $allocation['register_account_id'],
+                'quantity' => $this->decimal($allocation['quantity']),
+            ])->values();
+            $accounts = ShareholderRegisterAccount::where('register_id', $batch->register_id)
+                ->whereIn('id', $allocations->pluck('register_account_id'))
+                ->get()
+                ->keyBy('id');
+            if ($accounts->count() !== $allocations->count()) {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['Every selected account must belong to this batch register.'],
+                ]);
+            }
+            if ($accounts->pluck('shareholder_id')->unique()->count() !== 1) {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['All selected accounts must belong to the same shareholder.'],
+                ]);
+            }
+            $total = $allocations->reduce(
+                fn (string $sum, array $allocation) => bcadd($sum, $allocation['quantity'], self::SCALE),
+                $this->zero()
+            );
+            if (bccomp($total, $this->decimal($row->volume), self::SCALE) !== 0) {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['Split account quantities must equal the CSCS row quantity.'],
+                ]);
+            }
+
+            return $allocations->all();
+        }
+
+        return [[
+            'register_account_id' => (int) $resolution['register_account_id'],
+            'quantity' => $this->decimal($row->volume),
+        ]];
+    }
+
+    /**
+     * @return array<int, array{register_account_id: int|null, quantity: string}>
+     */
+    private function rowAccountAllocations(CscsUploadRow $row): array
+    {
+        $allocations = data_get($row->extra_details, 'manual_account_allocations');
+        if (is_array($allocations) && count($allocations) > 1) {
+            return collect($allocations)->map(fn (array $allocation) => [
+                'register_account_id' => (int) $allocation['register_account_id'],
+                'quantity' => $this->decimal($allocation['quantity']),
+            ])->all();
+        }
+
+        return [[
+            'register_account_id' => $row->proposed_sra_id ? (int) $row->proposed_sra_id : null,
+            'quantity' => $this->decimal($row->volume),
+        ]];
     }
 
     /** @return array<string, mixed> */
@@ -1142,8 +1242,15 @@ class CscsImportService
 
     private function accountMappingSnapshot(int $batchId): array
     {
-        return ShareholderRegisterAccount::whereIn('id', CscsUploadRow::where('batch_id', $batchId)
-            ->where('file_type', 'movement')->whereIn('resolution_status', ['READY', 'POSTED'])->whereNotNull('proposed_sra_id')->pluck('proposed_sra_id'))
+        $rows = CscsUploadRow::where('batch_id', $batchId)
+            ->where('file_type', 'movement')
+            ->whereIn('resolution_status', ['READY', 'POSTED'])
+            ->get();
+        $accountIds = $rows->pluck('proposed_sra_id')->filter()
+            ->merge($rows->flatMap(fn (CscsUploadRow $row) => collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()))
+            ->unique();
+
+        return ShareholderRegisterAccount::whereIn('id', $accountIds)
             ->orderBy('id')->get()->map(fn (ShareholderRegisterAccount $account) => [
                 'id' => (int) $account->id, 'register_id' => (int) $account->register_id,
                 'shareholder_id' => (int) $account->shareholder_id, 'chn' => $account->chn,
@@ -1208,48 +1315,65 @@ class CscsImportService
                     if (CscsUploadRow::where('fingerprint', $row->replay_key)->where('status', 'posted')->where('id', '!=', $row->id)->exists()) {
                         throw ValidationException::withMessages(['replay' => ["Movement row {$row->id} was already posted."]]);
                     }
-                    $sra = $row->proposed_sra_id
-                        ? ShareholderRegisterAccount::findOrFail($row->proposed_sra_id)
-                        : $this->createProposedAccount($batch, $row, (int) $actor->id);
-                    $position = SharePosition::where('sra_id', $sra->id)
-                        ->where('share_class_id', $row->proposed_share_class_id)->lockForUpdate()->first();
-                    $before = $this->decimal($position?->quantity ?? 0);
-                    $quantity = $this->decimal($row->volume);
-                    $delta = $row->sign === '-' ? '-'.$quantity : $quantity;
-                    $after = bcadd($before, $delta, self::SCALE);
-                    if (bccomp($after, $this->zero(), self::SCALE) < 0) {
-                        throw ValidationException::withMessages(['quantity' => ["Insufficient holding for row {$row->id}."]]);
+                    $postedAllocations = [];
+                    foreach ($this->rowAccountAllocations($row) as $index => $allocation) {
+                        $sra = $allocation['register_account_id']
+                            ? ShareholderRegisterAccount::findOrFail($allocation['register_account_id'])
+                            : $this->createProposedAccount($batch, $row, (int) $actor->id);
+                        $position = SharePosition::where('sra_id', $sra->id)
+                            ->where('share_class_id', $row->proposed_share_class_id)->lockForUpdate()->first();
+                        $before = $this->decimal($position?->quantity ?? 0);
+                        $quantity = $row->sign === '-' ? $allocation['quantity'] : $this->decimal($row->volume);
+                        $delta = $row->sign === '-' ? '-'.$quantity : $quantity;
+                        $after = bcadd($before, $delta, self::SCALE);
+                        if (bccomp($after, $this->zero(), self::SCALE) < 0) {
+                            throw ValidationException::withMessages(['quantity' => ["Insufficient holding for row {$row->id}."]]);
+                        }
+                        $position ??= SharePosition::create([
+                            'sra_id' => $sra->id,
+                            'share_class_id' => $row->proposed_share_class_id,
+                            'quantity' => $this->zero(),
+                            'holding_mode' => 'demat',
+                        ]);
+                        $position->update(['quantity' => $after, 'last_updated_at' => now()]);
+                        $tx = ShareTransaction::create([
+                            'sra_id' => $sra->id,
+                            'share_class_id' => $row->proposed_share_class_id,
+                            'tx_type' => $row->sign === '-' ? 'transfer_out' : 'transfer_in',
+                            'quantity' => $quantity,
+                            'tx_ref' => ($batch->batch_type === 'REVERSAL'
+                                ? 'CSCS-REV-'.$batch->id.'-'.$row->tran_no.'-'.$row->tran_seq
+                                : 'CSCS-'.$row->tran_no.'-'.$row->tran_seq).(count($this->rowAccountAllocations($row)) > 1 ? '-'.($index + 1) : ''),
+                            'tx_date' => $row->trade_date,
+                            'created_by' => $actor->id,
+                        ]);
+                        $postedAllocations[] = [
+                            'register_account_id' => $sra->id,
+                            'share_transaction_id' => $tx->id,
+                            'quantity' => $quantity,
+                            'before_qty' => $before,
+                            'after_qty' => $after,
+                        ];
                     }
-                    $position ??= SharePosition::create([
-                        'sra_id' => $sra->id,
-                        'share_class_id' => $row->proposed_share_class_id,
-                        'quantity' => $this->zero(),
-                        'holding_mode' => 'demat',
-                    ]);
-                    $position->update(['quantity' => $after, 'last_updated_at' => now()]);
-                    $tx = ShareTransaction::create([
-                        'sra_id' => $sra->id,
-                        'share_class_id' => $row->proposed_share_class_id,
-                        'tx_type' => $row->sign === '-' ? 'transfer_out' : 'transfer_in',
-                        'quantity' => $quantity,
-                        'tx_ref' => $batch->batch_type === 'REVERSAL'
-                            ? 'CSCS-REV-'.$batch->id.'-'.$row->tran_no.'-'.$row->tran_seq
-                            : 'CSCS-'.$row->tran_no.'-'.$row->tran_seq,
-                        'tx_date' => $row->trade_date,
-                        'created_by' => $actor->id,
-                    ]);
+                    $firstPosted = $postedAllocations[0];
+                    $sra = ShareholderRegisterAccount::findOrFail($firstPosted['register_account_id']);
+                    $extra = $row->extra_details ?? [];
+                    if (count($postedAllocations) > 1) {
+                        $extra['posted_account_allocations'] = $postedAllocations;
+                    }
                     $row->update([
                         'status' => 'posted',
                         'resolution_status' => 'POSTED',
                         'sra_id' => $sra->id,
                         'shareholder_id' => $sra->shareholder_id,
                         'share_class_id' => $row->proposed_share_class_id,
-                        'share_transaction_id' => $tx->id,
-                        'actual_before_qty' => $before,
-                        'actual_after_qty' => $after,
-                        'before_qty' => $before,
-                        'delta_qty' => $delta,
-                        'after_qty' => $after,
+                        'share_transaction_id' => $firstPosted['share_transaction_id'],
+                        'actual_before_qty' => $firstPosted['before_qty'],
+                        'actual_after_qty' => $firstPosted['after_qty'],
+                        'before_qty' => $firstPosted['before_qty'],
+                        'delta_qty' => $row->sign === '-' ? '-'.$firstPosted['quantity'] : $firstPosted['quantity'],
+                        'after_qty' => $firstPosted['after_qty'],
+                        'extra_details' => $extra,
                         'fingerprint' => $row->replay_key,
                     ]);
                 }
@@ -1301,8 +1425,11 @@ class CscsImportService
             ->where('file_type', 'movement')
             ->whereIn('resolution_status', ['READY', 'POSTED'])
             ->get();
+        $accountIds = $rows->pluck('proposed_sra_id')->filter()
+            ->merge($rows->flatMap(fn (CscsUploadRow $row) => collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()))
+            ->unique();
         $accounts = ShareholderRegisterAccount::with('shareholder')
-            ->whereIn('id', $rows->pluck('proposed_sra_id')->filter()->unique())
+            ->whereIn('id', $accountIds)
             ->get()
             ->keyBy('id');
         $shareClasses = ShareClass::with('register')->whereIn('id', $rows->pluck('proposed_share_class_id')->filter()->unique())
@@ -1314,31 +1441,40 @@ class CscsImportService
             ->orderBy('id')->get()->groupBy('shareholder_id');
 
         return $rows
-            ->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id)
+            ->flatMap(function (CscsUploadRow $row) {
+                return collect($this->rowAccountAllocations($row))->map(fn (array $allocation) => [
+                    'row' => $row,
+                    'register_account_id' => $row->sign === '-' ? $allocation['register_account_id'] : $row->proposed_sra_id,
+                    'quantity' => $row->sign === '-' ? $allocation['quantity'] : $this->decimal($row->volume),
+                ]);
+            })
+            ->groupBy(fn (array $entry) => ($entry['register_account_id'] ?: 'new:'.$entry['row']->identifier_value).':'.$entry['row']->proposed_share_class_id)
             ->map(function (Collection $rows) use ($accounts, $shareClasses, $otherAccounts) {
-                $first = $rows->first();
-                $account = $first->proposed_sra_id ? $accounts->get($first->proposed_sra_id) : null;
+                $firstEntry = $rows->first();
+                $first = $firstEntry['row'];
+                $account = $firstEntry['register_account_id'] ? $accounts->get($firstEntry['register_account_id']) : null;
                 $shareClass = $first->proposed_share_class_id ? $shareClasses->get($first->proposed_share_class_id) : null;
                 $profile = data_get($first->extra_details, 'master_profile', []);
                 $debit = $this->zero();
                 $credit = $this->zero();
-                foreach ($rows as $row) {
+                foreach ($rows as $entry) {
+                    $row = $entry['row'];
                     if ($row->sign === '-') {
-                        $debit = bcadd($debit, $this->decimal($row->volume), self::SCALE);
+                        $debit = bcadd($debit, $entry['quantity'], self::SCALE);
                     } else {
-                        $credit = bcadd($credit, $this->decimal($row->volume), self::SCALE);
+                        $credit = bcadd($credit, $entry['quantity'], self::SCALE);
                     }
                 }
 
                 $isNewAccount = ! $first->proposed_sra_id && $first->match_method === 'proposed_new_account';
-                $riskReasons = $rows->pluck('exception_code')->filter()->unique()->values();
+                $riskReasons = $rows->pluck('row.exception_code')->filter()->unique()->values();
                 if ($isNewAccount) {
                     $riskReasons->push('NEW_ACCOUNT');
                 }
                 $riskLevel = $riskReasons->isEmpty() ? 'LOW' : 'MEDIUM';
 
                 return [
-                    'register_account_id' => $first->proposed_sra_id,
+                    'register_account_id' => $firstEntry['register_account_id'],
                     'shareholder_id' => $account?->shareholder_id,
                     'shareholder_name' => $account?->shareholder?->full_name ?? data_get($profile, 'full_name'),
                     'shareholder_account_number' => $account?->shareholder?->account_no,
@@ -1354,11 +1490,11 @@ class CscsImportService
                     'share_class_id' => $first->proposed_share_class_id,
                     'share_class_code' => $shareClass?->class_code,
                     'share_class_name' => $shareClass?->name,
-                    'current_quantity' => $first->proposed_before_qty,
+                    'current_quantity' => $account ? $this->decimal(SharePosition::where('sra_id', $account->id)->where('share_class_id', $first->proposed_share_class_id)->value('quantity') ?? 0) : $first->proposed_before_qty,
                     'total_debit' => $debit,
                     'total_credit' => $credit,
                     'net_movement' => bcsub($credit, $debit, self::SCALE),
-                    'proposed_quantity' => $first->proposed_after_qty,
+                    'proposed_quantity' => $account ? bcadd($this->decimal(SharePosition::where('sra_id', $account->id)->where('share_class_id', $first->proposed_share_class_id)->value('quantity') ?? 0), bcsub($credit, $debit, self::SCALE), self::SCALE) : $first->proposed_after_qty,
                     'is_new_account' => $isNewAccount,
                     'is_flagged' => $riskReasons->isNotEmpty(),
                     'risk' => ['level' => $riskLevel, 'label' => ucfirst(strtolower($riskLevel)), 'reasons' => $riskReasons->all()],
@@ -1382,7 +1518,7 @@ class CscsImportService
                                 'holding_mode' => $position->holding_mode,
                             ])->values()->all(),
                         ])->values()->all(),
-                    'row_count' => $rows->count(),
+                    'row_count' => $rows->pluck('row.id')->unique()->count(),
                 ];
             })->values();
     }

@@ -459,7 +459,10 @@ class CscsUploadController extends Controller
             'profile.full_name' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'string', 'max:255'],
             'profile.email' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'email', 'max:255'],
             'profile.phone' => ['required_if:resolution_type,CREATE_SHAREHOLDER', 'string', 'max:30'],
-            'register_account_id' => ['required_if:resolution_type,MAP_ACCOUNT', 'nullable', 'integer', 'exists:shareholder_register_accounts,id'],
+            'register_account_id' => ['required_if:resolution_type,MAP_ACCOUNT', 'required_without:account_allocations', 'nullable', 'integer', 'exists:shareholder_register_accounts,id'],
+            'account_allocations' => ['nullable', 'array', 'min:2', 'max:20'],
+            'account_allocations.*.register_account_id' => ['required_with:account_allocations', 'integer', 'distinct', 'exists:shareholder_register_accounts,id'],
+            'account_allocations.*.quantity' => ['required_with:account_allocations', 'numeric', 'gt:0'],
             'reason' => ['required', 'string', 'min:10', 'max:1000'],
         ]);
 
