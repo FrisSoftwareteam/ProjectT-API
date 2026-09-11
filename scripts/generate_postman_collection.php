@@ -78,7 +78,7 @@ $jsonPayloads = [
     'CscsUploadController@storeSecurityMapping' => ['security_code' => 'STANBIC', 'register_id' => '{{register_id}}', 'share_class_id' => '{{share_class_id}}', 'is_active' => true],
     'CscsUploadController@updateSecurityMapping' => ['security_code' => 'STANBIC', 'register_id' => '{{register_id}}', 'share_class_id' => '{{share_class_id}}', 'is_active' => true],
     'CscsUploadController@updateApprovalPolicy' => ['name' => 'Default CSCS policy', 'checker_roles' => ['Internal Audit'], 'additional_approval_quantity' => 1000000, 'additional_approval_roles' => ['Internal Audit', 'Compliance'], 'checker_can_post' => true],
-    'CscsUploadController@resolveException' => ['resolution_type' => 'MAP_ACCOUNT', 'register_account_id' => '{{sra_id}}', 'reason' => 'Account mapping confirmed against the shareholder register'],
+    'CscsUploadController@resolveException' => ['resolution_type' => 'MAP_ACCOUNT', 'reason' => 'Account mapping confirmed against the shareholder register', 'register_account_id' => '{{sra_id}}', 'account_allocations' => [['register_account_id' => '{{sra_id}}', 'quantity' => '6000'], ['register_account_id' => '{{secondary_sra_id}}', 'quantity' => '4000']]],
     'CscsUploadController@revalidate' => ['comment' => 'All transaction groups and proposed holdings reviewed'],
     'CscsUploadController@submit' => ['comment' => 'Reconciled batch submitted for independent approval'],
     'CscsUploadController@raiseQuery' => ['comment' => 'Please confirm the identified account mapping', 'transaction_numbers' => ['2606160005615022'], 'row_ids' => [1]],
@@ -265,6 +265,7 @@ $variables = [
     ['key' => 'token', 'value' => '', 'type' => 'string'],
     ['key' => 'share_class_id', 'value' => '1', 'type' => 'string'],
     ['key' => 'shareholder_category_id', 'value' => '1', 'type' => 'string'],
+    ['key' => 'secondary_sra_id', 'value' => '2', 'type' => 'string'],
     ['key' => 'cscs_export_type', 'value' => 'audit', 'type' => 'string'],
     ['key' => 'cscs_export_format', 'value' => 'pdf', 'type' => 'string'],
 ];

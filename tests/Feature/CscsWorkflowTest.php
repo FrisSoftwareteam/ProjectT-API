@@ -776,6 +776,57 @@ class CscsWorkflowTest extends TestCase
         $this->assertDatabaseCount('share_transactions', 0);
     }
 
+    public function test_manual_mapping_can_split_a_debit_across_same_shareholder_accounts(): void
+    {
+        $batch = $this->stageBatch();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+        SharePosition::where('sra_id', $this->debitAccount->id)->where('share_class_id', $this->shareClass->id)
+            ->update(['quantity' => '200000.000000']);
+        $otherDebitAccount = ShareholderRegisterAccount::create([
+            'shareholder_id' => $this->debitAccount->shareholder_id,
+            'register_id' => $this->register->id,
+            'shareholder_no' => 'SRA-SPLIT',
+            'chn' => 'C111111112',
+            'status' => 'active',
+        ]);
+        SharePosition::create([
+            'sra_id' => $otherDebitAccount->id,
+            'share_class_id' => $this->shareClass->id,
+            'quantity' => '100000.000000',
+            'holding_mode' => 'demat',
+        ]);
+
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'MAP_ACCOUNT',
+            'reason' => 'Split debit across verified accounts for the same shareholder',
+            'account_allocations' => [
+                ['register_account_id' => $this->debitAccount->id, 'quantity' => '200000.000000'],
+                ['register_account_id' => $otherDebitAccount->id, 'quantity' => '48889.000000'],
+            ],
+        ]);
+
+        $this->assertSame('RECONCILED', $this->service->reconcile($batch['batch_id'], $this->maker->id)['status']);
+        $effects = $this->service->accountEffects($batch['batch_id']);
+        $this->assertSame('200000.000000', $effects->firstWhere('register_account_id', $this->debitAccount->id)['total_debit']);
+        $this->assertSame('48889.000000', $effects->firstWhere('register_account_id', $otherDebitAccount->id)['total_debit']);
+    }
+
+    public function test_split_manual_mapping_requires_one_shareholder(): void
+    {
+        $batch = $this->stageBatch();
+        $row = CscsUploadRow::where('batch_id', $batch['batch_id'])->where('sign', '-')->firstOrFail();
+
+        $this->expectException(ValidationException::class);
+        $this->service->resolveException($batch['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'MAP_ACCOUNT',
+            'reason' => 'Attempt invalid cross shareholder split mapping',
+            'account_allocations' => [
+                ['register_account_id' => $this->debitAccount->id, 'quantity' => '200000.000000'],
+                ['register_account_id' => $this->creditAccount->id, 'quantity' => '48889.000000'],
+            ],
+        ]);
+    }
+
     public function test_manual_mapping_rejects_an_account_from_another_register(): void
     {
         $batch = $this->stageBatch();

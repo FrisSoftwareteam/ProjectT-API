@@ -1883,7 +1883,19 @@ class CscsImportService
 
     private function assertOpeningBalances(CscsUploadBatch $batch, Collection $rows): void
     {
-        foreach ($rows->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id) as $effectRows) {
+        foreach ($rows as $row) {
+            foreach (data_get($row->extra_details, 'manual_account_allocations', []) as $allocation) {
+                $current = $this->decimal(SharePosition::where('sra_id', $allocation['register_account_id'])
+                    ->where('share_class_id', $row->proposed_share_class_id)->lockForUpdate()->value('quantity') ?? 0);
+                if (bccomp($current, $this->decimal($allocation['proposed_before_qty'] ?? 0), self::SCALE) !== 0) {
+                    $batch->update(['workflow_status' => 'STALE', 'failure_reason' => 'A holding changed after approval.']);
+                    throw ValidationException::withMessages(['batch' => ['A holding changed after approval; the batch must be reconciled again.']]);
+                }
+            }
+        }
+
+        $normalRows = $rows->filter(fn (CscsUploadRow $row) => ! data_get($row->extra_details, 'manual_account_allocations'));
+        foreach ($normalRows->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id) as $effectRows) {
             $first = $effectRows->first();
             $current = $this->zero();
             if ($first->proposed_sra_id) {
@@ -1926,7 +1938,7 @@ class CscsImportService
         $actualNet = bcsub($actualCredit, $actualDebit, self::SCALE);
         $checks = [
             'posted_row_count' => $rows->count() === (int) ($expected['ready_rows'] ?? -1),
-            'share_transaction_count' => $rows->whereNotNull('share_transaction_id')->unique('share_transaction_id')->count() === $rows->count(),
+            'share_transaction_count' => ShareTransaction::whereIn('id', $rows->pluck('share_transaction_id')->filter())->count() >= $rows->count(),
             'unique_replay_fingerprints' => $rows->whereNotNull('fingerprint')->unique('fingerprint')->count() === $rows->count(),
             'debit_total' => bccomp($actualDebit, $this->decimal($expected['total_debit'] ?? 0), self::SCALE) === 0,
             'credit_total' => bccomp($actualCredit, $this->decimal($expected['total_credit'] ?? 0), self::SCALE) === 0,
@@ -1935,6 +1947,16 @@ class CscsImportService
         ];
         foreach ($rows->groupBy(fn (CscsUploadRow $row) => $row->sra_id.':'.$row->share_class_id) as $effectRows) {
             $first = $effectRows->first();
+            if (data_get($first->extra_details, 'posted_account_allocations')) {
+                foreach (data_get($first->extra_details, 'posted_account_allocations', []) as $allocation) {
+                    $actual = $this->decimal(SharePosition::where('sra_id', $allocation['register_account_id'])->where('share_class_id', $first->share_class_id)->value('quantity') ?? 0);
+                    if (bccomp($actual, $this->decimal($allocation['after_qty']), self::SCALE) !== 0) {
+                        $checks['holding_effects'] = false;
+                    }
+                }
+
+                continue;
+            }
             $actual = $this->decimal(SharePosition::where('sra_id', $first->sra_id)->where('share_class_id', $first->share_class_id)->value('quantity') ?? 0);
             if (bccomp($actual, $this->decimal($first->proposed_after_qty), self::SCALE) !== 0) {
                 $checks['holding_effects'] = false;
