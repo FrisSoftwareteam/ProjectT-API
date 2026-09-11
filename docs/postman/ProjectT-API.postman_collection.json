@@ -2,7 +2,7 @@
     "info": {
         "_postman_id": "1aa59e6a-c071-48fa-a4cc-projecttapi001",
         "name": "ProjectT API - Complete Collection",
-        "description": "Generated from Laravel's registered API routes. Includes all 232 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
+        "description": "Generated from Laravel's registered API routes. Includes all 243 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "auth": {
@@ -103,6 +103,11 @@
             "type": "string"
         },
         {
+            "key": "shareholderId",
+            "value": "1",
+            "type": "string"
+        },
+        {
             "key": "batchId",
             "value": "1",
             "type": "string"
@@ -113,12 +118,12 @@
             "type": "string"
         },
         {
-            "key": "fileIndex",
+            "key": "rowId",
             "value": "1",
             "type": "string"
         },
         {
-            "key": "rowId",
+            "key": "fileIndex",
             "value": "1",
             "type": "string"
         },
@@ -3302,6 +3307,33 @@
                     "response": []
                 },
                 {
+                    "name": "GET - Cscs Upload - Shareholder Accounts",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/shareholders/{{shareholderId}}/accounts",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "shareholders",
+                                "{{shareholderId}}",
+                                "accounts"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@shareholderAccounts`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
                     "name": "GET - Cscs Upload - Index",
                     "request": {
                         "method": "GET",
@@ -3340,6 +3372,32 @@
                             ]
                         },
                         "description": "Backend action: `CscsUploadController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Cscs Upload - Dashboard Summary",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/summary",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "summary"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@dashboardSummary`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -3578,6 +3636,46 @@
                     "response": []
                 },
                 {
+                    "name": "POST - Cscs Upload - Confirm Financial Preview",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/confirm-financial-preview",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "confirm-financial-preview"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@confirmFinancialPreview`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.reconcile",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
                     "name": "POST - Cscs Upload - Create Reversal",
                     "request": {
                         "method": "POST",
@@ -3608,6 +3706,46 @@
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"reason\": \"Correcting an approved CSCS source-file error\",\n    \"effective_date\": \"2026-07-22\",\n    \"transaction_numbers\": []\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Cscs Upload - Download Report",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/download-report",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "download-report"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@downloadReport`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.export",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -3727,6 +3865,34 @@
                                 }
                             }
                         }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Cscs Upload - Row",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/exceptions/{{rowId}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "exceptions",
+                                "{{rowId}}"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@row`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
                     },
                     "response": []
                 },
@@ -3974,6 +4140,34 @@
                     "response": []
                 },
                 {
+                    "name": "GET - Cscs Upload - Processing Status",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/process/status",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "process",
+                                "status"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@processingStatus`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
                     "name": "POST - Cscs Upload - Raise Query",
                     "request": {
                         "method": "POST",
@@ -4144,6 +4338,46 @@
                             ]
                         },
                         "description": "Backend action: `CscsUploadController@relatedBatches`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Cscs Upload - Export",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/reports/download?type={{cscs_export_type}}&format={{cscs_export_format}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "reports",
+                                "download"
+                            ],
+                            "query": [
+                                {
+                                    "key": "type",
+                                    "value": "{{cscs_export_type}}",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "format",
+                                    "value": "{{cscs_export_format}}",
+                                    "disabled": false
+                                }
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@export`.\n\nSet collection variables `cscs_export_type` and `cscs_export_format`. Supported report pairs include `audit/pdf`, `posting/csv`, `reconciliation/pdf`, and `activity/xls` or `activity/xlsx`. Existing row, exception, preview, posting, and reconciliation CSV exports remain supported.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.export"
                     },
                     "response": []
                 },
@@ -4341,6 +4575,46 @@
                             ]
                         },
                         "description": "Backend action: `CscsUploadController@row`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Cscs Upload - Save Draft",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/save-draft",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "cscs",
+                                "uploads",
+                                "{{batchId}}",
+                                "save-draft"
+                            ]
+                        },
+                        "description": "Backend action: `CscsUploadController@saveDraft`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.reconcile",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
                     },
                     "response": []
                 },
@@ -5001,6 +5275,44 @@
                             ]
                         },
                         "description": "Backend action: `NotificationController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "PATCH - Notification - Mark Selected As Read",
+                    "request": {
+                        "method": "PATCH",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/notifications/read",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "notifications",
+                                "read"
+                            ]
+                        },
+                        "description": "Backend action: `NotificationController@markSelectedAsRead`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
                     },
                     "response": []
                 },
@@ -6722,6 +7034,31 @@
                         }
                     },
                     "response": []
+                },
+                {
+                    "name": "GET - Share Transfer - Activity Log",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/share-transfers/activity-log",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "share-transfers",
+                                "activity-log"
+                            ]
+                        },
+                        "description": "Backend action: `ShareTransferController@activityLog`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shares.transfer"
+                    },
+                    "response": []
                 }
             ]
         },
@@ -7342,6 +7679,44 @@
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"shareholder\": {\n        \"holder_type\": \"individual\",\n        \"first_name\": \"Ada\",\n        \"last_name\": \"Okafor\",\n        \"email\": \"ada.details@example.com\",\n        \"phone\": \"08012345002\",\n        \"status\": \"active\"\n    },\n    \"addresses\": [\n        {\n            \"address_line1\": \"1 Marina Road\",\n            \"city\": \"Lagos\",\n            \"state\": \"Lagos\",\n            \"country\": \"Nigeria\",\n            \"is_primary\": true\n        }\n    ],\n    \"mandates\": [\n        {\n            \"bank_name\": \"Example Bank\",\n            \"account_name\": \"Ada Okafor\",\n            \"account_number\": \"0123456789\",\n            \"status\": \"pending\"\n        }\n    ],\n    \"identities\": [\n        {\n            \"id_type\": \"nin\",\n            \"id_value\": \"12345678901\",\n            \"verified_status\": \"pending\"\n        }\n    ]\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder - Store With Register And Shares",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholders/with-register-and-shares",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholders",
+                                "with-register-and-shares"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderController@storeWithRegisterAndShares`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholders.create",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"shareholder\": {\n        \"holder_type\": \"individual\",\n        \"first_name\": \"Ada\",\n        \"last_name\": \"Okafor\",\n        \"email\": \"ada.register@example.com\",\n        \"phone\": \"08012345003\",\n        \"status\": \"active\"\n    },\n    \"addresses\": [\n        {\n            \"address_line1\": \"1 Marina Road\",\n            \"city\": \"Lagos\",\n            \"state\": \"Lagos\",\n            \"country\": \"Nigeria\",\n            \"is_primary\": true\n        }\n    ],\n    \"register_account\": {\n        \"register_id\": \"{{register_id}}\",\n        \"shareholder_no\": \"SH-000002\",\n        \"chn\": \"C123456790\",\n        \"cscs_account_no\": \"CSCS-000002\",\n        \"residency_status\": \"resident\",\n        \"kyc_level\": \"standard\",\n        \"status\": \"active\"\n    },\n    \"share_class_id\": \"{{share_class_id}}\",\n    \"initial_shares\": {\n        \"quantity\": \"1000\",\n        \"source_type\": \"allotment\",\n        \"lot_ref\": \"LOT-002\",\n        \"acquired_at\": \"2026-09-11\",\n        \"holding_mode\": \"demat\"\n    }\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
