@@ -3750,7 +3750,7 @@
                         "description": "Backend action: `CscsUploadController@downloadReport`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.export",
                         "body": {
                             "mode": "raw",
-                            "raw": "{}",
+                            "raw": "{\n    \"type\": \"reconciliation\",\n    \"format\": \"pdf\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -3863,7 +3863,7 @@
                         "description": "Backend action: `CscsUploadController@resolveException`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.reconcile",
                         "body": {
                             "mode": "raw",
-                            "raw": "{\n    \"resolution_type\": \"MAP_ACCOUNT\",\n    \"reason\": \"Account mapping confirmed against the shareholder register\",\n    \"register_account_id\": \"{{sra_id}}\",\n    \"account_allocations\": [\n        {\n            \"register_account_id\": \"{{sra_id}}\",\n            \"quantity\": \"6000\"\n        },\n        {\n            \"register_account_id\": \"{{secondary_sra_id}}\",\n            \"quantity\": \"4000\"\n        }\n    ]\n}",
+                            "raw": "{\n    \"resolution_type\": \"MAP_ACCOUNT\",\n    \"reason\": \"Account mapping confirmed against the shareholder register\",\n    \"account_allocations\": [\n        {\n            \"register_account_id\": \"{{sra_id}}\",\n            \"quantity\": \"{{allocation_quantity}}\"\n        }\n    ]\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"
@@ -4213,7 +4213,7 @@
                     "response": []
                 },
                 {
-                    "name": "POST - Cscs Upload - Revalidate",
+                    "name": "POST - Cscs Upload - Reconcile",
                     "request": {
                         "method": "POST",
                         "header": [

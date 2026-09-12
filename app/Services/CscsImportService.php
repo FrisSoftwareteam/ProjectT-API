@@ -453,6 +453,18 @@ class CscsImportService
         $effects = [];
         $readyGroups = 0;
         $groups = $rows->filter(fn (CscsUploadRow $row) => $row->tran_no)->groupBy('tran_no');
+        $securityMappings = CscsSecurityMapping::where('register_id', $batch->register_id)
+            ->where('is_active', true)
+            ->whereIn('security_code', $groups->keys()->map(
+                fn ($tranNo) => strtoupper((string) $groups->get($tranNo)?->first()?->sec_code)
+            )->filter()->unique()->values())
+            ->get()
+            ->keyBy(fn (CscsSecurityMapping $mapping) => strtoupper((string) $mapping->security_code));
+        $postedReplayKeys = CscsUploadRow::whereIn('fingerprint', $rows->pluck('replay_key')->filter()->unique())
+            ->where('status', 'posted')
+            ->pluck('id', 'fingerprint');
+        $accountResolutionCache = [];
+        $activeAccountCache = [];
         $processedValidationGroups = 0;
         $advanceValidationGroup = function () use (
             $batch,
@@ -493,7 +505,9 @@ class CscsImportService
                 continue;
             }
 
-            $replayed = $group->filter(fn (CscsUploadRow $row) => $this->isPostedReplay($row));
+            $replayed = $group->filter(fn (CscsUploadRow $row) => $row->replay_key
+                && isset($postedReplayKeys[$row->replay_key])
+                && (int) $postedReplayKeys[$row->replay_key] !== (int) $row->id);
             if ($replayed->count() === $group->count()) {
                 foreach ($group as $row) {
                     $row->update([
@@ -535,8 +549,8 @@ class CscsImportService
             }
 
             $securityCode = strtoupper((string) $group->first()->sec_code);
-            $mapping = CscsSecurityMapping::where('security_code', $securityCode)->where('is_active', true)->first();
-            if (! $mapping || (int) $mapping->register_id !== (int) $batch->register_id) {
+            $mapping = $securityMappings->get($securityCode);
+            if (! $mapping) {
                 $this->failGroup($group, 'UNKNOWN_SECURITY', "No active mapping exists for {$securityCode} in this register.");
 
                 $advanceValidationGroup();
@@ -546,7 +560,18 @@ class CscsImportService
 
             $groupReady = true;
             foreach ($group as $row) {
-                $account = $this->resolveAccountForPreview($row, $mapping->register_id);
+                $accountCacheKey = implode('|', [
+                    $mapping->register_id,
+                    $row->identifier_type,
+                    $row->identifier_value,
+                    $row->proposed_sra_id ?: '',
+                    $row->match_method ?: '',
+                    md5(json_encode(data_get($row->extra_details, 'account_proposal', []))),
+                    md5(json_encode(data_get($row->extra_details, 'master_profile', []))),
+                    data_get($row->extra_details, 'master_profile_count', ''),
+                    $row->sign,
+                ]);
+                $account = $accountResolutionCache[$accountCacheKey] ??= $this->resolveAccountForPreview($row, $mapping->register_id);
                 if (! $account['resolved']) {
                     $this->failRow($row, $account['code'], $account['message']);
                     $groupReady = false;
@@ -554,14 +579,17 @@ class CscsImportService
                     continue;
                 }
 
-                if ($account['sra_id'] && ! ShareholderRegisterAccount::whereKey($account['sra_id'])->where('status', 'active')->exists()) {
+                if ($account['sra_id'] && ! ($activeAccountCache[$account['sra_id']] ??= ShareholderRegisterAccount::whereKey($account['sra_id'])->where('status', 'active')->exists())) {
                     $this->failRow($row, 'ACCOUNT_FROZEN', 'The selected register account is not active.');
                     $groupReady = false;
 
                     continue;
                 }
                 $splitAccountIds = collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()->all();
-                if ($splitAccountIds && ShareholderRegisterAccount::whereIn('id', $splitAccountIds)->where('status', 'active')->count() !== count($splitAccountIds)) {
+                $inactiveSplitAccount = collect($splitAccountIds)->contains(function (int $accountId) use (&$activeAccountCache): bool {
+                    return ! ($activeAccountCache[$accountId] ??= ShareholderRegisterAccount::whereKey($accountId)->where('status', 'active')->exists());
+                });
+                if ($inactiveSplitAccount) {
                     $this->failRow($row, 'ACCOUNT_FROZEN', 'One or more selected register accounts are not active.');
                     $groupReady = false;
 
