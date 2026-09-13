@@ -37,7 +37,7 @@ class ShareholderCategorySeeder extends Seeder
                     'requires_joint_holders' => false,
                     'requires_review' => false,
                     'is_active' => true,
-                    'source_system' => 'ESTOCK',
+                    'source_system' => 'FRIS',
                 ], $category)
             );
             if ($model->trashed()) {

@@ -22,7 +22,6 @@ use App\Http\Controllers\Api\BankVerificationController;
 use App\Http\Controllers\Api\CautionController;
 use App\Http\Controllers\Api\CscsUploadController;
 use App\Http\Controllers\Api\IpoOfferController;
-use App\Http\Controllers\Api\LegacyMigrationController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\ProbateCaseController;
 use App\Http\Controllers\Api\ShareAllocationController;
@@ -326,22 +325,6 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/uploads/{batchId}/download-report', [CscsUploadController::class, 'downloadReport'])->middleware('permission:cscs.export');
         Route::get('/uploads/{batchId}/reports/download', [CscsUploadController::class, 'export'])->name('cscs.report.download')->middleware(['permission:cscs.export', 'signed']);
         Route::get('/uploads/{batchId}/export', [CscsUploadController::class, 'export'])->middleware('permission:cscs.export');
-    });
-
-    // Controlled, auditable legacy-data migration workflow
-    Route::prefix('legacy-migrations')->group(function () {
-        Route::get('/packages', [LegacyMigrationController::class, 'packages'])->middleware('permission:legacy_migrations.view');
-        Route::get('/batches', [LegacyMigrationController::class, 'index'])->middleware('permission:legacy_migrations.view');
-        Route::post('/batches', [LegacyMigrationController::class, 'create'])->middleware(['permission:legacy_migrations.create', 'throttle:5,1']);
-        Route::get('/batches/{batchId}', [LegacyMigrationController::class, 'show'])->middleware('permission:legacy_migrations.view');
-        Route::get('/batches/{batchId}/events', [LegacyMigrationController::class, 'events'])->middleware('permission:legacy_migrations.view');
-        Route::post('/batches/{batchId}/stage', [LegacyMigrationController::class, 'stage'])->middleware(['permission:legacy_migrations.stage', 'throttle:5,1']);
-        Route::post('/batches/{batchId}/reconcile', [LegacyMigrationController::class, 'reconcile'])->middleware('permission:legacy_migrations.reconcile');
-        Route::post('/batches/{batchId}/submit', [LegacyMigrationController::class, 'submit'])->middleware('permission:legacy_migrations.submit');
-        Route::post('/batches/{batchId}/approve', [LegacyMigrationController::class, 'approve'])->middleware('permission:legacy_migrations.approve');
-        Route::post('/batches/{batchId}/publish', [LegacyMigrationController::class, 'publish'])->middleware(['permission:legacy_migrations.publish', 'throttle:5,1']);
-        Route::post('/batches/{batchId}/cancel', [LegacyMigrationController::class, 'cancel'])->middleware('permission:legacy_migrations.submit');
-        Route::post('/batches/{batchId}/rollback', [LegacyMigrationController::class, 'rollback'])->middleware(['permission:legacy_migrations.rollback', 'throttle:5,1']);
     });
 
     // IPO / Offer processing

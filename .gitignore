@@ -21,10 +21,12 @@
 /vendor
 /build
 /migration-releases/*
-!/migration-releases/fidelity-bank-register-87-production-v1.tar.gz
-!/migration-releases/fidelity-bank-register-87-production-v1.manifest.json
-!/migration-releases/fidelity-bank-register-87-production-v1.sha256
 /docs/ESTOCK*
+/FRIS.sqlite
+/*.sqlite
+/*.sqlite3
+/*.db
+/*.zip
 /outputs
 /tools/estock_migration
 Homestead.json
