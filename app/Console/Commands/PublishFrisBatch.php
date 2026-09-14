@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\FrisMigrationBatch;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class PublishFrisBatch extends Command
 {
@@ -57,6 +58,11 @@ class PublishFrisBatch extends Command
             $target = $this->ensureRegisterTargets($batch, $now);
             $categoryId = DB::table('shareholder_categories')->where('code', 'A')->value('id')
                 ?? DB::table('shareholder_categories')->orderBy('id')->value('id');
+            $shareholderNameColumns = [
+                'first_name' => Schema::hasColumn('shareholders', 'first_name'),
+                'middle_name' => Schema::hasColumn('shareholders', 'middle_name'),
+                'last_name' => Schema::hasColumn('shareholders', 'last_name'),
+            ];
 
             $profiles = DB::table('fris_migration_profiles')
                 ->where('batch_id', $batch->id)
@@ -71,8 +77,9 @@ class PublishFrisBatch extends Command
                 $email = 'fris-'.$accountNo.'@invalid.projectt.local';
                 $phone = 'FRIS'.strtoupper(substr($hash, 0, 28));
                 $name = $profile->normalized_name ?: 'FRIS Account '.$profile->account_number;
+                $nameParts = $this->splitShareholderName($name);
 
-                $shareholderId = DB::table('shareholders')->insertGetId([
+                $shareholderPayload = [
                     'account_no' => $accountNo,
                     'holder_type' => $this->holderType($name),
                     'full_name' => $name,
@@ -84,7 +91,15 @@ class PublishFrisBatch extends Command
                     'status' => 'active',
                     'created_at' => $now,
                     'updated_at' => $now,
-                ]);
+                ];
+
+                foreach ($shareholderNameColumns as $column => $exists) {
+                    if ($exists) {
+                        $shareholderPayload[$column] = $nameParts[$column];
+                    }
+                }
+
+                $shareholderId = DB::table('shareholders')->insertGetId($shareholderPayload);
 
                 $normalized = json_decode((string) $profile->normalized_data, true) ?: [];
                 $addressId = DB::table('shareholder_addresses')->insertGetId([
@@ -322,5 +337,26 @@ class PublishFrisBatch extends Command
         return preg_match('/\b(LTD|LIMITED|PLC|BANK|FUND|TRUST|ASSURANCE|INSURANCE|COMPANY|CO\\.)\b/i', $name)
             ? 'corporate'
             : 'individual';
+    }
+
+    /** @return array{first_name:string,middle_name:?string,last_name:?string} */
+    private function splitShareholderName(string $name): array
+    {
+        $parts = preg_split('/\s+/', trim($name)) ?: [];
+        $parts = array_values(array_filter($parts, fn ($part) => $part !== ''));
+
+        if ($parts === []) {
+            return [
+                'first_name' => 'FRIS',
+                'middle_name' => null,
+                'last_name' => null,
+            ];
+        }
+
+        return [
+            'first_name' => substr($parts[0], 0, 100),
+            'middle_name' => count($parts) > 2 ? substr(implode(' ', array_slice($parts, 1, -1)), 0, 100) : null,
+            'last_name' => count($parts) > 1 ? substr($parts[count($parts) - 1], 0, 100) : null,
+        ];
     }
 }
