@@ -57,6 +57,13 @@ php artisan fris:profile --quick
 php artisan fris:profile
 ```
 
+Added per-register package export/import commands for server migrations where uploading the full `FRIS.sqlite` is impractical:
+
+```bash
+php artisan fris:export-register-package {register_code} --output=storage/app/fris-packages
+php artisan fris:stage-register-package storage/app/fris-packages/fris_register_{register_code}_YYYYMMDD_HHMMSS.zip
+```
+
 Added FRIS staging migration:
 
 ```bash

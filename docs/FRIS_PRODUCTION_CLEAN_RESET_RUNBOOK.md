@@ -212,6 +212,22 @@ DELETE FROM companies;
 
 ## First FRIS Commands After Reset
 
+If the full `FRIS.sqlite` file is too large to upload to the server, export one register package locally and upload only that ZIP:
+
+```bash
+php artisan fris:export-register-package 2 --output=storage/app/fris-packages
+```
+
+Upload the generated `storage/app/fris-packages/fris_register_2_*.zip` to the server, then stage from the package:
+
+```bash
+php artisan fris:stage-register-package storage/app/fris-packages/fris_register_2_YYYYMMDD_HHMMSS.zip
+```
+
+The rest of the flow is the same: reconcile, dry-run publish, publish, readiness-check, and rollback if needed.
+
+If the full SQLite file is available on the server, use the direct SQLite path:
+
 ```bash
 php artisan migrate --path=database/migrations/2026_09_13_060000_create_fris_migration_tables.php --force
 php artisan fris:profile --quick
