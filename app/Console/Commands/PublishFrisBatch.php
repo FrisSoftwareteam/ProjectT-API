@@ -63,6 +63,7 @@ class PublishFrisBatch extends Command
                 'middle_name' => Schema::hasColumn('shareholders', 'middle_name'),
                 'last_name' => Schema::hasColumn('shareholders', 'last_name'),
             ];
+            $legacyCscsAccounts = $this->legacyCscsAccountsByProfileKey($batch);
 
             $profiles = DB::table('fris_migration_profiles')
                 ->where('batch_id', $batch->id)
@@ -128,6 +129,7 @@ class PublishFrisBatch extends Command
                     'register_id' => $target['register_id'],
                     'shareholder_category_id' => $categoryId,
                     'shareholder_no' => (string) $profile->account_number,
+                    'cscs_account_no' => $legacyCscsAccounts[$sourceKey] ?? null,
                     'kyc_level' => 'basic',
                     'status' => 'active',
                     'created_at' => $now,
@@ -160,7 +162,10 @@ class PublishFrisBatch extends Command
                     'target_table' => 'shareholder_register_accounts',
                     'target_id' => $sraId,
                     'row_hash' => $profile->row_hash,
-                    'metadata' => json_encode(['shareholder_id' => $shareholderId]),
+                    'metadata' => json_encode([
+                        'shareholder_id' => $shareholderId,
+                        'legacy_cscs_account_no' => $legacyCscsAccounts[$sourceKey] ?? null,
+                    ]),
                     'created_at' => $now,
                     'updated_at' => $now,
                 ]);
@@ -337,6 +342,41 @@ class PublishFrisBatch extends Command
         return preg_match('/\b(LTD|LIMITED|PLC|BANK|FUND|TRUST|ASSURANCE|INSURANCE|COMPANY|CO\\.)\b/i', $name)
             ? 'corporate'
             : 'individual';
+    }
+
+    /** @return array<string,string> */
+    private function legacyCscsAccountsByProfileKey(FrisMigrationBatch $batch): array
+    {
+        $accounts = [];
+
+        DB::table('fris_migration_units')
+            ->where('batch_id', $batch->id)
+            ->where('status', 'VALID')
+            ->whereNotNull('source_data')
+            ->orderBy('id')
+            ->chunkById(5000, function ($units) use (&$accounts) {
+                foreach ($units as $unit) {
+                    $key = $unit->register_code.'|'.$unit->account_number;
+                    if (isset($accounts[$key])) {
+                        continue;
+                    }
+
+                    $source = json_decode((string) $unit->source_data, true) ?: [];
+                    $legacyAccount = $this->cleanLegacyCscsAccount($source['solid_acct'] ?? null);
+                    if ($legacyAccount !== null) {
+                        $accounts[$key] = $legacyAccount;
+                    }
+                }
+            });
+
+        return $accounts;
+    }
+
+    private function cleanLegacyCscsAccount(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' || $value === '0' ? null : substr($value, 0, 50);
     }
 
     /** @return array{first_name:string,middle_name:?string,last_name:?string} */

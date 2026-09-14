@@ -81,6 +81,20 @@ class CheckFrisOperationalReadiness extends Command
                 ->where('m.status', 'pending')
                 ->count()
             : 0;
+        $cscsAccountCount = $register
+            ? DB::table('shareholder_register_accounts')
+                ->where('register_id', $register->id)
+                ->whereNotNull('cscs_account_no')
+                ->where('cscs_account_no', '<>', '')
+                ->count()
+            : 0;
+        $chnCount = $register
+            ? DB::table('shareholder_register_accounts')
+                ->where('register_id', $register->id)
+                ->whereNotNull('chn')
+                ->where('chn', '<>', '')
+                ->count()
+            : 0;
 
         $checks = [
             'company_exists' => (bool) $company,
@@ -92,6 +106,8 @@ class CheckFrisOperationalReadiness extends Command
             'position_count' => $positionCount,
             'position_total' => $positionTotal,
             'paid_up_capital' => $register?->paid_up_capital,
+            'cscs_account_count' => $cscsAccountCount,
+            'chn_count' => $chnCount,
             'active_bank_mandates' => $activeMandates,
             'pending_bank_mandates' => $pendingMandates,
         ];

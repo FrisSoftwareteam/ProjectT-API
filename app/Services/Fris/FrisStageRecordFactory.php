@@ -84,6 +84,18 @@ class FrisStageRecordFactory
                 'category_desc' => $row['category_desc'],
                 'narration' => $row['narr'],
                 'description' => $row['desc_trans'],
+                'old_certificate_number' => trim((string) ($row['oldcertnumb'] ?? '')) ?: null,
+                'transfer_reference' => trim((string) ($row['xfer_no'] ?? '')) ?: null,
+                'verification_date' => $this->dateOrNull($row['verif_dt'] ?? null),
+                'broker_verified' => trim((string) ($row['brok_verified'] ?? '')) ?: null,
+                'legacy_cscs_account_no' => $this->stringOrNull($row['solid_acct'] ?? null),
+                'claimed' => $this->integerOrNull($row['claimed'] ?? null),
+                'unclaimed' => $this->integerOrNull($row['unclaim'] ?? null),
+                'stopped' => $this->integerOrNull($row['stop'] ?? null),
+                'lodge_reference' => $this->stringOrNull($row['lodge'] ?? null),
+                'lodge_date' => $this->dateOrNull($row['lodge_dt'] ?? null),
+                'lodge_counter' => $this->stringOrNull($row['lodge_cntr'] ?? null),
+                'extra' => trim((string) ($row['extra_json'] ?? '')) ?: null,
             ], JSON_UNESCAPED_SLASHES),
             'errors' => $errors === [] ? null : json_encode($errors),
             'created_at' => $now,
@@ -108,5 +120,12 @@ class FrisStageRecordFactory
         $value = trim((string) $value);
 
         return $value === '' || ! is_numeric($value) ? null : (int) $value;
+    }
+
+    private function stringOrNull(mixed $value): ?string
+    {
+        $value = trim((string) $value);
+
+        return $value === '' || $value === '0' ? null : $value;
     }
 }
