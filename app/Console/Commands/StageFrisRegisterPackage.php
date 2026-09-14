@@ -117,7 +117,7 @@ class StageFrisRegisterPackage extends Command
             throw new \RuntimeException('Unable to open CSV: '.$path);
         }
 
-        $headers = fgetcsv($handle);
+        $headers = fgetcsv($handle, null, ',', '"', '');
         if ($headers === false) {
             fclose($handle);
 
@@ -132,7 +132,16 @@ class StageFrisRegisterPackage extends Command
         $chunk = max(1, (int) $this->option('chunk'));
         $now = now();
 
-        while (($values = fgetcsv($handle)) !== false) {
+        while (($values = fgetcsv($handle, null, ',', '"', '')) !== false) {
+            if (count($values) !== count($headers)) {
+                throw new \RuntimeException(sprintf(
+                    '%s CSV row has %d columns, expected %d.',
+                    $type,
+                    count($values),
+                    count($headers)
+                ));
+            }
+
             $row = array_combine($headers, $values);
             if ($row === false) {
                 continue;
