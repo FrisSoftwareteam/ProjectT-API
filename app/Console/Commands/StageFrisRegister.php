@@ -98,7 +98,7 @@ class StageFrisRegister extends Command
         } catch (Throwable $exception) {
             $batch->update([
                 'status' => FrisMigrationBatch::FAILED,
-                'failure_reason' => $exception->getMessage(),
+                'failure_reason' => Str::limit($exception->getMessage(), 1000, '...'),
             ]);
             $this->error('FRIS staging failed: '.$exception->getMessage());
 

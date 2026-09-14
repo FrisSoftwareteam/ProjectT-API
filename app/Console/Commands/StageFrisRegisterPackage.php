@@ -98,7 +98,7 @@ class StageFrisRegisterPackage extends Command
             if (isset($batch)) {
                 $batch->update([
                     'status' => FrisMigrationBatch::FAILED,
-                    'failure_reason' => $exception->getMessage(),
+                    'failure_reason' => Str::limit($exception->getMessage(), 1000, '...'),
                 ]);
             }
             $this->error('FRIS package staging failed: '.$exception->getMessage());

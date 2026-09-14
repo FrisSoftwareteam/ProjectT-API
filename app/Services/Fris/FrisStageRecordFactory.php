@@ -71,10 +71,10 @@ class FrisStageRecordFactory
             'status' => $errors === [] ? 'VALID' : 'ERROR',
             'source_units' => is_numeric($row['units'] ?? null) ? number_format((float) $row['units'], 6, '.', '') : null,
             'issue_date' => $this->dateOrNull($row['issue_dt'] ?? null),
-            'source_status' => $row['status'],
-            'source_verified' => $row['verif'],
-            'source_claimed' => $row['claimed'],
-            'source_stop' => $row['stop'],
+            'source_status' => $this->integerOrNull($row['status'] ?? null),
+            'source_verified' => $this->integerOrNull($row['verif'] ?? null),
+            'source_claimed' => $this->integerOrNull($row['claimed'] ?? null),
+            'source_stop' => $this->integerOrNull($row['stop'] ?? null),
             'source_data' => json_encode($row, JSON_UNESCAPED_SLASHES),
             'normalized_data' => json_encode([
                 'certificate_number' => $row['cert_number'],
@@ -101,5 +101,12 @@ class FrisStageRecordFactory
         $timestamp = strtotime($value);
 
         return $timestamp === false ? null : date('Y-m-d H:i:s', $timestamp);
+    }
+
+    private function integerOrNull(mixed $value): ?int
+    {
+        $value = trim((string) $value);
+
+        return $value === '' || ! is_numeric($value) ? null : (int) $value;
     }
 }
