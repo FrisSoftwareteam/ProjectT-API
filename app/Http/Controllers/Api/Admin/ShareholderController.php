@@ -98,7 +98,9 @@ class ShareholderController extends Controller
             )->with(['category', 'register']);
         }]);
 
-        $shareholders = $query->paginate(20);
+        $perPage = $request->integer('per_page', 20);
+
+        $shareholders = $query->paginate($perPage);
 
         $shareholders->getCollection()->each(function (Shareholder $shareholder) {
             $shareholder->total_holdings ??= '0.000000';
