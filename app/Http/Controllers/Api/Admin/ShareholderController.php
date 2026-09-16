@@ -54,7 +54,12 @@ class ShareholderController extends Controller
                     ->orWhere('middle_name', 'like', $like)
                     ->orWhere('email', 'like', $like)
                     ->orWhere('phone', 'like', $like)
-                    ->orWhere('account_no', 'like', $like);
+                    ->orWhere('account_no', 'like', $like)
+                    ->orWhereHas('registerAccounts', function ($accountQuery) use ($like) {
+                        $accountQuery->where('chn', 'like', $like)
+                            ->orWhere('cscs_account_no', 'like', $like)
+                            ->orWhere('shareholder_no', 'like', $like);
+                    });
             });
         }
 

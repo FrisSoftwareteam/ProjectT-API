@@ -170,6 +170,57 @@ class ShareholderFilterApiTest extends TestCase
             ->assertJsonPath('data.0.total_holdings', '700.000000');
     }
 
+    public function test_shareholders_can_be_searched_by_chn(): void
+    {
+        [$register] = $this->createRegisters();
+        $target = $this->createShareholder('chn-target');
+        $other = $this->createShareholder('chn-other');
+        DB::table('shareholder_register_accounts')->insert([
+            'shareholder_id' => $target,
+            'register_id' => $register,
+            'chn' => 'FR5FA468F03CCD7BC2B9',
+            'status' => 'active',
+        ]);
+        $this->createRegisterAccount($other, $register);
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search=FR5FA468F03CCD7BC2B9')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $target);
+    }
+
+    public function test_shareholders_can_be_searched_by_cscs_account_no_or_shareholder_no(): void
+    {
+        [$register] = $this->createRegisters();
+        $byCscs = $this->createShareholder('cscs-target');
+        $byShareholderNo = $this->createShareholder('sno-target');
+        DB::table('shareholder_register_accounts')->insert([
+            'shareholder_id' => $byCscs,
+            'register_id' => $register,
+            'cscs_account_no' => 'CSCS998877',
+            'status' => 'active',
+        ]);
+        DB::table('shareholder_register_accounts')->insert([
+            'shareholder_id' => $byShareholderNo,
+            'register_id' => $register,
+            'shareholder_no' => 'SH-00042',
+            'status' => 'active',
+        ]);
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search=CSCS998877')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $byCscs);
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search=SH-00042')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $byShareholderNo);
+    }
+
     public function test_filter_ids_are_validated(): void
     {
         $this->withoutMiddleware()
