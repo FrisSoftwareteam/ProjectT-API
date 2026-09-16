@@ -63,125 +63,121 @@ class PublishFrisBatch extends Command
                 'middle_name' => Schema::hasColumn('shareholders', 'middle_name'),
                 'last_name' => Schema::hasColumn('shareholders', 'last_name'),
             ];
-            $legacyCscsAccounts = $this->legacyCscsAccountsByProfileKey($batch);
-
-            $profiles = DB::table('fris_migration_profiles')
+            DB::table('fris_migration_profiles')
                 ->where('batch_id', $batch->id)
                 ->where('status', 'VALID')
                 ->orderBy('id')
-                ->get();
+                ->chunkById(500, function ($profiles) use ($batch, $target, $categoryId, $shareholderNameColumns, $now) {
+                    $legacyCscsAccounts = $this->legacyCscsAccountsForProfiles($batch, $profiles);
 
-            foreach ($profiles as $profile) {
-                $sourceKey = $profile->register_code.'|'.$profile->account_number;
-                $hash = hash('sha256', $sourceKey);
-                $accountNo = 'FR'.strtoupper(substr($hash, 0, 18));
-                $email = 'fris-'.$accountNo.'@invalid.projectt.local';
-                $phone = 'FRIS'.strtoupper(substr($hash, 0, 28));
-                $name = $profile->normalized_name ?: 'FRIS Account '.$profile->account_number;
-                $nameParts = $this->splitShareholderName($name);
+                    foreach ($profiles as $profile) {
+                        $sourceKey = $profile->register_code.'|'.$profile->account_number;
+                        $hash = hash('sha256', $sourceKey);
+                        $accountNo = 'FR'.strtoupper(substr($hash, 0, 18));
+                        $email = 'fris-'.$accountNo.'@invalid.projectt.local';
+                        $phone = 'FRIS'.strtoupper(substr($hash, 0, 28));
+                        $name = $profile->normalized_name ?: 'FRIS Account '.$profile->account_number;
+                        $nameParts = $this->splitShareholderName($name);
 
-                $shareholderPayload = [
-                    'account_no' => $accountNo,
-                    'holder_type' => $this->holderType($name),
-                    'full_name' => $name,
-                    'email' => $email,
-                    'email_is_verified' => false,
-                    'phone' => $phone,
-                    'phone_is_verified' => false,
-                    'contact_suppressed' => true,
-                    'status' => 'active',
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
+                        $shareholderPayload = [
+                            'account_no' => $accountNo,
+                            'holder_type' => $this->holderType($name),
+                            'full_name' => $name,
+                            'email' => $email,
+                            'email_is_verified' => false,
+                            'phone' => $phone,
+                            'phone_is_verified' => false,
+                            'contact_suppressed' => true,
+                            'status' => 'active',
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
 
-                foreach ($shareholderNameColumns as $column => $exists) {
-                    if ($exists) {
-                        $shareholderPayload[$column] = $nameParts[$column];
+                        foreach ($shareholderNameColumns as $column => $exists) {
+                            if ($exists) {
+                                $shareholderPayload[$column] = $nameParts[$column];
+                            }
+                        }
+
+                        $shareholderId = DB::table('shareholders')->insertGetId($shareholderPayload);
+
+                        $normalized = json_decode((string) $profile->normalized_data, true) ?: [];
+                        $addressId = DB::table('shareholder_addresses')->insertGetId([
+                            'shareholder_id' => $shareholderId,
+                            'address_line1' => $normalized['address'] ?: 'Unknown legacy address',
+                            'country' => 'Nigeria',
+                            'is_primary' => true,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+
+                        if (! empty($normalized['bankac'])) {
+                            DB::table('shareholder_bank_mandates')->insertOrIgnore([
+                                'shareholder_id' => $shareholderId,
+                                'bank_name' => $normalized['clearing_no'] ? 'FRIS Clearing '.$normalized['clearing_no'] : 'FRIS Legacy Bank',
+                                'account_name' => $name,
+                                'account_number' => $normalized['bankac'],
+                                'status' => 'active',
+                                'created_at' => $now,
+                                'updated_at' => $now,
+                            ]);
+                        }
+
+                        $sraId = DB::table('shareholder_register_accounts')->insertGetId([
+                            'shareholder_id' => $shareholderId,
+                            'register_id' => $target['register_id'],
+                            'shareholder_category_id' => $categoryId,
+                            'shareholder_no' => (string) $profile->account_number,
+                            'cscs_account_no' => $legacyCscsAccounts[$sourceKey] ?? null,
+                            'kyc_level' => 'basic',
+                            'status' => 'active',
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+
+                        DB::table('share_positions')->insert([
+                            'sra_id' => $sraId,
+                            'share_class_id' => $target['share_class_id'],
+                            'quantity' => $profile->source_holdings ?? 0,
+                            'holding_mode' => 'paper',
+                            'last_updated_at' => $now,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+
+                        DB::table('fris_migration_profiles')->where('id', $profile->id)->update([
+                            'shareholder_id' => $shareholderId,
+                            'address_id' => $addressId,
+                            'sra_id' => $sraId,
+                            'published_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+
+                        DB::table('fris_migration_crosswalks')->insert([
+                            'batch_id' => $batch->id,
+                            'source_table' => 'profiles',
+                            'source_key' => $sourceKey,
+                            'source_key_hash' => $profile->source_key_hash,
+                            'target_table' => 'shareholder_register_accounts',
+                            'target_id' => $sraId,
+                            'row_hash' => $profile->row_hash,
+                            'metadata' => json_encode([
+                                'shareholder_id' => $shareholderId,
+                                'legacy_cscs_account_no' => $legacyCscsAccounts[$sourceKey] ?? null,
+                            ]),
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
                     }
-                }
-
-                $shareholderId = DB::table('shareholders')->insertGetId($shareholderPayload);
-
-                $normalized = json_decode((string) $profile->normalized_data, true) ?: [];
-                $addressId = DB::table('shareholder_addresses')->insertGetId([
-                    'shareholder_id' => $shareholderId,
-                    'address_line1' => $normalized['address'] ?: 'Unknown legacy address',
-                    'country' => 'Nigeria',
-                    'is_primary' => true,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ]);
-
-                if (! empty($normalized['bankac'])) {
-                    DB::table('shareholder_bank_mandates')->insertOrIgnore([
-                        'shareholder_id' => $shareholderId,
-                        'bank_name' => $normalized['clearing_no'] ? 'FRIS Clearing '.$normalized['clearing_no'] : 'FRIS Legacy Bank',
-                        'account_name' => $name,
-                        'account_number' => $normalized['bankac'],
-                        'status' => 'active',
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ]);
-                }
-
-                $sraId = DB::table('shareholder_register_accounts')->insertGetId([
-                    'shareholder_id' => $shareholderId,
-                    'register_id' => $target['register_id'],
-                    'shareholder_category_id' => $categoryId,
-                    'shareholder_no' => (string) $profile->account_number,
-                    'cscs_account_no' => $legacyCscsAccounts[$sourceKey] ?? null,
-                    'kyc_level' => 'basic',
-                    'status' => 'active',
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ]);
-
-                DB::table('share_positions')->insert([
-                    'sra_id' => $sraId,
-                    'share_class_id' => $target['share_class_id'],
-                    'quantity' => $profile->source_holdings ?? 0,
-                    'holding_mode' => 'paper',
-                    'last_updated_at' => $now,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ]);
-
-                DB::table('fris_migration_profiles')->where('id', $profile->id)->update([
-                    'shareholder_id' => $shareholderId,
-                    'address_id' => $addressId,
-                    'sra_id' => $sraId,
-                    'published_at' => $now,
-                    'updated_at' => $now,
-                ]);
-
-                DB::table('fris_migration_crosswalks')->insert([
-                    'batch_id' => $batch->id,
-                    'source_table' => 'profiles',
-                    'source_key' => $sourceKey,
-                    'source_key_hash' => $profile->source_key_hash,
-                    'target_table' => 'shareholder_register_accounts',
-                    'target_id' => $sraId,
-                    'row_hash' => $profile->row_hash,
-                    'metadata' => json_encode([
-                        'shareholder_id' => $shareholderId,
-                        'legacy_cscs_account_no' => $legacyCscsAccounts[$sourceKey] ?? null,
-                    ]),
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ]);
-            }
-
-            $sraByKey = DB::table('fris_migration_profiles')
-                ->where('batch_id', $batch->id)
-                ->whereNotNull('sra_id')
-                ->get()
-                ->mapWithKeys(fn ($profile) => [$profile->register_code.'|'.$profile->account_number => $profile->sra_id]);
+                });
 
             DB::table('fris_migration_units')
                 ->where('batch_id', $batch->id)
                 ->where('status', 'VALID')
                 ->orderBy('id')
-                ->chunkById(2000, function ($units) use ($batch, $target, $sraByKey, $now) {
+                ->chunkById(2000, function ($units) use ($batch, $target, $now) {
+                    $sraByKey = $this->sraIdsForUnits($batch, $units);
+
                     foreach ($units as $unit) {
                         $sraId = $sraByKey[$unit->register_code.'|'.$unit->account_number] ?? null;
                         if ($sraId === null) {
@@ -345,16 +341,26 @@ class PublishFrisBatch extends Command
     }
 
     /** @return array<string,string> */
-    private function legacyCscsAccountsByProfileKey(FrisMigrationBatch $batch): array
+    private function legacyCscsAccountsForProfiles(FrisMigrationBatch $batch, mixed $profiles): array
     {
         $accounts = [];
+        $accountNumbers = collect($profiles)
+            ->pluck('account_number')
+            ->map(fn ($accountNumber) => (string) $accountNumber)
+            ->unique()
+            ->values();
+
+        if ($accountNumbers->isEmpty()) {
+            return $accounts;
+        }
 
         DB::table('fris_migration_units')
             ->where('batch_id', $batch->id)
             ->where('status', 'VALID')
             ->whereNotNull('source_data')
+            ->whereIn('account_number', $accountNumbers)
             ->orderBy('id')
-            ->chunkById(5000, function ($units) use (&$accounts) {
+            ->chunkById(2000, function ($units) use (&$accounts) {
                 foreach ($units as $unit) {
                     $key = $unit->register_code.'|'.$unit->account_number;
                     if (isset($accounts[$key])) {
@@ -370,6 +376,28 @@ class PublishFrisBatch extends Command
             });
 
         return $accounts;
+    }
+
+    /** @return array<string,int> */
+    private function sraIdsForUnits(FrisMigrationBatch $batch, mixed $units): array
+    {
+        $accountNumbers = collect($units)
+            ->pluck('account_number')
+            ->map(fn ($accountNumber) => (string) $accountNumber)
+            ->unique()
+            ->values();
+
+        if ($accountNumbers->isEmpty()) {
+            return [];
+        }
+
+        return DB::table('fris_migration_profiles')
+            ->where('batch_id', $batch->id)
+            ->whereNotNull('sra_id')
+            ->whereIn('account_number', $accountNumbers)
+            ->get(['register_code', 'account_number', 'sra_id'])
+            ->mapWithKeys(fn ($profile) => [$profile->register_code.'|'.$profile->account_number => (int) $profile->sra_id])
+            ->all();
     }
 
     private function cleanLegacyCscsAccount(mixed $value): ?string
