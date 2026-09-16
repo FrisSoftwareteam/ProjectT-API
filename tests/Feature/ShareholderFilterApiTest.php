@@ -170,6 +170,59 @@ class ShareholderFilterApiTest extends TestCase
             ->assertJsonPath('data.0.total_holdings', '700.000000');
     }
 
+    public function test_chn_search_still_respects_register_filter(): void
+    {
+        [$firstRegister, $secondRegister] = $this->createRegisters();
+        $inFirstRegister = $this->createShareholder('chn-in-first');
+        $inSecondRegister = $this->createShareholder('chn-in-second');
+        DB::table('shareholder_register_accounts')->insert([
+            'shareholder_id' => $inFirstRegister,
+            'register_id' => $firstRegister,
+            'chn' => 'SHARED-CHN-CODE',
+            'status' => 'active',
+        ]);
+        DB::table('shareholder_register_accounts')->insert([
+            'shareholder_id' => $inSecondRegister,
+            'register_id' => $secondRegister,
+            'chn' => 'SHARED-CHN-CODE',
+            'status' => 'active',
+        ]);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?search=SHARED-CHN-CODE&register_id={$firstRegister}")
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $inFirstRegister);
+    }
+
+    public function test_search_with_no_matches_returns_empty_result(): void
+    {
+        $this->createShareholder('no-match-here');
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search=NOTHING_MATCHES_THIS_XYZ')
+            ->assertOk()
+            ->assertJsonPath('total', 0)
+            ->assertJsonPath('data', []);
+    }
+
+    public function test_name_and_account_no_search_still_works(): void
+    {
+        $target = $this->createShareholder('Findme');
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search=Findme')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $target);
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search=ACCOUNT-Findme')
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $target);
+    }
+
     public function test_shareholders_can_be_searched_by_chn(): void
     {
         [$register] = $this->createRegisters();
