@@ -7,5 +7,4 @@ $channels = array_values(array_filter(array_map(
 
 return [
     'admin_channels' => $channels,
-    'queue' => env('NOTIFICATION_QUEUE', 'default'),
 ];

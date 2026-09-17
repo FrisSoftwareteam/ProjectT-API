@@ -5,18 +5,16 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\ShareTransferRequest;
 use App\Models\ShareClass;
-use App\Models\Shareholder;
-use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
 use App\Models\ShareTransaction;
 use App\Models\ShareTransferEvent;
+use App\Models\Shareholder;
+use App\Models\ShareholderRegisterAccount;
 use App\Services\ActivityLogService;
 use App\Services\AdminNotificationService;
 use App\Services\CapitalValidationService;
 use App\Services\UnitPrecisionValidationService;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class ShareTransferController extends Controller
@@ -26,18 +24,7 @@ class ShareTransferController extends Controller
         private readonly ActivityLogService $activityLogService,
         private readonly AdminNotificationService $adminNotificationService,
         private readonly UnitPrecisionValidationService $unitPrecisionValidationService,
-    ) {}
-
-    public function activityLog(Request $request)
-    {
-        $data = $request->validate([
-            'status' => ['nullable', Rule::in(['POSTED'])],
-            'page' => ['nullable', 'integer', 'min:1'], 'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
-        ]);
-        $paginator = ShareTransferEvent::with('shareClass')->latest('id')->paginate($data['per_page'] ?? 20);
-        $paginator->setCollection($paginator->getCollection()->map(fn ($event) => $event->toArray() + ['status' => 'POSTED']));
-
-        return response()->json($paginator);
+    ) {
     }
 
     public function store(ShareTransferRequest $request)
@@ -99,7 +86,7 @@ class ShareTransferController extends Controller
             $fromPos->save();
             $toPos->save();
 
-            $txRef = 'TRF-'.now()->format('YmdHis').'-'.$fromSra->id.'-'.$toSra->id;
+            $txRef = 'TRF-' . now()->format('YmdHis') . '-' . $fromSra->id . '-' . $toSra->id;
             ShareTransaction::create([
                 'sra_id' => $fromSra->id,
                 'share_class_id' => $shareClass->id,

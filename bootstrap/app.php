@@ -1,22 +1,9 @@
 <?php
 
-use App\Http\Middleware\ForceJsonResponse;
-use App\Http\Middleware\LogApiActivity;
-use Illuminate\Auth\Access\AuthorizationException;
-use Illuminate\Auth\AuthenticationException;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Illuminate\Http\JsonResponse;
-use Illuminate\Routing\Middleware\SubstituteBindings;
-use Illuminate\Validation\ValidationException;
-use Spatie\Permission\Exceptions\UnauthorizedException;
-use Spatie\Permission\Middleware\PermissionMiddleware;
-use Spatie\Permission\Middleware\RoleMiddleware;
-use Spatie\Permission\Middleware\RoleOrPermissionMiddleware;
 use Symfony\Component\HttpFoundation\Request as SymfonyRequest;
-use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -38,47 +25,21 @@ return Application::configure(basePath: dirname(__DIR__))
         );
 
         $middleware->alias([
-            'role' => RoleMiddleware::class,
-            'permission' => PermissionMiddleware::class,
-            'role_or_permission' => RoleOrPermissionMiddleware::class,
-            'activity.log' => LogApiActivity::class,
+            'role' => \Spatie\Permission\Middleware\RoleMiddleware::class,
+            'permission' => \Spatie\Permission\Middleware\PermissionMiddleware::class,
+            'role_or_permission' => \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class,
+            'activity.log' => \App\Http\Middleware\LogApiActivity::class,
         ]);
 
         // Force JSON responses for all API routes
         $middleware->group('api', [
-            ForceJsonResponse::class,
-            SubstituteBindings::class,
+            \App\Http\Middleware\ForceJsonResponse::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        $exceptions->respond(function ($response, $exception, $request) {
-            if (! $request->is('api/cscs', 'api/cscs/*') || ! $response instanceof JsonResponse) {
-                return $response;
-            }
-            $payload = $response->getData(true);
-            $status = $exception instanceof HttpExceptionInterface
-                ? $exception->getStatusCode() : $response->getStatusCode();
-            $details = $exception instanceof ValidationException ? $exception->errors() : [];
-            $code = match (true) {
-                isset($details['pre_posting_checks']) => 'PRE_POSTING_CHECK_FAILED',
-                isset($details['snapshot_hash']) => 'SNAPSHOT_HASH_MISMATCH',
-                isset($details['status']) => 'BATCH_STATE_CONFLICT',
-                $status === 401 => 'UNAUTHORIZED',
-                $status === 403 && str_contains($exception->getMessage(), 'Maker-checker') => 'SELF_APPROVAL_FORBIDDEN',
-                $status === 403 => 'FORBIDDEN',
-                $status === 404 => 'RESOURCE_NOT_FOUND',
-                $status === 422 => 'VALIDATION_ERROR',
-                $status === 429 => 'RATE_LIMITED',
-                default => 'INTERNAL_ERROR',
-            };
-            // Preserve existing top-level message/errors and add a machine-readable envelope.
-            $payload['error'] = ['code' => $code, 'message' => $payload['message'] ?? 'Request failed.', 'details' => $details];
-            $response->setData($payload)->setStatusCode($status);
-
-            return $response;
-        });
         // Handle unauthorized access for API routes
-        $exceptions->render(function (AuthenticationException $e, $request) {
+        $exceptions->render(function (\Illuminate\Auth\AuthenticationException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
@@ -88,7 +49,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Handle forbidden access (lack of permissions)
-        $exceptions->render(function (AuthorizationException $e, $request) {
+        $exceptions->render(function (\Illuminate\Auth\Access\AuthorizationException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
@@ -99,7 +60,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Handle Spatie permission exceptions
-        $exceptions->render(function (UnauthorizedException $e, $request) {
+        $exceptions->render(function (\Spatie\Permission\Exceptions\UnauthorizedException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
@@ -110,7 +71,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Handle model not found
-        $exceptions->render(function (ModelNotFoundException $e, $request) {
+        $exceptions->render(function (\Illuminate\Database\Eloquent\ModelNotFoundException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
@@ -120,7 +81,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Handle validation exceptions (already handled by Laravel, but ensure JSON)
-        $exceptions->render(function (ValidationException $e, $request) {
+        $exceptions->render(function (\Illuminate\Validation\ValidationException $e, $request) {
             if ($request->is('api/*')) {
                 return response()->json([
                     'success' => false,
@@ -131,7 +92,7 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         // Handle general exceptions for API
-        $exceptions->render(function (Throwable $e, $request) {
+        $exceptions->render(function (\Throwable $e, $request) {
             if ($request->is('api/*') && ! config('app.debug')) {
                 return response()->json([
                     'success' => false,

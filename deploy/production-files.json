@@ -1,7 +1,6 @@
 {
     "include": [
         "app",
-        "App_Data",
         "artisan",
         "bootstrap/app.php",
         "bootstrap/providers.php",

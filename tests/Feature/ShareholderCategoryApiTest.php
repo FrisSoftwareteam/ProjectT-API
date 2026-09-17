@@ -77,7 +77,7 @@ class ShareholderCategoryApiTest extends TestCase
                 'name' => 'Foreign Shareholders',
                 'default_holder_type' => null,
                 'requires_review' => true,
-                'source_system' => 'FRIS',
+                'source_system' => 'ESTOCK',
             ])
             ->assertCreated()
             ->assertJsonPath('data.code', 'V')
@@ -89,7 +89,7 @@ class ShareholderCategoryApiTest extends TestCase
         ]);
     }
 
-    public function test_fris_category_seeder_is_complete_and_idempotent(): void
+    public function test_estock_category_seeder_is_complete_and_idempotent(): void
     {
         $this->seed(ShareholderCategorySeeder::class);
         $this->seed(ShareholderCategorySeeder::class);
@@ -191,7 +191,7 @@ class ShareholderCategoryApiTest extends TestCase
             'default_holder_type' => $holderType,
             'requires_review' => $requiresReview,
             'is_active' => true,
-            'source_system' => 'FRIS',
+            'source_system' => 'ESTOCK',
         ]);
     }
 

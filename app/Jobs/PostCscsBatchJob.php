@@ -26,7 +26,7 @@ class PostCscsBatchJob implements ShouldBeUnique, ShouldQueue
         public readonly int $actorId,
         public readonly ?string $comment = null
     ) {
-        $this->onQueue(config('cscs.queue', 'cscs'));
+        $this->onQueue('cscs');
     }
 
     public function uniqueId(): string
@@ -36,16 +36,7 @@ class PostCscsBatchJob implements ShouldBeUnique, ShouldQueue
 
     public function handle(CscsImportService $service, AdminNotificationService $notifications): void
     {
-        $batch = CscsUploadBatch::findOrFail($this->batchId);
-        if ($batch->workflow_status === 'POSTED') {
-            return;
-        }
         $actor = AdminUser::findOrFail($this->actorId);
-        $notifications->sendToRoles(
-            ['Reconciliation', 'Internal Audit', 'Compliance', 'Admin', 'Super Admin'],
-            'CSCS_POSTING_STARTED', 'CSCS posting started', "Posting started for CSCS batch #{$this->batchId}.",
-            'cscs_upload_batch', $this->batchId, "CSCS batch #{$this->batchId}", "/cscs/uploads/{$this->batchId}", $this->actorId
-        );
         $service->post($this->batchId, $actor, $this->comment);
         $notifications->sendToRoles(
             ['Reconciliation', 'Internal Audit', 'Compliance', 'Admin', 'Super Admin'],

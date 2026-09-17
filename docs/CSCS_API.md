@@ -96,43 +96,15 @@ The second approval step is activated when total debit is at or above the config
 | GET | `/uploads/{batchId}/rows` | Movement rows |
 | GET | `/uploads/{batchId}/rows/{rowId}` | One staged row |
 | GET | `/uploads/{batchId}/master-records` | Parsed master records |
-| GET | `/uploads/{batchId}/transactions` | UI-ready transaction groups with debit/credit accounts, risk, resolution, balance and flags |
-| GET | `/uploads/{batchId}/transactions/{transactionNumber}` | The same UI-ready contract plus raw debit/credit legs for one transaction |
-| GET | `/uploads/{batchId}/account-effects` | Named proposed holding effects and proposed-account profiles |
-| GET | `/uploads/{batchId}/preview` | Complete maker/checker preview with actors, review summary, timeline and comments |
-| GET | `/uploads/{batchId}/exceptions` | Blocking/resolved exceptions with severity, suggestions, history and summary counts |
+| GET | `/uploads/{batchId}/transactions` | Transaction groups |
+| GET | `/uploads/{batchId}/transactions/{transactionNumber}` | Debit and credit legs for a transaction |
+| GET | `/uploads/{batchId}/account-effects` | Proposed holding effects |
+| GET | `/uploads/{batchId}/preview` | Complete maker/checker preview |
+| GET | `/uploads/{batchId}/exceptions` | Blocking and resolved exceptions |
 | GET | `/uploads/{batchId}/files` | Private source-file metadata |
 | GET | `/uploads/{batchId}/files/{fileIndex}/download` | Authorized source-file download |
 | GET | `/uploads/{batchId}/related-batches` | Original/reversal batch links |
 | GET | `/uploads/{batchId}/snapshots` | Immutable submitted revision evidence |
-
-Transaction-group query parameters:
-
-```text
-search=transaction number, account identifier, or security code
-balance_status=BALANCED|UNBALANCED
-is_flagged=true|false
-resolution_status=READY|UNRESOLVED|INVALID|RULE_EXCLUDED|CONFIRMED_REPLAY|POSTED
-security_code=FIDELITYBK
-trade_date_from=YYYY-MM-DD
-trade_date_to=YYYY-MM-DD
-page=1
-per_page=50
-```
-
-`meta.transaction_counts` always reports counts across the complete batch, while `total`, `current_page`, and `data` describe the filtered result.
-
-Exception query parameters:
-
-```text
-status=UNRESOLVED                         # legacy filter name
-resolution_status=UNRESOLVED              # preferred alias
-exception_code=DEBIT_ACCOUNT_NOT_FOUND
-search=transaction, identifier, code, message, or row number
-per_page=50
-```
-
-`meta.exception_counts` reports `total`, `blocking`, `warnings`, `resolved`, and `remaining` across the complete batch. Resolved rows remain available for the Resolved tab and audit history.
 
 Upload uses `multipart/form-data`:
 
@@ -158,7 +130,7 @@ Rules:
 - A file hash already staged for the same register is rejected unless the earlier batch failed or was cancelled.
 - Duplicate movement rows and duplicate/ambiguous master identifiers are blocking exceptions.
 
-The asynchronous response is `202 Accepted`. `summary.processing_percent` advances monotonically from staged (`0`) through row parsing (`1–80`), validation (`82–99`), and ready (`100`). `summary.processing_stage` identifies the active stage, while `source_rows_processed` and `source_rows_total` provide row-level parsing progress. The current values and final parsed status are available from `GET /uploads/{batchId}`.
+The asynchronous response is `202 Accepted`. `summary.processing_stage` and `summary.processing_percent` can be used for progress display; the final parsed status is available from `GET /uploads/{batchId}`.
 
 ## Reconciliation endpoints
 
@@ -221,8 +193,6 @@ Submission freezes a SHA-256 snapshot of every source row, resolution, mapping, 
 
 Approval does not post holdings. The maker is prohibited from approving, rejecting as checker, or posting their own batch.
 
-The maker may cancel during `PROCESSING`, `DRAFT_REVIEW`, `RECONCILED`, `QUERY_RAISED`, `STALE`, or `PROCESSING_FAILED`. Cancelling an active import signals the queue worker to stop, preserves `CANCELLED` as the final status, and marks any already-created unposted movement rows `CANCELLED_WITH_BATCH`.
-
 Typical action body:
 
 ```json
@@ -248,10 +218,6 @@ Query body:
 | POST | `/uploads/{batchId}/post` | `cscs.post` |
 | POST | `/uploads/{batchId}/retry-posting` | `cscs.post` |
 | GET | `/uploads/{batchId}/posting-status` | `cscs.view` |
-| GET | `/uploads/{batchId}/posting-readiness` | `cscs.view` |
-| GET | `/uploads/{batchId}/verification-summary` | `cscs.view` |
-| GET | `/uploads/{batchId}/comments` | `cscs.view` |
-| POST | `/uploads/{batchId}/comments` | CSCS review/reconcile/approve/post permission |
 
 Posting returns `202 Accepted` and dispatches a unique job to the `cscs` queue. Run a worker in production:
 
@@ -285,16 +251,6 @@ Supported types:
 - `reconciliation`
 - `preview`
 - `posting`
-- `audit`
-- `activity`
-
-Optional `format` values are `csv`, `pdf`, `xls`, and `xlsx`. PDF is available for `audit` and `reconciliation`; Excel is available for `activity`. Examples:
-
-```text
-GET /uploads/{batchId}/export?type=audit&format=pdf
-GET /uploads/{batchId}/export?type=reconciliation&format=pdf
-GET /uploads/{batchId}/export?type=activity&format=xls
-```
 
 Exports and source downloads require `cscs.export`.
 
