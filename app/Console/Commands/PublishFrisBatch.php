@@ -11,7 +11,9 @@ class PublishFrisBatch extends Command
 {
     protected $signature = 'fris:publish-batch
         {batch_id : Reconciled FRIS migration batch ID}
-        {--dry-run : Check publish readiness without writing domain tables}';
+        {--dry-run : Check publish readiness without writing domain tables}
+        {--profile-chunk-size=250 : Profiles committed per transaction}
+        {--unit-chunk-size=1000 : Units committed per transaction}';
 
     protected $description = 'Publish a reconciled FRIS batch into Project T domain tables';
 
@@ -53,21 +55,32 @@ class PublishFrisBatch extends Command
             return self::SUCCESS;
         }
 
-        DB::transaction(function () use ($batch) {
-            $now = now();
-            $target = $this->ensureRegisterTargets($batch, $now);
-            $categoryId = DB::table('shareholder_categories')->where('code', 'A')->value('id')
-                ?? DB::table('shareholder_categories')->orderBy('id')->value('id');
-            $shareholderNameColumns = [
-                'first_name' => Schema::hasColumn('shareholders', 'first_name'),
-                'middle_name' => Schema::hasColumn('shareholders', 'middle_name'),
-                'last_name' => Schema::hasColumn('shareholders', 'last_name'),
-            ];
-            DB::table('fris_migration_profiles')
-                ->where('batch_id', $batch->id)
-                ->where('status', 'VALID')
-                ->orderBy('id')
-                ->chunkById(500, function ($profiles) use ($batch, $target, $categoryId, $shareholderNameColumns, $now) {
+        $profileChunkSize = max(1, (int) $this->option('profile-chunk-size'));
+        $unitChunkSize = max(1, (int) $this->option('unit-chunk-size'));
+        $target = DB::transaction(fn () => $this->ensureRegisterTargets($batch, now()));
+
+        $batch->update([
+            'status' => FrisMigrationBatch::PUBLISHING,
+            'publishing_started_at' => $batch->publishing_started_at ?? now(),
+            'failure_reason' => null,
+        ]);
+
+        $profileChunks = 0;
+        DB::table('fris_migration_profiles')
+            ->where('batch_id', $batch->id)
+            ->where('status', 'VALID')
+            ->whereNull('published_at')
+            ->orderBy('id')
+            ->chunkById($profileChunkSize, function ($profiles) use ($batch, $target, &$profileChunks) {
+                DB::transaction(function () use ($batch, $target, $profiles) {
+                    $now = now();
+                    $categoryId = DB::table('shareholder_categories')->where('code', 'A')->value('id')
+                        ?? DB::table('shareholder_categories')->orderBy('id')->value('id');
+                    $shareholderNameColumns = [
+                        'first_name' => Schema::hasColumn('shareholders', 'first_name'),
+                        'middle_name' => Schema::hasColumn('shareholders', 'middle_name'),
+                        'last_name' => Schema::hasColumn('shareholders', 'last_name'),
+                    ];
                     $legacyCscsAccounts = $this->legacyCscsAccountsForProfiles($batch, $profiles);
 
                     foreach ($profiles as $profile) {
@@ -170,17 +183,36 @@ class PublishFrisBatch extends Command
                         ]);
                     }
                 });
+                $profileChunks++;
+                $this->line("Committed profile chunk {$profileChunks}; last staging ID {$profiles->last()->id}");
+            });
 
-            DB::table('fris_migration_units')
-                ->where('batch_id', $batch->id)
-                ->where('status', 'VALID')
-                ->orderBy('id')
-                ->chunkById(2000, function ($units) use ($batch, $target, $now) {
+        $remainingProfiles = $this->remainingRows('fris_migration_profiles', $batch->id);
+        if ($remainingProfiles > 0) {
+            $this->warn("FRIS batch {$batch->id} is partially published. Remaining profiles: {$remainingProfiles}");
+
+            return self::SUCCESS;
+        }
+
+        $unitChunks = 0;
+        DB::table('fris_migration_units')
+            ->where('batch_id', $batch->id)
+            ->where('status', 'VALID')
+            ->whereNull('published_at')
+            ->orderBy('id')
+            ->chunkById($unitChunkSize, function ($units) use ($batch, $target, &$unitChunks) {
+                DB::transaction(function () use ($batch, $target, $units) {
+                    $now = now();
                     $sraByKey = $this->sraIdsForUnits($batch, $units);
 
                     foreach ($units as $unit) {
                         $sraId = $sraByKey[$unit->register_code.'|'.$unit->account_number] ?? null;
                         if ($sraId === null) {
+                            DB::table('fris_migration_units')->where('id', $unit->id)->update([
+                                'published_at' => $now,
+                                'updated_at' => $now,
+                            ]);
+
                             continue;
                         }
 
@@ -233,7 +265,19 @@ class PublishFrisBatch extends Command
                         ]);
                     }
                 });
+                $unitChunks++;
+                $this->line("Committed unit chunk {$unitChunks}; last staging ID {$units->last()->id}");
+            });
 
+        $remainingUnits = $this->remainingRows('fris_migration_units', $batch->id);
+        if ($remainingUnits > 0) {
+            $this->warn("FRIS batch {$batch->id} is partially published. Remaining units: {$remainingUnits}");
+
+            return self::SUCCESS;
+        }
+
+        DB::transaction(function () use ($batch, $target) {
+            $now = now();
             $batch->update([
                 'status' => FrisMigrationBatch::PUBLISHED,
                 'published_at' => $now,
@@ -245,6 +289,15 @@ class PublishFrisBatch extends Command
         $this->info('FRIS batch '.$batch->id.' published.');
 
         return self::SUCCESS;
+    }
+
+    private function remainingRows(string $table, int $batchId): int
+    {
+        return DB::table($table)
+            ->where('batch_id', $batchId)
+            ->where('status', 'VALID')
+            ->whereNull('published_at')
+            ->count();
     }
 
     /** @return array{company_id:int,register_id:int,share_class_id:int} */
