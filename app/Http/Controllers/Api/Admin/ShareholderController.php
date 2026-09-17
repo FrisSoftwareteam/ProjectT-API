@@ -10,16 +10,22 @@ use App\Http\Requests\ShareholderAddressUpdateRequest;
 use App\Http\Requests\ShareholderIdentityRequest;
 use App\Http\Requests\ShareholderMandateRequest;
 use App\Http\Requests\ShareholderRequest;
+use App\Models\Register;
+use App\Models\ShareClass;
+use App\Models\ShareLot;
+use App\Models\SharePosition;
+use App\Models\ShareTransaction;
 use App\Models\Shareholder;
 use App\Models\ShareholderAddress;
 use App\Models\ShareholderCategory;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
-use App\Models\Register;
 use App\Rules\ValidIdentificationNumber;
+use App\Services\CapitalValidationService;
 use App\Services\ShareholderAccountNumberService;
 use App\Services\ShareholderBulkImportService;
+use App\Services\UnitPrecisionValidationService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -27,13 +33,16 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 class ShareholderController extends Controller
 {
     public function __construct(
         protected ShareholderAccountNumberService $accountNumberService,
-        protected ShareholderBulkImportService $bulkImportService
+        protected ShareholderBulkImportService $bulkImportService,
+        protected CapitalValidationService $capitalValidationService,
+        protected UnitPrecisionValidationService $unitPrecisionValidationService
     ) {}
 
     public function index(Request $request)
@@ -168,7 +177,7 @@ class ShareholderController extends Controller
         ], 201);
     }
 
-    public function storeWithDetails(\Illuminate\Http\Request $request)
+    public function storeWithDetails(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'shareholder' => 'required|array',
@@ -420,6 +429,247 @@ class ShareholderController extends Controller
                 'error' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    public function storeWithRegisterAndShares(Request $request): JsonResponse
+    {
+        $validator = Validator::make($request->all(), [
+            'shareholder' => 'required|array',
+            'shareholder.holder_type' => 'required|in:individual,corporate',
+            'shareholder.first_name' => 'required|string|max:255',
+            'shareholder.full_name' => 'nullable|string|max:255',
+            'shareholder.last_name' => 'nullable|string|max:100',
+            'shareholder.middle_name' => 'nullable|string|max:100',
+            'shareholder.email' => 'required|email|unique:shareholders,email',
+            'shareholder.phone' => 'required|string|max:32|unique:shareholders,phone',
+            'shareholder.date_of_birth' => 'nullable|date',
+            'shareholder.sex' => 'nullable|in:male,female,other',
+            'shareholder.rc_number' => 'nullable|string|max:50',
+            'shareholder.nin' => 'nullable|string|max:20',
+            'shareholder.bvn' => 'nullable|string|max:20',
+            'shareholder.tax_id' => 'nullable|string|max:50',
+            'shareholder.next_of_kin_name' => 'nullable|string|max:255',
+            'shareholder.next_of_kin_phone' => 'nullable|string|max:32',
+            'shareholder.next_of_kin_relationship' => 'nullable|string|max:100',
+            'shareholder.status' => 'required|in:active,dormant,deceased,closed',
+
+            'addresses' => 'required|array|min:1',
+            'addresses.*.address_line1' => 'required|string|max:255',
+            'addresses.*.address_line2' => 'nullable|string|max:255',
+            'addresses.*.city' => 'nullable|string|max:100',
+            'addresses.*.state' => 'nullable|string|max:100',
+            'addresses.*.postal_code' => 'nullable|string|max:20',
+            'addresses.*.country' => 'nullable|string|max:100',
+            'addresses.*.is_primary' => 'required|boolean',
+            'addresses.*.valid_from' => 'nullable|date',
+            'addresses.*.valid_to' => 'nullable|date',
+
+            'mandates' => 'nullable|array',
+            'mandates.*.bank_name' => 'required_with:mandates|string|max:150',
+            'mandates.*.account_name' => 'required_with:mandates|string|max:255',
+            'mandates.*.account_number' => 'required_with:mandates|string|max:20',
+            'mandates.*.bvn' => 'nullable|string|max:20',
+            'mandates.*.status' => 'required_with:mandates|in:pending,verified,active,rejected,revoked',
+            'mandates.*.verified_by' => 'nullable|exists:admin_users,id',
+            'mandates.*.verified_at' => 'nullable|date',
+
+            'identities' => 'nullable|array',
+            'identities.*.id_type' => 'required_with:identities|in:passport,drivers_license,nin,bvn,cac_cert,other',
+            'identities.*.id_value' => 'required_with:identities|string|max:100',
+            'identities.*.issued_on' => 'nullable|date',
+            'identities.*.expires_on' => 'nullable|date',
+            'identities.*.verified_status' => 'required_with:identities|in:pending,verified,rejected',
+            'identities.*.verified_by' => 'nullable|exists:admin_users,id',
+            'identities.*.verified_at' => 'nullable|date',
+            'identities.*.file_ref' => 'nullable|string|max:255',
+
+            'register_account' => 'required|array',
+            'register_account.register_id' => 'required|integer|exists:registers,id',
+            'register_account.shareholder_category_id' => [
+                'nullable',
+                'integer',
+                Rule::exists('shareholder_categories', 'id')->where(
+                    fn ($query) => $query->where('is_active', true)->whereNull('deleted_at')
+                ),
+            ],
+            'register_account.shareholder_no' => 'nullable|string|max:30',
+            'register_account.chn' => 'nullable|string|max:50',
+            'register_account.cscs_account_no' => 'nullable|string|max:50',
+            'register_account.residency_status' => 'nullable|in:resident,non_resident',
+            'register_account.kyc_level' => 'nullable|in:basic,standard,enhanced',
+            'register_account.status' => 'nullable|in:active,suspended,closed',
+
+            'share_class_id' => 'required|integer|exists:share_classes,id',
+            'initial_shares' => 'nullable|array',
+            'initial_shares.quantity' => 'nullable|numeric|min:0',
+            'initial_shares.source_type' => 'nullable|in:allotment,bonus,rights,transfer_in,demat_in,certificate_deposit',
+            'initial_shares.lot_ref' => 'nullable|string|max:64',
+            'initial_shares.acquired_at' => 'nullable|date',
+            'initial_shares.holding_mode' => 'nullable|in:demat,paper',
+            'initial_shares.corporate_action_id' => 'nullable|exists:corporate_actions,id',
+        ]);
+
+        $validator->after(function ($validator) use ($request): void {
+            $primaryCount = collect((array) $request->input('addresses', []))
+                ->filter(fn ($address) => ! empty($address['is_primary']))
+                ->count();
+
+            if ($primaryCount > 1) {
+                $validator->errors()->add('addresses', 'Only one primary address is allowed.');
+            }
+            if ($primaryCount === 0) {
+                $validator->errors()->add('addresses', 'At least one address must be marked as primary.');
+            }
+
+            foreach ((array) $request->input('identities', []) as $index => $identity) {
+                $idType = $identity['id_type'] ?? null;
+                $idValue = $identity['id_value'] ?? null;
+                if ($idType === null || $idValue === null) {
+                    continue;
+                }
+
+                (new ValidIdentificationNumber($idType))->validate(
+                    "identities.{$index}.id_value",
+                    $idValue,
+                    fn ($message) => $validator->errors()->add("identities.{$index}.id_value", $message)
+                );
+            }
+        });
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $validator->errors(),
+            ], 422);
+        }
+
+        $payload = $validator->validated();
+        $shareClass = ShareClass::with('register')->findOrFail($payload['share_class_id']);
+        $registerId = (int) $payload['register_account']['register_id'];
+
+        if ((int) $shareClass->register_id !== $registerId) {
+            throw ValidationException::withMessages([
+                'share_class_id' => ['share_class_id does not belong to the supplied register_id.'],
+            ]);
+        }
+
+        $quantity = data_get($payload, 'initial_shares.quantity');
+        $shouldAllocate = $quantity !== null && bccomp((string) $quantity, '0', 6) > 0;
+        if ($shouldAllocate) {
+            $this->unitPrecisionValidationService->assertValidForShareClass((int) $shareClass->id, $quantity);
+        }
+
+        return DB::transaction(function () use ($payload, $shareClass, $registerId, $quantity, $shouldAllocate) {
+            if ($shouldAllocate) {
+                $this->capitalValidationService->assertChangeAllowed(
+                    $registerId,
+                    (float) $quantity,
+                    data_get($payload, 'initial_shares.corporate_action_id')
+                        ? (int) data_get($payload, 'initial_shares.corporate_action_id')
+                        : null
+                );
+            }
+
+            $shareholderData = $payload['shareholder'];
+            $shareholderData['account_no'] = $this->accountNumberService->generate();
+            $shareholderData['full_name'] = trim(($shareholderData['first_name'] ?? '').' '.($shareholderData['last_name'] ?? ''));
+
+            $shareholder = Shareholder::create($shareholderData);
+
+            foreach ($payload['addresses'] as $address) {
+                ShareholderAddress::create($address + ['shareholder_id' => $shareholder->id]);
+            }
+
+            foreach ($payload['mandates'] ?? [] as $mandate) {
+                ShareholderMandate::create($mandate + ['shareholder_id' => $shareholder->id]);
+            }
+
+            foreach ($payload['identities'] ?? [] as $identity) {
+                ShareholderIdentity::create($identity + ['shareholder_id' => $shareholder->id]);
+            }
+
+            $accountData = $payload['register_account'];
+            $category = null;
+            if (! empty($accountData['shareholder_category_id'])) {
+                $category = ShareholderCategory::query()->findOrFail($accountData['shareholder_category_id']);
+                if (! $category->isCompatibleWith($shareholder->holder_type)) {
+                    throw ValidationException::withMessages([
+                        'register_account.shareholder_category_id' => [
+                            "Category {$category->code} requires holder type {$category->default_holder_type}.",
+                        ],
+                    ]);
+                }
+            }
+
+            $registerAccount = ShareholderRegisterAccount::create([
+                'shareholder_id' => $shareholder->id,
+                'register_id' => $registerId,
+                'shareholder_category_id' => $category?->id,
+                'shareholder_no' => $accountData['shareholder_no'] ?? ShareholderRegisterAccount::generateAccountNumber($shareholder->id),
+                'chn' => $accountData['chn'] ?? null,
+                'cscs_account_no' => $accountData['cscs_account_no'] ?? null,
+                'residency_status' => $accountData['residency_status'] ?? 'resident',
+                'kyc_level' => $accountData['kyc_level'] ?? 'basic',
+                'status' => $accountData['status'] ?? 'active',
+            ]);
+
+            $position = SharePosition::create([
+                'sra_id' => $registerAccount->id,
+                'share_class_id' => $shareClass->id,
+                'quantity' => $shouldAllocate ? $quantity : 0,
+                'holding_mode' => data_get($payload, 'initial_shares.holding_mode', 'demat'),
+            ]);
+
+            $lot = null;
+            $transaction = null;
+            if ($shouldAllocate) {
+                $lotRef = data_get($payload, 'initial_shares.lot_ref') ?? ('ALLOC-'.strtoupper(Str::random(8)));
+                $acquiredAt = data_get($payload, 'initial_shares.acquired_at') ?? now();
+                $sourceType = data_get($payload, 'initial_shares.source_type', 'allotment');
+
+                $lot = ShareLot::create([
+                    'sra_id' => $registerAccount->id,
+                    'share_class_id' => $shareClass->id,
+                    'quantity' => $quantity,
+                    'lot_ref' => $lotRef,
+                    'source_type' => $sourceType,
+                    'acquired_at' => $acquiredAt,
+                ]);
+
+                $transaction = ShareTransaction::create([
+                    'sra_id' => $registerAccount->id,
+                    'share_class_id' => $shareClass->id,
+                    'tx_type' => $sourceType === 'allotment' ? 'allot' : $sourceType,
+                    'quantity' => $quantity,
+                    'tx_ref' => $lotRef,
+                    'tx_date' => $acquiredAt,
+                    'created_by' => auth()->id(),
+                ]);
+
+                $this->capitalValidationService->syncOutstandingUnits($registerId);
+                $this->capitalValidationService->assertConstantBalanced($registerId);
+            }
+
+            $shareholder->load('addresses', 'mandates', 'identities', 'holdings.shareClass.register.company', 'certificates', 'registerAccounts.category');
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Shareholder created, added to register, and assigned to share class successfully',
+                'data' => [
+                    'shareholder' => $shareholder,
+                    'register_account' => $registerAccount->load('register', 'category'),
+                    'share_class' => $shareClass,
+                    'position' => $position->load('shareClass'),
+                    'lot' => $lot,
+                    'transaction' => $transaction,
+                ],
+                'meta' => [
+                    'unit_precision' => $shareClass->register->unit_precision,
+                    'initial_shares_allocated' => $shouldAllocate,
+                ],
+            ], 201);
+        });
     }
 
     public function show($id)

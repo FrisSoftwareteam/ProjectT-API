@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Exceptions\CscsImportCancelledException;
 use App\Models\AdminUser;
 use App\Models\CscsApprovalAction;
 use App\Models\CscsApprovalPolicy;
@@ -10,6 +11,7 @@ use App\Models\CscsSecurityMapping;
 use App\Models\CscsUploadBatch;
 use App\Models\CscsUploadRow;
 use App\Models\CscsWorkflowEvent;
+use App\Models\ShareClass;
 use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
@@ -155,6 +157,12 @@ class CscsImportService
         $seenMovementRows = [];
 
         try {
+            $totalSourceRows = $this->countSourceRows($storedFiles);
+            $processedSourceRows = 0;
+            $counts['source_rows_total'] = $totalSourceRows;
+            $counts['source_rows_processed'] = 0;
+            $this->persistProcessingProgress($batch, $counts, 'PARSING', 1, true);
+
             foreach ($storedFiles as $storedFile) {
                 $type = (string) $storedFile['type'];
                 $safeName = (string) $storedFile['name'];
@@ -190,11 +198,12 @@ class CscsImportService
                             'raw_line' => $line,
                             'extra_details' => ['profile' => $profile],
                         ]);
+                        $processedSourceRows++;
+                        $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows);
                     }
 
                     $counts['files_processed']++;
-                    $counts['processing_percent'] = (int) floor(($counts['files_processed'] / max(1, $counts['files_total'])) * 100);
-                    $batch->update(['summary' => $counts]);
+                    $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows, true);
 
                     continue;
                 }
@@ -208,6 +217,8 @@ class CscsImportService
                     if (isset($parsed['parse_error'])) {
                         $counts['invalid_rows']++;
                         $this->createInvalidRow($batch, $parsed);
+                        $processedSourceRows++;
+                        $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows);
 
                         continue;
                     }
@@ -234,44 +245,136 @@ class CscsImportService
                             'source_fingerprint' => $sourceFingerprint,
                         ],
                     ]));
+                    $processedSourceRows++;
+                    $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows);
                 }
 
                 $counts['files_processed']++;
-                $counts['processing_percent'] = (int) floor(($counts['files_processed'] / max(1, $counts['files_total'])) * 100);
-                $batch->update(['summary' => $counts]);
+                $this->persistParsingProgress($batch, $counts, $processedSourceRows, $totalSourceRows, true);
             }
 
             if ($counts['movement_rows'] === 0) {
                 throw ValidationException::withMessages(['files' => ['A CSCS movement file is required.']]);
             }
 
-            $batch->update([
-                'status' => 'completed',
-                'uploaded_files' => $storedFiles,
-                'summary' => array_merge($counts, ['processing_stage' => 'VALIDATING', 'processing_percent' => 95]),
-            ]);
+            $this->persistProcessingProgress($batch, $counts, 'VALIDATING', 82, true);
+            $batch->update(['status' => 'completed', 'uploaded_files' => $storedFiles]);
             $this->validateDraft($batch, $batch->uploaded_by, false);
-            $this->event($batch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $batch->uploaded_by, null, $counts);
+            $processedBatch = $batch->fresh();
+            if ($processedBatch->workflow_status === 'DRAFT_REVIEW') {
+                $this->event($processedBatch, 'PARSED', 'PROCESSING', 'DRAFT_REVIEW', $processedBatch->uploaded_by, null, $counts);
+            }
 
-            return $this->batchResult($batch->fresh());
+            return $this->batchResult($processedBatch);
+        } catch (CscsImportCancelledException) {
+            return $this->finalizeCancelledImport($batchId);
         } catch (\Throwable $e) {
             $this->failImport($batch, $storedFiles, $counts, $e);
         }
     }
 
     /**
+     * Count meaningful source rows one file at a time, including CR-only source files.
+     *
      * @param  array<int, array<string, mixed>>  $storedFiles
-     * @param  array<string, int>  $counts
+     */
+    private function countSourceRows(array $storedFiles): int
+    {
+        $total = 0;
+
+        foreach ($storedFiles as $storedFile) {
+            $path = (string) ($storedFile['path'] ?? '');
+            $lines = preg_split('/\r\n|\n|\r/', (string) Storage::get($path)) ?: [];
+            $total += count(array_filter($lines, fn (string $line) => trim($line) !== ''));
+        }
+
+        return $total;
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function persistParsingProgress(
+        CscsUploadBatch $batch,
+        array &$summary,
+        int $processedRows,
+        int $totalRows,
+        bool $force = false
+    ): void {
+        $summary['source_rows_processed'] = $processedRows;
+        $summary['source_rows_total'] = $totalRows;
+        $percent = $totalRows > 0
+            ? 5 + (int) floor(($processedRows / $totalRows) * 75)
+            : 80;
+
+        $this->persistProcessingProgress($batch, $summary, 'PARSING', min(80, $percent), $force);
+    }
+
+    /** @param array<string, mixed> $summary */
+    private function persistProcessingProgress(
+        CscsUploadBatch $batch,
+        array &$summary,
+        string $stage,
+        int $percent,
+        bool $force = false
+    ): void {
+        $currentStage = (string) ($summary['processing_stage'] ?? '');
+        $currentPercent = (int) ($summary['processing_percent'] ?? 0);
+        $percent = max($currentPercent, min(99, max(0, $percent)));
+
+        if (! $force && $currentStage === $stage && $currentPercent === $percent) {
+            return;
+        }
+
+        $summary['processing_stage'] = $stage;
+        $summary['processing_percent'] = $percent;
+
+        DB::transaction(function () use ($batch, $summary): void {
+            $current = CscsUploadBatch::lockForUpdate()->findOrFail($batch->id);
+            if ($current->workflow_status === 'CANCELLED') {
+                throw new CscsImportCancelledException;
+            }
+            if ($current->workflow_status !== 'PROCESSING') {
+                throw new \RuntimeException("CSCS batch {$batch->id} left PROCESSING while the import worker was active.");
+            }
+
+            $current->update(['summary' => $summary]);
+        });
+
+        $batch->setAttribute('summary', $summary);
+    }
+
+    /** @return array<string, mixed> */
+    private function finalizeCancelledImport(int $batchId): array
+    {
+        CscsUploadRow::where('batch_id', $batchId)
+            ->where('file_type', 'movement')
+            ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
+            ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
+
+        return $this->batchResult(CscsUploadBatch::findOrFail($batchId));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $storedFiles
+     * @param  array<string, mixed>  $counts
      */
     private function failImport(CscsUploadBatch $batch, array $storedFiles, array $counts, \Throwable $exception): never
     {
         $reference = (string) Str::uuid();
+        $latestSummary = $batch->fresh()->summary ?? [];
+        $failureSummary = array_merge($counts, $latestSummary, [
+            'processing_stage' => 'FAILED',
+            'processing_percent' => max(
+                (int) ($counts['processing_percent'] ?? 0),
+                (int) ($latestSummary['processing_percent'] ?? 0)
+            ),
+            'failure_reference' => $reference,
+        ]);
         Log::error('CSCS staging failed', ['batch_id' => $batch->id, 'reference' => $reference, 'error' => $exception->getMessage()]);
         $batch->update([
             'status' => 'failed',
             'workflow_status' => 'PROCESSING_FAILED',
             'uploaded_files' => $storedFiles,
-            'summary' => array_merge($counts, ['failure_reference' => $reference]),
+            'summary' => $failureSummary,
             'failure_reason' => "CSCS processing failed. Reference: {$reference}",
         ]);
         $this->event(
@@ -291,7 +394,7 @@ class CscsImportService
     {
         $batch = CscsUploadBatch::findOrFail($batchId);
         $this->assertMaker($batch, $actorId);
-        $this->assertState($batch, ['DRAFT_REVIEW', 'QUERY_RAISED', 'RECONCILED', 'STALE']);
+        $this->assertState($batch, ['DRAFT_REVIEW', 'RECONCILED', 'STALE']);
         $result = $this->validateDraft($batch, $actorId, true, $comment);
         if (($result['unresolved_exceptions'] ?? 0) > 0) {
             throw ValidationException::withMessages([
@@ -309,13 +412,22 @@ class CscsImportService
         bool $markReconciled,
         ?string $comment = null
     ): array {
+        $trackImportProgress = $batch->workflow_status === 'PROCESSING';
+        $progressSummary = $batch->summary ?? [];
         $rows = CscsUploadRow::where('batch_id', $batch->id)
             ->where('file_type', 'movement')
             ->orderBy('id')
             ->get();
 
+        $processedValidationRows = 0;
         foreach ($rows as $row) {
             if (in_array($row->resolution_status, ['RULE_EXCLUDED', 'CONFIRMED_REPLAY'], true)) {
+                $processedValidationRows++;
+                if ($trackImportProgress) {
+                    $percent = 82 + (int) floor(($processedValidationRows / max(1, $rows->count())) * 6);
+                    $this->persistProcessingProgress($batch, $progressSummary, 'VALIDATING_ROWS', $percent);
+                }
+
                 continue;
             }
             $structuralException = in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true);
@@ -328,6 +440,11 @@ class CscsImportService
                 'proposed_delta_qty' => null,
                 'proposed_after_qty' => null,
             ]);
+            $processedValidationRows++;
+            if ($trackImportProgress) {
+                $percent = 82 + (int) floor(($processedValidationRows / max(1, $rows->count())) * 6);
+                $this->persistProcessingProgress($batch, $progressSummary, 'VALIDATING_ROWS', $percent);
+            }
         }
 
         $totalDebit = $this->zero();
@@ -336,6 +453,32 @@ class CscsImportService
         $effects = [];
         $readyGroups = 0;
         $groups = $rows->filter(fn (CscsUploadRow $row) => $row->tran_no)->groupBy('tran_no');
+        $securityMappings = CscsSecurityMapping::where('register_id', $batch->register_id)
+            ->where('is_active', true)
+            ->whereIn('security_code', $groups->keys()->map(
+                fn ($tranNo) => strtoupper((string) $groups->get($tranNo)?->first()?->sec_code)
+            )->filter()->unique()->values())
+            ->get()
+            ->keyBy(fn (CscsSecurityMapping $mapping) => strtoupper((string) $mapping->security_code));
+        $postedReplayKeys = CscsUploadRow::whereIn('fingerprint', $rows->pluck('replay_key')->filter()->unique())
+            ->where('status', 'posted')
+            ->pluck('id', 'fingerprint');
+        $accountResolutionCache = [];
+        $activeAccountCache = [];
+        $processedValidationGroups = 0;
+        $advanceValidationGroup = function () use (
+            $batch,
+            $groups,
+            $trackImportProgress,
+            &$processedValidationGroups,
+            &$progressSummary
+        ): void {
+            $processedValidationGroups++;
+            if ($trackImportProgress) {
+                $percent = 88 + (int) floor(($processedValidationGroups / max(1, $groups->count())) * 7);
+                $this->persistProcessingProgress($batch, $progressSummary, 'VALIDATING_TRANSACTIONS', $percent);
+            }
+        };
 
         foreach ($groups as $tranNo => $group) {
             if ($group->contains(fn (CscsUploadRow $row) => in_array($row->exception_code, ['INVALID_FORMAT', 'DUPLICATE_SOURCE_ROW'], true))) {
@@ -343,9 +486,13 @@ class CscsImportService
                     $this->failRow($row, 'GROUP_STRUCTURAL_ERROR', 'Another leg in this transaction group has a structural validation error.');
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
             if ($group->every(fn (CscsUploadRow $row) => $row->resolution_status === 'RULE_EXCLUDED')) {
+                $advanceValidationGroup();
+
                 continue;
             }
             if ($group->contains(fn (CscsUploadRow $row) => $row->resolution_status === 'RULE_EXCLUDED')) {
@@ -353,10 +500,14 @@ class CscsImportService
                     $this->failRow($row, 'PARTIAL_GROUP_EXCLUSION', 'A transfer group must be included or excluded as a whole.');
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
 
-            $replayed = $group->filter(fn (CscsUploadRow $row) => $this->isPostedReplay($row));
+            $replayed = $group->filter(fn (CscsUploadRow $row) => $row->replay_key
+                && isset($postedReplayKeys[$row->replay_key])
+                && (int) $postedReplayKeys[$row->replay_key] !== (int) $row->id);
             if ($replayed->count() === $group->count()) {
                 foreach ($group as $row) {
                     $row->update([
@@ -366,10 +517,14 @@ class CscsImportService
                     ]);
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
             if ($replayed->isNotEmpty()) {
                 $this->failGroup($group, 'PARTIAL_REPLAY', 'Only part of this transaction group was previously posted.');
+
+                $advanceValidationGroup();
 
                 continue;
             }
@@ -378,20 +533,45 @@ class CscsImportService
             if ($groupError) {
                 $this->failGroup($group, $groupError[0], $groupError[1]);
 
+                $advanceValidationGroup();
+
+                continue;
+            }
+
+            $tradeDate = $group->first()->trade_date?->format('Y-m-d');
+            $minimumDate = config('cscs.trade_date_min');
+            $maximumDate = config('cscs.trade_date_max');
+            if (($minimumDate && $tradeDate < $minimumDate) || ($maximumDate && $tradeDate > $maximumDate)) {
+                $this->failGroup($group, 'DATE_OUT_OF_RANGE', 'The trade date is outside the configured CSCS processing window.');
+                $advanceValidationGroup();
+
                 continue;
             }
 
             $securityCode = strtoupper((string) $group->first()->sec_code);
-            $mapping = CscsSecurityMapping::where('security_code', $securityCode)->where('is_active', true)->first();
-            if (! $mapping || (int) $mapping->register_id !== (int) $batch->register_id) {
+            $mapping = $securityMappings->get($securityCode);
+            if (! $mapping) {
                 $this->failGroup($group, 'UNKNOWN_SECURITY', "No active mapping exists for {$securityCode} in this register.");
+
+                $advanceValidationGroup();
 
                 continue;
             }
 
             $groupReady = true;
             foreach ($group as $row) {
-                $account = $this->resolveAccountForPreview($row, $mapping->register_id);
+                $accountCacheKey = implode('|', [
+                    $mapping->register_id,
+                    $row->identifier_type,
+                    $row->identifier_value,
+                    $row->proposed_sra_id ?: '',
+                    $row->match_method ?: '',
+                    md5(json_encode(data_get($row->extra_details, 'account_proposal', []))),
+                    md5(json_encode(data_get($row->extra_details, 'master_profile', []))),
+                    data_get($row->extra_details, 'master_profile_count', ''),
+                    $row->sign,
+                ]);
+                $account = $accountResolutionCache[$accountCacheKey] ??= $this->resolveAccountForPreview($row, $mapping->register_id);
                 if (! $account['resolved']) {
                     $this->failRow($row, $account['code'], $account['message']);
                     $groupReady = false;
@@ -399,6 +579,33 @@ class CscsImportService
                     continue;
                 }
 
+                if ($account['sra_id'] && ! ($activeAccountCache[$account['sra_id']] ??= ShareholderRegisterAccount::whereKey($account['sra_id'])->where('status', 'active')->exists())) {
+                    $this->failRow($row, 'ACCOUNT_FROZEN', 'The selected register account is not active.');
+                    $groupReady = false;
+
+                    continue;
+                }
+                $splitAccountIds = collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()->all();
+                $inactiveSplitAccount = collect($splitAccountIds)->contains(function (int $accountId) use (&$activeAccountCache): bool {
+                    return ! ($activeAccountCache[$accountId] ??= ShareholderRegisterAccount::whereKey($accountId)->where('status', 'active')->exists());
+                });
+                if ($inactiveSplitAccount) {
+                    $this->failRow($row, 'ACCOUNT_FROZEN', 'One or more selected register accounts are not active.');
+                    $groupReady = false;
+
+                    continue;
+                }
+                $sourceName = data_get($row->extra_details, 'master_profile.full_name');
+                if (config('cscs.validate_holder_names', false) && $sourceName && $account['sra_id'] && $account['method'] !== 'manual_mapping') {
+                    $holderName = ShareholderRegisterAccount::with('shareholder')->find($account['sra_id'])?->shareholder?->full_name;
+                    $normalize = fn ($name) => mb_strtoupper(preg_replace('/\s+/u', ' ', trim((string) $name)));
+                    if ($normalize($holderName) !== $normalize($sourceName)) {
+                        $this->failRow($row, 'NAME_MISMATCH', 'The source name differs from the matched shareholder. An audited mapping decision is required.');
+                        $groupReady = false;
+
+                        continue;
+                    }
+                }
                 $row->update([
                     'proposed_sra_id' => $account['sra_id'],
                     'proposed_share_class_id' => $mapping->share_class_id,
@@ -419,6 +626,8 @@ class CscsImportService
                     $this->failRow($readyRow, 'GROUP_UNRESOLVED', 'Another leg in this transaction group is unresolved.');
                 }
 
+                $advanceValidationGroup();
+
                 continue;
             }
 
@@ -429,26 +638,32 @@ class CscsImportService
                 } else {
                     $totalCredit = bcadd($totalCredit, $quantity, self::SCALE);
                 }
-                $key = ($row->proposed_sra_id ? 'sra:'.$row->proposed_sra_id : 'new:'.$row->identifier_value)
-                    .':class:'.$mapping->share_class_id;
-                $effects[$key] ??= [
-                    'sra_id' => $row->proposed_sra_id,
-                    'identifier' => $row->identifier_value,
-                    'share_class_id' => (int) $mapping->share_class_id,
-                    'debit' => $this->zero(),
-                    'credit' => $this->zero(),
-                    'rows' => [],
-                ];
-                $effects[$key][$row->sign === '-' ? 'debit' : 'credit'] = bcadd(
-                    $effects[$key][$row->sign === '-' ? 'debit' : 'credit'],
-                    $quantity,
-                    self::SCALE
-                );
-                $effects[$key]['rows'][] = $row->id;
+                foreach ($this->rowAccountAllocations($row) as $allocation) {
+                    $allocationQuantity = $row->sign === '-' ? $allocation['quantity'] : $quantity;
+                    $sraId = $row->sign === '-' ? $allocation['register_account_id'] : $row->proposed_sra_id;
+                    $key = ($sraId ? 'sra:'.$sraId : 'new:'.$row->identifier_value)
+                        .':class:'.$mapping->share_class_id;
+                    $effects[$key] ??= [
+                        'sra_id' => $sraId,
+                        'identifier' => $row->identifier_value,
+                        'share_class_id' => (int) $mapping->share_class_id,
+                        'debit' => $this->zero(),
+                        'credit' => $this->zero(),
+                        'rows' => [],
+                    ];
+                    $effects[$key][$row->sign === '-' ? 'debit' : 'credit'] = bcadd(
+                        $effects[$key][$row->sign === '-' ? 'debit' : 'credit'],
+                        $allocationQuantity,
+                        self::SCALE
+                    );
+                    $effects[$key]['rows'][] = $row->id;
+                }
             }
             $readyGroups++;
+            $advanceValidationGroup();
         }
 
+        $processedEffects = 0;
         foreach ($effects as $effect) {
             $before = $this->zero();
             if ($effect['sra_id']) {
@@ -462,12 +677,42 @@ class CscsImportService
                     $this->failRow(CscsUploadRow::findOrFail($rowId), 'INSUFFICIENT_HOLDING', 'The proposed debit would create a negative holding.');
                 }
 
+                $processedEffects++;
+                if ($trackImportProgress) {
+                    $percent = 95 + (int) floor(($processedEffects / max(1, count($effects))) * 4);
+                    $this->persistProcessingProgress($batch, $progressSummary, 'CALCULATING_EFFECTS', $percent);
+                }
+
                 continue;
             }
-            CscsUploadRow::whereIn('id', $effect['rows'])->update([
-                'proposed_before_qty' => $before,
-                'proposed_after_qty' => $after,
-            ]);
+            foreach (CscsUploadRow::whereIn('id', $effect['rows'])->get() as $effectRow) {
+                $extra = $effectRow->extra_details ?? [];
+                if (is_array(data_get($extra, 'manual_account_allocations')) && $effect['sra_id']) {
+                    $extra['manual_account_allocations'] = collect($extra['manual_account_allocations'])
+                        ->map(function (array $allocation) use ($effect, $before, $after) {
+                            if ((int) $allocation['register_account_id'] === (int) $effect['sra_id']) {
+                                $allocation['proposed_before_qty'] = $before;
+                                $allocation['proposed_after_qty'] = $after;
+                            }
+
+                            return $allocation;
+                        })->all();
+                }
+                $effectRow->update([
+                    'extra_details' => $extra,
+                    'proposed_before_qty' => $before,
+                    'proposed_after_qty' => $after,
+                ]);
+            }
+            $processedEffects++;
+            if ($trackImportProgress) {
+                $percent = 95 + (int) floor(($processedEffects / max(1, count($effects))) * 4);
+                $this->persistProcessingProgress($batch, $progressSummary, 'CALCULATING_EFFECTS', $percent);
+            }
+        }
+
+        if ($trackImportProgress) {
+            $this->persistProcessingProgress($batch, $progressSummary, 'FINALIZING', 99, true);
         }
 
         $unresolved = CscsUploadRow::where('batch_id', $batch->id)
@@ -493,9 +738,10 @@ class CscsImportService
         ]);
 
         $snapshot = $unresolved === 0 ? $this->snapshotHash($batch->id) : null;
+        $summary['account_mapping_snapshot'] = $this->accountMappingSnapshot($batch->id);
         $from = $batch->workflow_status;
         $to = $markReconciled && $unresolved === 0 ? 'RECONCILED' : 'DRAFT_REVIEW';
-        $batch->update([
+        $attributes = [
             'workflow_status' => $to,
             'summary' => $summary,
             'reconciliation' => $summary,
@@ -504,12 +750,64 @@ class CscsImportService
             'reconciled_by' => $to === 'RECONCILED' ? $actorId : null,
             'reconciled_at' => $to === 'RECONCILED' ? now() : null,
             'failure_reason' => null,
-        ]);
+        ];
+        if ($trackImportProgress) {
+            DB::transaction(function () use ($batch, $attributes): void {
+                $current = CscsUploadBatch::lockForUpdate()->findOrFail($batch->id);
+                if ($current->workflow_status === 'CANCELLED') {
+                    throw new CscsImportCancelledException;
+                }
+                if ($current->workflow_status !== 'PROCESSING') {
+                    throw new \RuntimeException("CSCS batch {$batch->id} left PROCESSING before validation completed.");
+                }
+
+                $current->update($attributes);
+            });
+            $batch->refresh();
+        } else {
+            $batch->update($attributes);
+        }
         if ($markReconciled) {
             $this->event($batch, 'RECONCILED', $from, $to, $actorId, $comment, $summary);
         }
 
         return $summary;
+    }
+
+    public function confirmFinancialPreview(int $batchId, int $actorId, string $hash): array
+    {
+        return DB::transaction(function () use ($batchId, $actorId, $hash) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['RECONCILED']);
+            if (! hash_equals((string) $batch->snapshot_hash, $hash)
+                || ! hash_equals($hash, $this->snapshotHash($batchId))) {
+                throw ValidationException::withMessages(['snapshot_hash' => ['The preview changed. Revalidate and review the current snapshot.']]);
+            }
+            $reconciliation = $batch->reconciliation ?? [];
+            $reconciliation['preview_confirmation'] = [
+                'snapshot_hash' => $hash, 'revision' => $batch->revision,
+                'confirmed_by' => $actorId, 'confirmed_at' => now()->toIso8601String(),
+            ];
+            $batch->update(['reconciliation' => $reconciliation]);
+            $this->event($batch, 'FINANCIAL_PREVIEW_CONFIRMED', $batch->workflow_status, $batch->workflow_status, $actorId, null, $reconciliation['preview_confirmation']);
+
+            return $this->batchResult($batch->fresh());
+        });
+    }
+
+    public function saveDraft(int $batchId, int $actorId, array $state): array
+    {
+        return DB::transaction(function () use ($batchId, $actorId, $state) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['DRAFT_REVIEW', 'QUERY_RAISED', 'RECONCILED', 'STALE']);
+            $summary = $batch->summary ?? [];
+            $summary['review_draft'] = $state;
+            $batch->update(['summary' => $summary]);
+
+            return $this->batchResult($batch->fresh());
+        });
     }
 
     /** @return array<string, mixed> */
@@ -523,6 +821,12 @@ class CscsImportService
                 throw ValidationException::withMessages(['batch' => ['The reconciled snapshot changed; reconcile it again.']]);
             }
 
+            if (config('cscs.require_preview_confirmation', true)
+                && (! hash_equals((string) $batch->snapshot_hash, (string) data_get($batch->reconciliation, 'preview_confirmation.snapshot_hash', ''))
+                    || (int) data_get($batch->reconciliation, 'preview_confirmation.revision') !== (int) $batch->revision
+                    || (int) data_get($batch->reconciliation, 'preview_confirmation.confirmed_by') !== $actorId)) {
+                throw ValidationException::withMessages(['snapshot_hash' => ['Confirm the current financial preview before submitting.']]);
+            }
             $steps = $this->approvalSteps($batch);
             $from = $batch->workflow_status;
             $batch->update([
@@ -563,6 +867,30 @@ class CscsImportService
             $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
             $this->assertState($batch, ['PENDING_APPROVAL']);
             $this->assertNotMaker($batch, $actorId);
+            $scope = $context['scope'] ?? 'BATCH';
+            $reference = $context['reference_id'] ?? null;
+            $rows = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement');
+            foreach ($context['row_ids'] ?? [] as $id) {
+                if (! (clone $rows)->whereKey($id)->exists()) {
+                    throw ValidationException::withMessages(['row_ids' => ['Every referenced row must belong to this batch.']]);
+                }
+            }
+            foreach ($context['transaction_numbers'] ?? [] as $number) {
+                if (! (clone $rows)->where('tran_no', $number)->exists()) {
+                    throw ValidationException::withMessages(['transaction_numbers' => ['Every referenced transaction must belong to this batch.']]);
+                }
+            }
+            $validReference = match ($scope) {
+                'BATCH' => true,
+                'TRANSACTION' => $reference && (clone $rows)->where('tran_no', $reference)->exists(),
+                'ROW', 'EXCEPTION' => $reference && (clone $rows)->whereKey($reference)->exists(),
+                'ACCOUNT' => $reference && (clone $rows)->where('proposed_sra_id', $reference)->exists(),
+                'MAPPING' => $reference && CscsSecurityMapping::whereKey($reference)->where('register_id', $batch->register_id)->whereIn('security_code', (clone $rows)->pluck('sec_code'))->exists(),
+                default => false,
+            };
+            if (! $validReference) {
+                throw ValidationException::withMessages(['reference_id' => ['A valid reference in this batch is required for the selected query scope.']]);
+            }
             $this->recordDecision($batch, $actorId, 'QUERY_RAISED', $comment, $context);
             $batch->update(['workflow_status' => 'QUERY_RAISED']);
             $this->event($batch, 'QUERY_RAISED', 'PENDING_APPROVAL', 'QUERY_RAISED', $actorId, $comment, $context);
@@ -574,22 +902,24 @@ class CscsImportService
     /** @return array<string, mixed> */
     public function respondToQuery(int $batchId, int $actorId, string $comment): array
     {
-        $batch = CscsUploadBatch::findOrFail($batchId);
-        $this->assertMaker($batch, $actorId);
-        $this->assertState($batch, ['QUERY_RAISED']);
-        $this->recordDecision($batch, $actorId, 'QUERY_RESPONDED', $comment);
-        $batch->update([
-            'workflow_status' => 'DRAFT_REVIEW',
-            'revision' => $batch->revision + 1,
-            'snapshot_hash' => null,
-            'submitted_by' => null,
-            'submitted_at' => null,
-            'current_approval_step' => null,
-            'required_approval_steps' => null,
-        ]);
-        $this->event($batch, 'QUERY_RESPONDED', 'QUERY_RAISED', 'DRAFT_REVIEW', $actorId, $comment);
+        return DB::transaction(function () use ($batchId, $actorId, $comment) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['QUERY_RAISED']);
+            $this->recordDecision($batch, $actorId, 'QUERY_RESPONDED', $comment);
+            $batch->update([
+                'workflow_status' => 'DRAFT_REVIEW',
+                'revision' => $batch->revision + 1,
+                'snapshot_hash' => null,
+                'submitted_by' => null,
+                'submitted_at' => null,
+                'current_approval_step' => null,
+                'required_approval_steps' => null,
+            ]);
+            $this->event($batch, 'QUERY_RESPONDED', 'QUERY_RAISED', 'DRAFT_REVIEW', $actorId, $comment);
 
-        return $this->batchResult($batch->fresh());
+            return $this->batchResult($batch->fresh());
+        });
     }
 
     /** @return array<string, mixed> */
@@ -648,54 +978,168 @@ class CscsImportService
     /** @return array<string, mixed> */
     public function cancel(int $batchId, int $actorId, string $comment): array
     {
-        $batch = CscsUploadBatch::findOrFail($batchId);
-        $this->assertMaker($batch, $actorId);
-        $this->assertState($batch, ['DRAFT_REVIEW', 'RECONCILED', 'QUERY_RAISED', 'STALE', 'PROCESSING_FAILED']);
-        $from = $batch->workflow_status;
-        $batch->update(['workflow_status' => 'CANCELLED', 'failure_reason' => $comment]);
-        CscsUploadRow::where('batch_id', $batch->id)
-            ->where('file_type', 'movement')
-            ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
-            ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
-        $this->event($batch, 'CANCELLED', $from, 'CANCELLED', $actorId, $comment);
+        return DB::transaction(function () use ($batchId, $actorId, $comment) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['PROCESSING', 'DRAFT_REVIEW', 'RECONCILED', 'QUERY_RAISED', 'STALE', 'PROCESSING_FAILED']);
+            $from = $batch->workflow_status;
+            $summary = $batch->summary ?? [];
+            if ($from === 'PROCESSING') {
+                $summary['processing_stage'] = 'CANCELLED';
+            }
+            $batch->update(['workflow_status' => 'CANCELLED', 'summary' => $summary, 'failure_reason' => $comment]);
+            CscsUploadRow::where('batch_id', $batch->id)
+                ->where('file_type', 'movement')
+                ->whereNotIn('resolution_status', ['POSTED', 'CONFIRMED_REPLAY'])
+                ->update(['resolution_status' => 'CANCELLED_WITH_BATCH']);
+            $this->event($batch, 'CANCELLED', $from, 'CANCELLED', $actorId, $comment);
 
-        return $this->batchResult($batch->fresh());
+            return $this->batchResult($batch->fresh());
+        });
     }
 
     /** @return array<string, mixed> */
     public function resolveException(int $batchId, int $rowId, int $actorId, array $resolution): array
     {
-        $batch = CscsUploadBatch::findOrFail($batchId);
-        $this->assertMaker($batch, $actorId);
-        $this->assertState($batch, ['DRAFT_REVIEW', 'QUERY_RAISED', 'STALE']);
-        $row = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->findOrFail($rowId);
-        $type = $resolution['resolution_type'];
-        $updates = [
-            'resolved_by' => $actorId,
-            'resolved_at' => now(),
-            'resolution_reason' => $resolution['reason'],
-        ];
-        if ($type === 'MAP_ACCOUNT') {
-            $sra = ShareholderRegisterAccount::where('register_id', $batch->register_id)->findOrFail($resolution['register_account_id']);
-            $updates += ['proposed_sra_id' => $sra->id, 'match_method' => 'manual_mapping', 'resolution_status' => 'UNRESOLVED'];
-        } elseif ($type === 'RULE_EXCLUDED') {
-            $updates += ['resolution_status' => 'RULE_EXCLUDED', 'exception_code' => null, 'error_message' => 'Excluded by documented rule'];
-        } elseif ($type === 'CONFIRM_REPLAY') {
-            if (! $this->isPostedReplay($row)) {
-                throw ValidationException::withMessages(['resolution_type' => ['No matching posted movement leg was found.']]);
+        return DB::transaction(function () use ($batchId, $rowId, $actorId, $resolution) {
+            $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+            $this->assertMaker($batch, $actorId);
+            $this->assertState($batch, ['DRAFT_REVIEW', 'QUERY_RAISED', 'STALE']);
+            $row = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->findOrFail($rowId);
+            $type = $resolution['resolution_type'];
+            $updates = [
+                'resolved_by' => $actorId,
+                'resolved_at' => now(),
+                'resolution_reason' => $resolution['reason'],
+            ];
+            if ($type === 'MAP_ACCOUNT') {
+                $allocations = $this->manualAccountAllocations($batch, $row, $resolution);
+                $sra = ShareholderRegisterAccount::where('register_id', $batch->register_id)->findOrFail($allocations[0]['register_account_id']);
+                $extra = $row->extra_details ?? [];
+                unset($extra['account_proposal']);
+                if (count($allocations) > 1) {
+                    $extra['manual_account_allocations'] = $allocations;
+                } else {
+                    unset($extra['manual_account_allocations']);
+                }
+                $updates += ['extra_details' => $extra, 'proposed_sra_id' => $sra->id, 'match_method' => 'manual_mapping', 'resolution_status' => 'UNRESOLVED'];
+            } elseif (in_array($type, ['CREATE_SHAREHOLDER', 'CREATE_ACCOUNT'], true)) {
+                if ($row->sign !== '+') {
+                    throw ValidationException::withMessages(['resolution_type' => ['A new account cannot fund a debit. Map an existing account.']]);
+                }
+                if ($type === 'CREATE_ACCOUNT') {
+                    $holder = Shareholder::findOrFail($resolution['shareholder_id']);
+                    if (ShareholderRegisterAccount::where('shareholder_id', $holder->id)->where('register_id', $batch->register_id)->exists()) {
+                        throw ValidationException::withMessages(['shareholder_id' => ['This shareholder already has an account in the register. Use MAP_ACCOUNT.']]);
+                    }
+                    $profile = ['full_name' => $holder->full_name, 'email' => $holder->email, 'phone' => $holder->phone];
+                } else {
+                    $profile = $resolution['profile'];
+                    if (Shareholder::where('email', $profile['email'])->orWhere('phone', $profile['phone'])->exists()) {
+                        throw ValidationException::withMessages(['profile' => ['An existing shareholder uses this email or phone. Select the existing shareholder.']]);
+                    }
+                }
+                if (empty($profile['full_name']) || empty($profile['email']) || empty($profile['phone'])) {
+                    throw ValidationException::withMessages(['profile' => ['Name, email and phone are required to propose an account.']]);
+                }
+                $extra = $row->extra_details ?? [];
+                $extra['account_proposal'] = ['type' => $type, 'shareholder_id' => $holder->id ?? null, 'profile' => $profile];
+                $extra['master_profile'] = $profile;
+                $extra['master_profile_count'] = 1;
+                $updates += ['extra_details' => $extra, 'proposed_sra_id' => null, 'match_method' => 'proposed_new_account', 'resolution_status' => 'UNRESOLVED'];
+            } elseif ($type === 'RULE_EXCLUDED') {
+                $updates += ['resolution_status' => 'RULE_EXCLUDED', 'exception_code' => null, 'error_message' => 'Excluded by documented rule'];
+            } elseif ($type === 'CONFIRM_REPLAY') {
+                $group = CscsUploadRow::where('batch_id', $batchId)
+                    ->where('file_type', 'movement')
+                    ->where('tran_no', $row->tran_no)
+                    ->lockForUpdate()->get();
+                if (! $row->tran_no || $this->validateTransactionGroup($group)
+                    || ! $group->every(fn (CscsUploadRow $leg) => $this->isPostedReplay($leg))) {
+                    throw ValidationException::withMessages(['resolution_type' => ['Every leg of a complete transaction must match a previously posted movement before confirming replay.']]);
+                }
+                $updates += ['resolution_status' => 'CONFIRMED_REPLAY', 'exception_code' => null];
             }
-            $updates += ['resolution_status' => 'CONFIRMED_REPLAY', 'exception_code' => null];
-        }
-        $from = $batch->workflow_status;
-        if (in_array($type, ['RULE_EXCLUDED', 'CONFIRM_REPLAY'], true) && $row->tran_no) {
-            CscsUploadRow::where('batch_id', $batch->id)->where('tran_no', $row->tran_no)->update($updates);
-        } else {
-            $row->update($updates);
-        }
-        $batch->update(['snapshot_hash' => null, 'workflow_status' => 'DRAFT_REVIEW']);
-        $this->event($batch, 'EXCEPTION_RESOLVED', $from, 'DRAFT_REVIEW', $actorId, $resolution['reason'], ['row_id' => $row->id, 'type' => $type]);
+            $from = $batch->workflow_status;
+            if (in_array($type, ['RULE_EXCLUDED', 'CONFIRM_REPLAY'], true) && $row->tran_no) {
+                CscsUploadRow::where('batch_id', $batch->id)->where('file_type', 'movement')->where('tran_no', $row->tran_no)->update($updates);
+            } else {
+                $row->update($updates);
+            }
+            $next = $from === 'QUERY_RAISED' ? 'QUERY_RAISED' : 'DRAFT_REVIEW';
+            $batch->update(['snapshot_hash' => null, 'workflow_status' => $next]);
+            $this->event($batch, 'EXCEPTION_RESOLVED', $from, $next, $actorId, $resolution['reason'], ['row_id' => $row->id, 'row_ids' => in_array($type, ['RULE_EXCLUDED', 'CONFIRM_REPLAY'], true) && $row->tran_no ? CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->where('tran_no', $row->tran_no)->pluck('id')->all() : [$row->id], 'type' => $type]);
 
-        return ['row' => $row->fresh(), 'batch' => $this->batchResult($batch->fresh())];
+            return ['row' => $row->fresh(), 'batch' => $this->batchResult($batch->fresh())];
+        });
+    }
+
+    /**
+     * @return array<int, array{register_account_id: int, quantity: string}>
+     */
+    private function manualAccountAllocations(CscsUploadBatch $batch, CscsUploadRow $row, array $resolution): array
+    {
+        if (! empty($resolution['account_allocations'])) {
+            if ($row->sign !== '-') {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['Split account mapping is only supported for debit rows.'],
+                ]);
+            }
+
+            $allocations = collect($resolution['account_allocations'])->map(fn (array $allocation) => [
+                'register_account_id' => (int) $allocation['register_account_id'],
+                'quantity' => $this->decimal($allocation['quantity']),
+            ])->values();
+            $accounts = ShareholderRegisterAccount::where('register_id', $batch->register_id)
+                ->whereIn('id', $allocations->pluck('register_account_id'))
+                ->get()
+                ->keyBy('id');
+            if ($accounts->count() !== $allocations->count()) {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['Every selected account must belong to this batch register.'],
+                ]);
+            }
+            if ($accounts->pluck('shareholder_id')->unique()->count() !== 1) {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['All selected accounts must belong to the same shareholder.'],
+                ]);
+            }
+            $total = $allocations->reduce(
+                fn (string $sum, array $allocation) => bcadd($sum, $allocation['quantity'], self::SCALE),
+                $this->zero()
+            );
+            if (bccomp($total, $this->decimal($row->volume), self::SCALE) !== 0) {
+                throw ValidationException::withMessages([
+                    'account_allocations' => ['Split account quantities must equal the CSCS row quantity.'],
+                ]);
+            }
+
+            return $allocations->all();
+        }
+
+        return [[
+            'register_account_id' => (int) $resolution['register_account_id'],
+            'quantity' => $this->decimal($row->volume),
+        ]];
+    }
+
+    /**
+     * @return array<int, array{register_account_id: int|null, quantity: string}>
+     */
+    private function rowAccountAllocations(CscsUploadRow $row): array
+    {
+        $allocations = data_get($row->extra_details, 'manual_account_allocations');
+        if (is_array($allocations) && count($allocations) > 1) {
+            return collect($allocations)->map(fn (array $allocation) => [
+                'register_account_id' => (int) $allocation['register_account_id'],
+                'quantity' => $this->decimal($allocation['quantity']),
+            ])->all();
+        }
+
+        return [[
+            'register_account_id' => $row->proposed_sra_id ? (int) $row->proposed_sra_id : null,
+            'quantity' => $this->decimal($row->volume),
+        ]];
     }
 
     /** @return array<string, mixed> */
@@ -709,6 +1153,7 @@ class CscsImportService
             if ($policy && ! $policy->checker_can_post && (int) $batch->approved_by === (int) $actor->id) {
                 abort(403, 'The active CSCS policy requires a separate poster.');
             }
+            $this->assertPostingReady($batch);
             $from = $batch->workflow_status;
             $batch->update([
                 'workflow_status' => 'POSTING_QUEUED',
@@ -723,9 +1168,150 @@ class CscsImportService
     }
 
     /** @return array<string, mixed> */
+    public function postingReadiness(int $batchId): array
+    {
+        $batch = CscsUploadBatch::with('register')->findOrFail($batchId);
+        $rows = CscsUploadRow::where('batch_id', $batch->id)
+            ->where('file_type', 'movement')
+            ->get();
+        $readyRows = $rows->where('resolution_status', 'READY');
+
+        $snapshotUnchanged = filled($batch->snapshot_hash)
+            && hash_equals((string) $batch->snapshot_hash, $this->snapshotHash($batch->id));
+        $securityMappingsValid = $readyRows->groupBy('sec_code')->every(function (Collection $securityRows, string|int $securityCode) use ($batch): bool {
+            $mapping = CscsSecurityMapping::where('security_code', (string) $securityCode)
+                ->where('is_active', true)
+                ->first();
+
+            return $mapping
+                && (int) $mapping->register_id === (int) $batch->register_id
+                && (int) $mapping->share_class_id === (int) $securityRows->first()->proposed_share_class_id;
+        });
+        $accountMappingsValid = (! isset($batch->reconciliation['account_mapping_snapshot'])
+            || $batch->reconciliation['account_mapping_snapshot'] === $this->accountMappingSnapshot($batchId))
+            && $readyRows->every(function (CscsUploadRow $row) use ($batch): bool {
+                if (! $row->proposed_share_class_id) {
+                    return false;
+                }
+                if (! $row->proposed_sra_id) {
+                    $resolved = $this->resolveAccountForPreview($row, $batch->register_id);
+
+                    return $resolved['resolved'] && $resolved['new_account'];
+                }
+
+                return ShareholderRegisterAccount::whereKey($row->proposed_sra_id)
+                    ->where('register_id', $batch->register_id)
+                    ->where('status', 'active')
+                    ->exists();
+            });
+        $holdingsCurrent = $readyRows
+            ->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id)
+            ->every(function (Collection $effectRows): bool {
+                $first = $effectRows->first();
+                $current = $first->proposed_sra_id
+                    ? SharePosition::where('sra_id', $first->proposed_sra_id)
+                        ->where('share_class_id', $first->proposed_share_class_id)
+                        ->value('quantity') ?? 0
+                    : 0;
+
+                $maxAge = (int) config('cscs.holdings_max_age_hours', 0);
+                if ($maxAge > 0 && $first->proposed_sra_id) {
+                    $updated = SharePosition::where('sra_id', $first->proposed_sra_id)
+                        ->where('share_class_id', $first->proposed_share_class_id)->value('last_updated_at');
+                    if (! $updated || now()->subHours($maxAge)->gt($updated)) {
+                        return false;
+                    }
+                }
+
+                return bccomp($this->decimal($current), $this->decimal($first->proposed_before_qty ?? 0), self::SCALE) === 0;
+            });
+        $movementsNotPosted = $readyRows->every(fn (CscsUploadRow $row): bool => ! $row->replay_key
+            || ! CscsUploadRow::where('fingerprint', $row->replay_key)
+                ->where('status', 'posted')
+                ->where('id', '!=', $row->id)
+                ->exists());
+        $blockingExceptions = $rows
+            ->whereNotIn('resolution_status', ['READY', 'CONFIRMED_REPLAY', 'RULE_EXCLUDED', 'POSTED'])
+            ->count();
+        $statusAllowsPosting = in_array($batch->workflow_status, ['APPROVED_AWAITING_POST', 'POSTING_FAILED'], true);
+
+        $checks = [
+            'status_allows_posting' => ['passed' => $statusAllowsPosting, 'label' => 'Batch approved for posting'],
+            'snapshot_hash_unchanged' => ['passed' => $snapshotUnchanged, 'label' => 'Snapshot hash unchanged'],
+            'security_mappings_valid' => ['passed' => $securityMappingsValid, 'label' => 'Security mappings active and unchanged'],
+            'account_mappings_valid' => ['passed' => $accountMappingsValid, 'label' => 'Account mappings remain valid'],
+            'holdings_current' => ['passed' => $holdingsCurrent, 'label' => 'Current holdings match the approved snapshot'],
+            'movements_not_posted' => ['passed' => $movementsNotPosted, 'label' => 'Movements have not already been posted'],
+            'no_blocking_exceptions' => ['passed' => $blockingExceptions === 0, 'label' => 'No blocking exceptions remain'],
+        ];
+
+        return [
+            'batch_id' => $batch->id,
+            'status' => $batch->workflow_status,
+            'snapshot_hash' => $batch->snapshot_hash,
+            'ready' => collect($checks)->every(fn (array $check): bool => $check['passed']),
+            'checks' => $checks,
+            'summary' => [
+                'records_to_post' => $readyRows->count(),
+                'affected_accounts' => $readyRows
+                    ->map(fn (CscsUploadRow $row) => $row->proposed_sra_id ?: 'new:'.$row->identifier_value)
+                    ->unique()
+                    ->count(),
+                'blocking_exceptions' => $blockingExceptions,
+            ],
+            'posting_policy' => [
+                'is_irreversible' => true,
+                'correction_method' => 'CONTROLLED_REVERSAL',
+                'rollback_window_hours' => null,
+                'message' => 'Posting changes live holdings. Corrections require the controlled reversal workflow; no automatic rollback window is configured.',
+            ],
+        ];
+    }
+
+    private function accountMappingSnapshot(int $batchId): array
+    {
+        $rows = CscsUploadRow::where('batch_id', $batchId)
+            ->where('file_type', 'movement')
+            ->whereIn('resolution_status', ['READY', 'POSTED'])
+            ->get();
+        $accountIds = $rows->pluck('proposed_sra_id')->filter()
+            ->merge($rows->flatMap(fn (CscsUploadRow $row) => collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()))
+            ->unique();
+
+        return ShareholderRegisterAccount::whereIn('id', $accountIds)
+            ->orderBy('id')->get()->map(fn (ShareholderRegisterAccount $account) => [
+                'id' => (int) $account->id, 'register_id' => (int) $account->register_id,
+                'shareholder_id' => (int) $account->shareholder_id, 'chn' => $account->chn,
+                'cscs_account_no' => $account->cscs_account_no, 'status' => $account->status,
+            ])->all();
+    }
+
+    private function assertPostingReady(CscsUploadBatch $batch): void
+    {
+        // Hold account/position/mapping locks until the posting transaction commits.
+        $rows = CscsUploadRow::where('batch_id', $batch->id)->where('resolution_status', 'READY')->lockForUpdate()->get();
+        ShareholderRegisterAccount::whereIn('id', $rows->pluck('proposed_sra_id')->filter())->orderBy('id')->lockForUpdate()->get();
+        SharePosition::whereIn('sra_id', $rows->pluck('proposed_sra_id')->filter())->orderBy('id')->lockForUpdate()->get();
+        CscsSecurityMapping::whereIn('security_code', $rows->pluck('sec_code'))->orderBy('id')->lockForUpdate()->get();
+        $checks = $this->postingReadiness($batch->id)['checks'];
+        if ($batch->workflow_status === 'POSTING_QUEUED') {
+            $checks['status_allows_posting']['passed'] = true;
+        }
+        $failures = collect($checks)->reject(fn (array $check) => $check['passed']);
+        if ($failures->isNotEmpty()) {
+            throw ValidationException::withMessages(['pre_posting_checks' => $failures->map(
+                fn (array $check, string $key) => $key.': '.$check['label'].' failed; data may have changed after approval.'
+            )->values()->all()]);
+        }
+    }
+
+    /** @return array<string, mixed> */
     public function post(int $batchId, AdminUser $actor, ?string $comment = null): array
     {
         $batch = CscsUploadBatch::findOrFail($batchId);
+        if ($batch->workflow_status === 'POSTED') {
+            return $this->batchResult($batch);
+        }
         $this->assertState($batch, ['APPROVED_AWAITING_POST', 'POSTING_FAILED', 'POSTING_QUEUED']);
         $this->assertNotMaker($batch, (int) $actor->id);
         $policy = CscsApprovalPolicy::where('is_active', true)->first();
@@ -736,6 +1322,9 @@ class CscsImportService
         try {
             DB::transaction(function () use ($batchId, $actor, $comment) {
                 $batch = CscsUploadBatch::lockForUpdate()->findOrFail($batchId);
+                if ($batch->workflow_status === 'POSTED') {
+                    return;
+                }
                 $this->assertState($batch, ['APPROVED_AWAITING_POST', 'POSTING_FAILED', 'POSTING_QUEUED']);
                 if (! hash_equals((string) $batch->snapshot_hash, $this->snapshotHash($batch->id))) {
                     $batch->update(['workflow_status' => 'STALE', 'failure_reason' => 'The approved snapshot changed.']);
@@ -743,6 +1332,7 @@ class CscsImportService
                     throw ValidationException::withMessages(['batch' => ['The approved snapshot is stale.']]);
                 }
 
+                $this->assertPostingReady($batch);
                 $batch->update(['workflow_status' => 'POSTING', 'posted_by' => $actor->id, 'posting_started_at' => now(), 'failure_reason' => null]);
                 $rows = CscsUploadRow::where('batch_id', $batch->id)
                     ->where('resolution_status', 'READY')->orderBy('id')->lockForUpdate()->get();
@@ -753,48 +1343,65 @@ class CscsImportService
                     if (CscsUploadRow::where('fingerprint', $row->replay_key)->where('status', 'posted')->where('id', '!=', $row->id)->exists()) {
                         throw ValidationException::withMessages(['replay' => ["Movement row {$row->id} was already posted."]]);
                     }
-                    $sra = $row->proposed_sra_id
-                        ? ShareholderRegisterAccount::findOrFail($row->proposed_sra_id)
-                        : $this->createProposedAccount($batch, $row, (int) $actor->id);
-                    $position = SharePosition::where('sra_id', $sra->id)
-                        ->where('share_class_id', $row->proposed_share_class_id)->lockForUpdate()->first();
-                    $before = $this->decimal($position?->quantity ?? 0);
-                    $quantity = $this->decimal($row->volume);
-                    $delta = $row->sign === '-' ? '-'.$quantity : $quantity;
-                    $after = bcadd($before, $delta, self::SCALE);
-                    if (bccomp($after, $this->zero(), self::SCALE) < 0) {
-                        throw ValidationException::withMessages(['quantity' => ["Insufficient holding for row {$row->id}."]]);
+                    $postedAllocations = [];
+                    foreach ($this->rowAccountAllocations($row) as $index => $allocation) {
+                        $sra = $allocation['register_account_id']
+                            ? ShareholderRegisterAccount::findOrFail($allocation['register_account_id'])
+                            : $this->createProposedAccount($batch, $row, (int) $actor->id);
+                        $position = SharePosition::where('sra_id', $sra->id)
+                            ->where('share_class_id', $row->proposed_share_class_id)->lockForUpdate()->first();
+                        $before = $this->decimal($position?->quantity ?? 0);
+                        $quantity = $row->sign === '-' ? $allocation['quantity'] : $this->decimal($row->volume);
+                        $delta = $row->sign === '-' ? '-'.$quantity : $quantity;
+                        $after = bcadd($before, $delta, self::SCALE);
+                        if (bccomp($after, $this->zero(), self::SCALE) < 0) {
+                            throw ValidationException::withMessages(['quantity' => ["Insufficient holding for row {$row->id}."]]);
+                        }
+                        $position ??= SharePosition::create([
+                            'sra_id' => $sra->id,
+                            'share_class_id' => $row->proposed_share_class_id,
+                            'quantity' => $this->zero(),
+                            'holding_mode' => 'demat',
+                        ]);
+                        $position->update(['quantity' => $after, 'last_updated_at' => now()]);
+                        $tx = ShareTransaction::create([
+                            'sra_id' => $sra->id,
+                            'share_class_id' => $row->proposed_share_class_id,
+                            'tx_type' => $row->sign === '-' ? 'transfer_out' : 'transfer_in',
+                            'quantity' => $quantity,
+                            'tx_ref' => ($batch->batch_type === 'REVERSAL'
+                                ? 'CSCS-REV-'.$batch->id.'-'.$row->tran_no.'-'.$row->tran_seq
+                                : 'CSCS-'.$row->tran_no.'-'.$row->tran_seq).(count($this->rowAccountAllocations($row)) > 1 ? '-'.($index + 1) : ''),
+                            'tx_date' => $row->trade_date,
+                            'created_by' => $actor->id,
+                        ]);
+                        $postedAllocations[] = [
+                            'register_account_id' => $sra->id,
+                            'share_transaction_id' => $tx->id,
+                            'quantity' => $quantity,
+                            'before_qty' => $before,
+                            'after_qty' => $after,
+                        ];
                     }
-                    $position ??= SharePosition::create([
-                        'sra_id' => $sra->id,
-                        'share_class_id' => $row->proposed_share_class_id,
-                        'quantity' => $this->zero(),
-                        'holding_mode' => 'demat',
-                    ]);
-                    $position->update(['quantity' => $after, 'last_updated_at' => now()]);
-                    $tx = ShareTransaction::create([
-                        'sra_id' => $sra->id,
-                        'share_class_id' => $row->proposed_share_class_id,
-                        'tx_type' => $row->sign === '-' ? 'transfer_out' : 'transfer_in',
-                        'quantity' => $quantity,
-                        'tx_ref' => $batch->batch_type === 'REVERSAL'
-                            ? 'CSCS-REV-'.$batch->id.'-'.$row->tran_no.'-'.$row->tran_seq
-                            : 'CSCS-'.$row->tran_no.'-'.$row->tran_seq,
-                        'tx_date' => $row->trade_date,
-                        'created_by' => $actor->id,
-                    ]);
+                    $firstPosted = $postedAllocations[0];
+                    $sra = ShareholderRegisterAccount::findOrFail($firstPosted['register_account_id']);
+                    $extra = $row->extra_details ?? [];
+                    if (count($postedAllocations) > 1) {
+                        $extra['posted_account_allocations'] = $postedAllocations;
+                    }
                     $row->update([
                         'status' => 'posted',
                         'resolution_status' => 'POSTED',
                         'sra_id' => $sra->id,
                         'shareholder_id' => $sra->shareholder_id,
                         'share_class_id' => $row->proposed_share_class_id,
-                        'share_transaction_id' => $tx->id,
-                        'actual_before_qty' => $before,
-                        'actual_after_qty' => $after,
-                        'before_qty' => $before,
-                        'delta_qty' => $delta,
-                        'after_qty' => $after,
+                        'share_transaction_id' => $firstPosted['share_transaction_id'],
+                        'actual_before_qty' => $firstPosted['before_qty'],
+                        'actual_after_qty' => $firstPosted['after_qty'],
+                        'before_qty' => $firstPosted['before_qty'],
+                        'delta_qty' => $row->sign === '-' ? '-'.$firstPosted['quantity'] : $firstPosted['quantity'],
+                        'after_qty' => $firstPosted['after_qty'],
+                        'extra_details' => $extra,
                         'fingerprint' => $row->replay_key,
                     ]);
                 }
@@ -842,33 +1449,104 @@ class CscsImportService
     /** @return Collection<int, array<string, mixed>> */
     public function accountEffects(int $batchId): Collection
     {
-        return CscsUploadRow::where('batch_id', $batchId)
+        $rows = CscsUploadRow::where('batch_id', $batchId)
+            ->where('file_type', 'movement')
             ->whereIn('resolution_status', ['READY', 'POSTED'])
+            ->get();
+        $accountIds = $rows->pluck('proposed_sra_id')->filter()
+            ->merge($rows->flatMap(fn (CscsUploadRow $row) => collect($this->rowAccountAllocations($row))->pluck('register_account_id')->filter()))
+            ->unique();
+        $accounts = ShareholderRegisterAccount::with('shareholder')
+            ->whereIn('id', $accountIds)
             ->get()
-            ->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id)
-            ->map(function (Collection $rows) {
-                $first = $rows->first();
+            ->keyBy('id');
+        $shareClasses = ShareClass::with('register')->whereIn('id', $rows->pluck('proposed_share_class_id')->filter()->unique())
+            ->get()
+            ->keyBy('id');
+
+        $otherAccounts = ShareholderRegisterAccount::with(['register', 'sharePositions.shareClass'])
+            ->whereIn('shareholder_id', $accounts->pluck('shareholder_id')->unique())
+            ->orderBy('id')->get()->groupBy('shareholder_id');
+
+        return $rows
+            ->flatMap(function (CscsUploadRow $row) {
+                return collect($this->rowAccountAllocations($row))->map(fn (array $allocation) => [
+                    'row' => $row,
+                    'register_account_id' => $row->sign === '-' ? $allocation['register_account_id'] : $row->proposed_sra_id,
+                    'quantity' => $row->sign === '-' ? $allocation['quantity'] : $this->decimal($row->volume),
+                ]);
+            })
+            ->groupBy(fn (array $entry) => ($entry['register_account_id'] ?: 'new:'.$entry['row']->identifier_value).':'.$entry['row']->proposed_share_class_id)
+            ->map(function (Collection $rows) use ($accounts, $shareClasses, $otherAccounts) {
+                $firstEntry = $rows->first();
+                $first = $firstEntry['row'];
+                $account = $firstEntry['register_account_id'] ? $accounts->get($firstEntry['register_account_id']) : null;
+                $shareClass = $first->proposed_share_class_id ? $shareClasses->get($first->proposed_share_class_id) : null;
+                $profile = data_get($first->extra_details, 'master_profile', []);
                 $debit = $this->zero();
                 $credit = $this->zero();
-                foreach ($rows as $row) {
+                foreach ($rows as $entry) {
+                    $row = $entry['row'];
                     if ($row->sign === '-') {
-                        $debit = bcadd($debit, $this->decimal($row->volume), self::SCALE);
+                        $debit = bcadd($debit, $entry['quantity'], self::SCALE);
                     } else {
-                        $credit = bcadd($credit, $this->decimal($row->volume), self::SCALE);
+                        $credit = bcadd($credit, $entry['quantity'], self::SCALE);
                     }
                 }
 
+                $isNewAccount = ! $first->proposed_sra_id && $first->match_method === 'proposed_new_account';
+                $riskReasons = $rows->pluck('row.exception_code')->filter()->unique()->values();
+                if ($isNewAccount) {
+                    $riskReasons->push('NEW_ACCOUNT');
+                }
+                $riskLevel = $riskReasons->isEmpty() ? 'LOW' : 'MEDIUM';
+
                 return [
-                    'register_account_id' => $first->proposed_sra_id,
+                    'register_account_id' => $firstEntry['register_account_id'],
+                    'shareholder_id' => $account?->shareholder_id,
+                    'shareholder_name' => $account?->shareholder?->full_name ?? data_get($profile, 'full_name'),
+                    'shareholder_account_number' => $account?->shareholder?->account_no,
+                    'register_account_number' => $account?->shareholder_no,
+                    'chn' => $account?->chn ?? ($first->identifier_type === 'chn' ? $first->identifier_value : null),
+                    'cscs_account_number' => $account?->cscs_account_no ?? ($first->identifier_type === 'cscs_account_no' ? $first->identifier_value : null),
                     'identifier_value' => $first->identifier_value,
+                    'register_id' => $shareClass?->register_id,
+                    'register_name' => $shareClass?->register?->name,
+                    'proposal_type' => data_get($first->extra_details, 'account_proposal.type'),
+                    'proposed_shareholder_id' => data_get($first->extra_details, 'account_proposal.shareholder_id'),
+                    'trigger_reason' => ! $first->proposed_sra_id ? 'No existing register account selected; creation requires approved posting.' : null,
                     'share_class_id' => $first->proposed_share_class_id,
-                    'current_quantity' => $first->proposed_before_qty,
+                    'share_class_code' => $shareClass?->class_code,
+                    'share_class_name' => $shareClass?->name,
+                    'current_quantity' => $account ? $this->decimal(SharePosition::where('sra_id', $account->id)->where('share_class_id', $first->proposed_share_class_id)->value('quantity') ?? 0) : $first->proposed_before_qty,
                     'total_debit' => $debit,
                     'total_credit' => $credit,
                     'net_movement' => bcsub($credit, $debit, self::SCALE),
-                    'proposed_quantity' => $first->proposed_after_qty,
-                    'is_new_account' => ! $first->proposed_sra_id,
-                    'row_count' => $rows->count(),
+                    'proposed_quantity' => $account ? bcadd($this->decimal(SharePosition::where('sra_id', $account->id)->where('share_class_id', $first->proposed_share_class_id)->value('quantity') ?? 0), bcsub($credit, $debit, self::SCALE), self::SCALE) : $first->proposed_after_qty,
+                    'is_new_account' => $isNewAccount,
+                    'is_flagged' => $riskReasons->isNotEmpty(),
+                    'risk' => ['level' => $riskLevel, 'label' => ucfirst(strtolower($riskLevel)), 'reasons' => $riskReasons->all()],
+                    'proposed_profile' => ! $first->proposed_sra_id ? $profile : null,
+                    'other_accounts' => ($account ? $otherAccounts->get($account->shareholder_id, collect()) : collect())
+                        ->reject(fn (ShareholderRegisterAccount $other) => $other->id === $account->id)
+                        ->map(fn (ShareholderRegisterAccount $other) => [
+                            'register_account_id' => $other->id,
+                            'register_account_number' => $other->shareholder_no,
+                            'register_id' => $other->register_id,
+                            'register_name' => $other->register?->name,
+                            'chn' => $other->chn,
+                            'cscs_account_number' => $other->cscs_account_no,
+                            'status' => $other->status,
+                            'same_register' => (int) $other->register_id === (int) $account->register_id,
+                            'holdings' => $other->sharePositions->map(fn (SharePosition $position) => [
+                                'share_class_id' => $position->share_class_id,
+                                'share_class_code' => $position->shareClass?->class_code,
+                                'share_class_name' => $position->shareClass?->name,
+                                'quantity' => $this->decimal($position->quantity),
+                                'holding_mode' => $position->holding_mode,
+                            ])->values()->all(),
+                        ])->values()->all(),
+                    'row_count' => $rows->pluck('row.id')->unique()->count(),
                 ];
             })->values();
     }
@@ -1121,6 +1799,26 @@ class CscsImportService
     /** @return array{resolved:bool,sra_id:?int,method:?string,new_account:bool,code:?string,message:?string} */
     private function resolveAccountForPreview(CscsUploadRow $row, int $registerId): array
     {
+        if ($proposal = data_get($row->extra_details, 'account_proposal')) {
+            $column = $row->identifier_type === 'chn' ? 'chn' : 'cscs_account_no';
+            $existing = ShareholderRegisterAccount::where('register_id', $registerId)->where(function ($query) use ($column, $row, $proposal) {
+                $query->where($column, $row->identifier_value)
+                    ->orWhereHas('externalIdentifiers', fn ($ids) => $ids->where('identifier_type', $row->identifier_type)->where('identifier_value', $row->identifier_value));
+                if ($proposal['shareholder_id'] ?? null) {
+                    $query->orWhere('shareholder_id', $proposal['shareholder_id']);
+                }
+            })->exists();
+            $holder = ($proposal['shareholder_id'] ?? null) ? Shareholder::find($proposal['shareholder_id']) : null;
+            $profile = $proposal['profile'];
+            $changed = ($proposal['shareholder_id'] ?? null)
+                ? ! $holder || $holder->full_name !== $profile['full_name'] || $holder->email !== $profile['email'] || $holder->phone !== $profile['phone']
+                : Shareholder::where('email', $profile['email'])->orWhere('phone', $profile['phone'])->exists();
+            if ($existing || $changed) {
+                return ['resolved' => false, 'sra_id' => null, 'method' => null, 'new_account' => false, 'code' => 'ACCOUNT_PROPOSAL_CHANGED', 'message' => 'The proposed account identity changed or now exists. Review the proposal or map the existing account.'];
+            }
+
+            return ['resolved' => true, 'sra_id' => null, 'method' => 'proposed_new_account', 'new_account' => true, 'code' => null, 'message' => null];
+        }
         if ($row->proposed_sra_id && $row->match_method === 'manual_mapping') {
             $sra = ShareholderRegisterAccount::where('register_id', $registerId)->find($row->proposed_sra_id);
             if ($sra) {
@@ -1171,11 +1869,12 @@ class CscsImportService
 
     private function createProposedAccount(CscsUploadBatch $batch, CscsUploadRow $row, int $actorId): ShareholderRegisterAccount
     {
-        $profile = data_get($row->extra_details, 'master_profile');
+        $profile = data_get($row->extra_details, 'account_proposal.profile', data_get($row->extra_details, 'master_profile'));
         if (! $profile || empty($profile['email']) || empty($profile['phone'])) {
             throw ValidationException::withMessages(['profile' => ["Missing approved master data for {$row->identifier_value}."]]);
         }
-        $shareholder = Shareholder::where('email', $profile['email'])->where('phone', $profile['phone'])->first();
+        $proposedHolderId = data_get($row->extra_details, 'account_proposal.shareholder_id');
+        $shareholder = $proposedHolderId ? Shareholder::findOrFail($proposedHolderId) : Shareholder::where('email', $profile['email'])->where('phone', $profile['phone'])->first();
         if (! $shareholder) {
             $parts = preg_split('/\s+/', trim($profile['full_name'])) ?: [];
             $first = array_shift($parts) ?: 'UNKNOWN';
@@ -1212,7 +1911,19 @@ class CscsImportService
 
     private function assertOpeningBalances(CscsUploadBatch $batch, Collection $rows): void
     {
-        foreach ($rows->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id) as $effectRows) {
+        foreach ($rows as $row) {
+            foreach (data_get($row->extra_details, 'manual_account_allocations', []) as $allocation) {
+                $current = $this->decimal(SharePosition::where('sra_id', $allocation['register_account_id'])
+                    ->where('share_class_id', $row->proposed_share_class_id)->lockForUpdate()->value('quantity') ?? 0);
+                if (bccomp($current, $this->decimal($allocation['proposed_before_qty'] ?? 0), self::SCALE) !== 0) {
+                    $batch->update(['workflow_status' => 'STALE', 'failure_reason' => 'A holding changed after approval.']);
+                    throw ValidationException::withMessages(['batch' => ['A holding changed after approval; the batch must be reconciled again.']]);
+                }
+            }
+        }
+
+        $normalRows = $rows->filter(fn (CscsUploadRow $row) => ! data_get($row->extra_details, 'manual_account_allocations'));
+        foreach ($normalRows->groupBy(fn (CscsUploadRow $row) => ($row->proposed_sra_id ?: 'new:'.$row->identifier_value).':'.$row->proposed_share_class_id) as $effectRows) {
             $first = $effectRows->first();
             $current = $this->zero();
             if ($first->proposed_sra_id) {
@@ -1255,7 +1966,7 @@ class CscsImportService
         $actualNet = bcsub($actualCredit, $actualDebit, self::SCALE);
         $checks = [
             'posted_row_count' => $rows->count() === (int) ($expected['ready_rows'] ?? -1),
-            'share_transaction_count' => $rows->whereNotNull('share_transaction_id')->unique('share_transaction_id')->count() === $rows->count(),
+            'share_transaction_count' => ShareTransaction::whereIn('id', $rows->pluck('share_transaction_id')->filter())->count() >= $rows->count(),
             'unique_replay_fingerprints' => $rows->whereNotNull('fingerprint')->unique('fingerprint')->count() === $rows->count(),
             'debit_total' => bccomp($actualDebit, $this->decimal($expected['total_debit'] ?? 0), self::SCALE) === 0,
             'credit_total' => bccomp($actualCredit, $this->decimal($expected['total_credit'] ?? 0), self::SCALE) === 0,
@@ -1264,6 +1975,16 @@ class CscsImportService
         ];
         foreach ($rows->groupBy(fn (CscsUploadRow $row) => $row->sra_id.':'.$row->share_class_id) as $effectRows) {
             $first = $effectRows->first();
+            if (data_get($first->extra_details, 'posted_account_allocations')) {
+                foreach (data_get($first->extra_details, 'posted_account_allocations', []) as $allocation) {
+                    $actual = $this->decimal(SharePosition::where('sra_id', $allocation['register_account_id'])->where('share_class_id', $first->share_class_id)->value('quantity') ?? 0);
+                    if (bccomp($actual, $this->decimal($allocation['after_qty']), self::SCALE) !== 0) {
+                        $checks['holding_effects'] = false;
+                    }
+                }
+
+                continue;
+            }
             $actual = $this->decimal(SharePosition::where('sra_id', $first->sra_id)->where('share_class_id', $first->share_class_id)->value('quantity') ?? 0);
             if (bccomp($actual, $this->decimal($first->proposed_after_qty), self::SCALE) !== 0) {
                 $checks['holding_effects'] = false;
@@ -1357,9 +2078,25 @@ class CscsImportService
             'to_status' => $to,
             'actor_id' => $actorId,
             'comment' => $comment,
-            'metadata' => $metadata,
+            'metadata' => array_merge($metadata, ['revision' => $batch->revision, 'actor_role' => $actorId === null ? 'SYSTEM' : ((int) $batch->uploaded_by === $actorId ? 'MAKER' : 'CHECKER')]),
             'created_at' => now(),
         ]);
+        $notification = match ($type) {
+            'STALE' => ['CSCS_STALE', 'CSCS batch requires fresh reconciliation'],
+            'SUBMITTED' => count($batch->required_approval_steps ?? []) > 1 ? ['CSCS_ADDITIONAL_APPROVAL_REQUIRED', 'Additional CSCS risk approval required'] : null,
+            'APPROVAL_STEP_COMPLETED' => ['CSCS_ADDITIONAL_APPROVAL_REQUIRED', 'CSCS batch awaits the next approval step'],
+            default => null,
+        };
+        if ($notification) {
+            DB::afterCommit(function () use ($batch, $actorId, $notification): void {
+                app(AdminNotificationService::class)->sendToRoles(
+                    ['Reconciliation', 'Internal Audit', 'Compliance', 'Admin', 'Super Admin'],
+                    $notification[0], $notification[1], "CSCS batch #{$batch->id} requires attention.",
+                    'cscs_upload_batch', $batch->id, "CSCS batch #{$batch->id}", "/cscs/uploads/{$batch->id}", $actorId, [$batch->uploaded_by]
+                );
+            });
+        }
+
     }
 
     private function snapshotHash(int $batchId): string
@@ -1374,6 +2111,7 @@ class CscsImportService
             $row->id, $row->raw_line, $row->resolution_status, $row->proposed_sra_id,
             $row->proposed_share_class_id, $row->proposed_before_qty, $row->proposed_delta_qty,
             $row->proposed_after_qty, $row->replay_key, $row->resolution_reason,
+            ...(data_get($row->extra_details, 'account_proposal') ? [data_get($row->extra_details, 'account_proposal')] : []),
         ])->all();
     }
 

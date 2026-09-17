@@ -1,5 +1,7 @@
 # CSCS Frontend Integration Guide
 
+> Integration update: new submissions now require explicit financial-preview confirmation by default. See [CSCS Figmake API handoff](CSCS_FIGMAKE_API_HANDOFF.md) for the updated sequence, new endpoints, rollout settings and supported prototype mappings.
+
 This is the frontend implementation sequence for the CSCS upload, reconciliation, maker-checker approval, posting, and correction workflow.
 
 Related resources:
@@ -138,7 +140,7 @@ Rules:
 - Do not send files as JSON/base64.
 - Do not manually set multipart `Content-Type`.
 
-Success returns `202` with `data.batch_id`, `data.status`, and progress under `data.summary`. The initial status is `PROCESSING`; upload never changes live holdings. Poll `GET /uploads/{batchId}` until a terminal processing state is returned. Use `summary.processing_stage` and `summary.processing_percent` for a real progress display rather than inventing a client-side percentage.
+Success returns `202` with `data.batch_id`, `data.status`, and progress under `data.summary`. The initial status is `PROCESSING`; upload never changes live holdings. Poll `GET /uploads/{batchId}` until a terminal processing state is returned. Use the monotonic `summary.processing_percent` and `summary.processing_stage` values (`STAGED`, `PARSING`, `VALIDATING`, `VALIDATING_ROWS`, `VALIDATING_TRANSACTIONS`, `CALCULATING_EFFECTS`, `FINALIZING`, `READY`). During parsing, `summary.source_rows_processed` and `summary.source_rows_total` provide row-level progress.
 
 The API validates UTF-8 encoding, samples multiple records to identify each fixed-width file, rejects duplicate hashes for the same register, and reports duplicate movement rows or ambiguous master identifiers as blocking exceptions.
 
@@ -151,6 +153,31 @@ GET /api/cscs/uploads/{batchId}
 GET /api/cscs/uploads/{batchId}/preview
 GET /api/cscs/uploads/{batchId}/exceptions?per_page=50
 GET /api/cscs/uploads/{batchId}/transactions?per_page=50
+```
+
+The transaction-groups endpoint supports server-side workspace filtering. Filters are applied before pagination:
+
+```http
+GET /api/cscs/uploads/{batchId}/transactions?search=2606160005615022&balance_status=BALANCED&is_flagged=false&resolution_status=READY&security_code=FIDELITYBK&trade_date_from=2026-06-16&trade_date_to=2026-06-16&page=1&per_page=50
+```
+
+All filters are optional. `search` matches transaction number, either account identifier, or security code. `balance_status` accepts `BALANCED` or `UNBALANCED`; `is_flagged` accepts `true` or `false`. The response includes full-batch tab counts and normalized active filters independently of the current page:
+
+```json
+{
+  "meta": {
+    "transaction_counts": {
+      "all": 1145,
+      "balanced": 1000,
+      "unbalanced": 145,
+      "flagged": 300
+    },
+    "applied_filters": {
+      "balance_status": "BALANCED",
+      "is_flagged": false
+    }
+  }
+}
 ```
 
 Optional tabs:
@@ -168,6 +195,50 @@ GET /api/cscs/uploads/{batchId}/snapshots
 ```
 
 Show file names/hashes/encoding, record and duplicate counts, transaction groups, debit/credit totals, unresolved exceptions, opening and proposed holdings, risk flags, revision, approval step, immutable snapshots, and audit events.
+
+`GET /uploads/{batchId}/account-effects` returns all eligible account effects; it is not paginated and `per_page` is ignored. Only `READY` and `POSTED` movement rows contribute to financial effects. An empty array does not mean the batch is ready for submission or has no uploaded records.
+
+Use `meta.account_effects` (also `data.account_effects_meta` in `/preview`) to explain empty results: `workflow_status`, `movement_row_counts`, `exception_counts`, and `empty_reason`. Reasons are `PROCESSING`, `NO_MOVEMENT_ROWS`, `UNRESOLVED_EXCEPTIONS`, `ALL_MOVEMENTS_EXCLUDED_OR_REPLAYED`, or `NO_ELIGIBLE_MOVEMENTS`; the reason is null when effects exist. For unresolved exceptions, display the exception counts and link to `exceptions_endpoint`. Resolve the blockers and reconcile through the existing workflow before refreshing the preview. Use the preview's workflow checks for submission readiness, never the presence or absence of account effects alone.
+
+The individual transaction endpoint includes explicit UI fields in addition to the existing totals and legs:
+
+```json
+{
+  "data": {
+    "transaction_number": "2606160005615022",
+    "quantity": "248889.000000",
+    "quantity_mismatch": false,
+    "debit_total": "248889.000000",
+    "credit_total": "248889.000000",
+    "net_total": "0.000000",
+    "is_balanced": true,
+    "balance_status": "BALANCED",
+    "is_flagged": false,
+    "flag_reasons": [],
+    "risk": { "level": "LOW", "label": "Low", "reasons": [] },
+    "resolution": { "status": "READY", "label": "Ready", "action_required": false },
+    "debit_account": {
+      "register_account_id": 445,
+      "shareholder_name": "Debit Holder",
+      "register_account_number": "SRA-00000445",
+      "chn": "C111111111",
+      "current_quantity": "300000.000000",
+      "proposed_quantity": "51111.000000",
+      "is_new_account": false
+    },
+    "credit_account": {
+      "register_account_id": 446,
+      "shareholder_name": "Credit Holder",
+      "chn": "C222222222",
+      "is_new_account": false
+    },
+    "status": ["READY"],
+    "legs": []
+  }
+}
+```
+
+`balance_status` is `BALANCED` or `UNBALANCED`. `is_flagged` is true when the transaction is unbalanced, contains an exception, or has a leg outside the normal `READY`/`POSTED` states. `flag_reasons` contains the applicable exception and resolution codes. The `risk`, `resolution`, `debit_account`, and `credit_account` objects are returned by both transaction endpoints; the frontend does not need to join register-account IDs to render the table.
 
 ### Step 4 — Render actions from the batch response
 
@@ -188,8 +259,26 @@ Render a button only when its action is present and the user has the matching fr
 ### Step 5 — Resolve all exceptions
 
 ```http
-GET /api/cscs/uploads/{batchId}/exceptions?status=UNRESOLVED&per_page=50
+GET /api/cscs/uploads/{batchId}/exceptions?resolution_status=UNRESOLVED&search=C111111111&per_page=50
 ```
+
+`status` and `resolution_status` are equivalent filters. Search matches transaction number, identifier, exception code, error message, or source row number. Each result includes `severity`, `is_blocking`, `exception_label`, `parsed_record`, `matched_account`, `allowed_resolution_types`, `suggested_resolution`, and `resolution_history`. The response also provides full-batch cards independently of pagination:
+
+```json
+{
+  "meta": {
+    "exception_counts": {
+      "total": 10,
+      "blocking": 5,
+      "warnings": 2,
+      "resolved": 3,
+      "remaining": 7
+    }
+  }
+}
+```
+
+Resolved rows remain in this endpoint so the Resolved tab and audit trail do not disappear after revalidation.
 
 Manual account mapping:
 
@@ -205,7 +294,7 @@ POST /api/cscs/uploads/{batchId}/exceptions/{exceptionId}/resolve
 }
 ```
 
-Obtain `register_account_id` from the application's existing shareholder/register-account lookup. It must belong to the batch register.
+Obtain `register_account_id` from `GET /api/shareholders?register_id={registerId}&search={query}`. Search accepts shareholder names/contact information as well as shareholder numbers, CHNs, and CSCS account numbers. The selected account must belong to the batch register.
 
 Replay or exclusion alternatives:
 
@@ -277,7 +366,12 @@ GET /api/cscs/uploads/{batchId}/account-effects
 GET /api/cscs/uploads/{batchId}/files
 GET /api/cscs/uploads/{batchId}/approvals
 GET /api/cscs/uploads/{batchId}/events
+GET /api/cscs/uploads/{batchId}/comments
 ```
+
+Post a standalone review note with `POST /api/cscs/uploads/{batchId}/comments` and a JSON body containing `comment`. The comments read also includes comments recorded with workflow actions.
+
+The preview is the UI-ready checker aggregate. It includes named `account_effects`, `proposed_new_accounts`, mappings with register/share-class details, `review_summary`, `approval_timeline`, and `comments`. Batch metadata includes `register.company` and the `uploader`, `reconciler`, `submitter`, `approver`, `rejector`, and `poster` actor objects when available.
 
 ### Step 9 — Checker approves
 
@@ -301,6 +395,16 @@ Approval never changes holdings.
 ### Step 10 — Release for posting
 
 The poster cannot be the maker. Policy may also require someone other than the checker.
+
+Populate the authorization modal before enabling the release action:
+
+```http
+GET /api/cscs/uploads/{batchId}/posting-readiness
+```
+
+Require `data.ready === true` and render the individual checks returned under `data.checks`. This read validates the snapshot, security and account mappings, opening holdings, replay protection, blocking exceptions, and current workflow state without changing the batch.
+
+Render the warning from `data.posting_policy`. There is no automatic 24-hour rollback window: a posted correction uses the controlled reversal workflow.
 
 ```http
 POST /api/cscs/uploads/{batchId}/post
@@ -345,6 +449,14 @@ Stop on:
 - `STALE`: return the batch to maker reconciliation.
 
 Cancel polling when the page unmounts.
+
+For the consolidated success screen, load:
+
+```http
+GET /api/cscs/uploads/{batchId}/verification-summary
+```
+
+Show posting as verified only when `data.verification_status` is `VERIFIED` and `data.all_checks_passed` is true. Render the reconciliation table directly from `data.comparison`; every row contains `approved`, `actual`, `variance`, `status`, and `matched`. The top cards are available under `data.metrics`, including `duplicate_prevention_blocks`.
 
 ## 5. Alternative branches
 
@@ -391,6 +503,8 @@ POST /api/cscs/uploads/{batchId}/reject
 `REJECTED` is terminal in the current API. Upload a corrected new batch.
 
 ### Maker cancellation
+
+The maker can cancel a batch while it is `PROCESSING`, `DRAFT_REVIEW`, `RECONCILED`, `QUERY_RAISED`, `STALE`, or `PROCESSING_FAILED`. During an active import, cancellation safely stops the worker and prevents it from later changing the batch to `DRAFT_REVIEW`.
 
 ```http
 POST /api/cscs/uploads/{batchId}/cancel
@@ -493,7 +607,12 @@ GET /uploads/{batchId}/export?type=exceptions
 GET /uploads/{batchId}/export?type=reconciliation
 GET /uploads/{batchId}/export?type=preview
 GET /uploads/{batchId}/export?type=posting
+GET /uploads/{batchId}/export?type=audit&format=pdf
+GET /uploads/{batchId}/export?type=reconciliation&format=pdf
+GET /uploads/{batchId}/export?type=activity&format=xls
 ```
+
+The activity export also supports `format=xlsx`. Existing exports default to CSV when `format` is omitted.
 
 Downloads and exports require `responseType: 'blob'` and the authorization token:
 
@@ -578,3 +697,14 @@ Batch list
 ```
 
 Always refresh the batch and use `allowed_actions`. Do not maintain a separate client-side state machine that can drift from the API.
+
+
+## Other shareholder accounts in balancing and replay confirmation
+
+Each item in `account_effects` (both the preview and account-effects responses) now includes an additive `other_accounts` array. Existing balance fields retain their meaning. The array contains other register accounts linked to the same shareholder ID; it is empty when there are no other accounts or the row proposes a new account.
+
+Each other account includes `register_account_id`, `register_account_number`, `register_id`, `register_name`, `chn`, `cscs_account_number`, `status`, `same_register`, and `holdings`. Each holding contains `share_class_id`, `share_class_code`, `share_class_name`, `quantity` (six-decimal string), and `holding_mode`.
+
+Display these accounts alongside the selected account for review. Do not sum their quantities into the selected account's balance or combine different share classes. Accounts from another register are informational: `MAP_ACCOUNT` still requires an account in the batch's register. Account discovery uses the existing shareholder ID, not a name similarity match.
+
+After `MAP_ACCOUNT`, call revalidation before proceeding; recording a mapping does not certify sufficient holdings. `CONFIRM_REPLAY` now rejects an incomplete transaction or any transaction where either leg has no matching posted movement, with a validation error under `resolution_type`. A successful confirmation applies to the complete movement group atomically. Continue to revalidate after recording the resolution.

@@ -41,7 +41,7 @@ Use `--with-vendor` only when the deployment host cannot install Composer depend
 
 ## Always excluded
 
-- Estock source JSON and other source extracts.
+- FRIS SQLite files and other source extracts.
 - Local SQLite databases and backups.
 - Approved or draft company data bundles.
 - Workstation reports and generated outputs.
@@ -66,6 +66,6 @@ Before deployment, confirm:
 2. `git_dirty` is `false`.
 3. The transferred archive matches the `.sha256` file.
 4. The internal `.release/files.sha256` inventory verifies after extraction.
-5. No company bundle, `.env`, SQLite file, Estock source or workstation output appears in the archive.
+5. No company bundle, `.env`, SQLite file, FRIS source or workstation output appears in the archive.
 6. A restorable production database backup exists.
 7. The allowlisted Fidelity bundle is present after deployment and matches its committed checksum.

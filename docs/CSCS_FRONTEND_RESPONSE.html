@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>CSCS Upload Screens — Backend Integration Response</title>
+    <style>
+        @page { margin: 42px 46px 48px; }
+        * { box-sizing: border-box; }
+        body { color: #17233c; font-family: DejaVu Sans, Arial, sans-serif; font-size: 10px; line-height: 1.48; margin: 0; }
+        h1 { color: #11376f; font-size: 24px; line-height: 1.18; margin: 0 0 7px; }
+        h2 { border-bottom: 2px solid #dbe5f2; color: #11376f; font-size: 15px; margin: 23px 0 10px; padding-bottom: 5px; }
+        h3 { color: #274f80; font-size: 11px; margin: 15px 0 5px; }
+        p { margin: 5px 0 9px; }
+        ul, ol { margin: 5px 0 10px; padding-left: 19px; }
+        li { margin: 3px 0; }
+        code { background: #eef3f8; color: #153a68; font-family: DejaVu Sans Mono, monospace; font-size: 8.4px; padding: 1px 3px; }
+        pre { background: #13233b; border-radius: 4px; color: #eef5ff; font-family: DejaVu Sans Mono, monospace; font-size: 7.8px; line-height: 1.48; margin: 7px 0 11px; padding: 9px 11px; white-space: pre-wrap; }
+        table { border-collapse: collapse; margin: 8px 0 14px; width: 100%; }
+        th { background: #e7eef8; color: #173e70; font-weight: bold; text-align: left; }
+        th, td { border: 1px solid #d4dfed; padding: 6px 7px; vertical-align: top; }
+        td code { font-size: 7.3px; white-space: normal; word-wrap: break-word; }
+        tr:nth-child(even) td { background: #fafbfd; }
+        .cover { padding-top: 85px; }
+        .eyebrow { color: #2d67a9; font-size: 9px; font-weight: bold; letter-spacing: 1.2px; margin-bottom: 14px; text-transform: uppercase; }
+        .lead { color: #47566a; font-size: 12px; line-height: 1.55; margin: 16px 0 24px; max-width: 500px; }
+        .status { background: #eaf8f0; border: 1px solid #b9e4ca; border-radius: 4px; color: #12633d; font-size: 11px; font-weight: bold; padding: 10px 12px; }
+        .meta { border-top: 1px solid #dbe5f2; color: #667589; margin-top: 45px; padding-top: 12px; }
+        .callout { background: #f4f7fb; border-left: 4px solid #2e67a5; margin: 9px 0 13px; padding: 9px 11px; }
+        .warning { background: #fff7e8; border-left-color: #d58b17; }
+        .success { background: #edf9f2; border-left-color: #15925b; }
+        .page-break { page-break-before: always; }
+        .avoid-break { page-break-inside: avoid; }
+        .closing h2 { margin: 14px 0 7px; }
+        .closing p { margin: 3px 0 6px; }
+        .closing table { margin: 5px 0 9px; }
+        .closing th, .closing td { padding: 4px 6px; }
+        .closing ol { line-height: 1.34; margin: 3px 0 7px; }
+        .closing li { margin: 1px 0; }
+        .tag { background: #e8f6ee; border-radius: 9px; color: #147548; display: inline-block; font-size: 8px; font-weight: bold; padding: 2px 7px; }
+        .footer { bottom: 17px; color: #8390a0; font-size: 7px; left: 46px; position: fixed; right: 46px; text-align: right; }
+    </style>
+</head>
+<body>
+    <div class="footer">Project T · CSCS frontend integration response · 31 August 2026</div>
+
+    <section class="cover">
+        <div class="eyebrow">Backend integration response</div>
+        <h1>CSCS Upload, Reconciliation,<br>Approval &amp; Posting Screens</h1>
+        <p class="lead">Response to the annotated frontend screen document, including the endpoint for every data panel and action, required payloads, workflow guidance, and the additions completed to support the proposed experience.</p>
+        <div class="status">Integration status: Backend support is complete for the concerns raised.</div>
+        <div class="meta">
+            <strong>API base path:</strong> <code>/api/cscs</code><br>
+            <strong>Authentication:</strong> Sanctum bearer token<br>
+            <strong>Response date:</strong> 31 August 2026
+        </div>
+    </section>
+
+    <section class="page-break">
+        <h2>1. Reconciliation workspace</h2>
+        <p>The first screen can be populated from the following existing endpoints. Transaction groups are paginated and include their balance, flag and resolution information.</p>
+        <table>
+            <thead><tr><th>Screen area</th><th>Endpoint</th><th>Frontend guidance</th></tr></thead>
+            <tbody>
+                <tr><td>Batch and summary cards</td><td><code>GET /uploads/{batchId}</code></td><td>Use <code>workflow_status</code>, summary fields and <code>allowed_actions</code>.</td></tr>
+                <tr><td>Transaction table</td><td><code>GET /uploads/{batchId}/transactions?page=1&amp;per_page=50</code></td><td>Supports search, balance, flagged, resolution, security and date filters.</td></tr>
+                <tr><td>Selected transaction preview</td><td><code>GET /uploads/{batchId}/transactions/{transactionNumber}</code></td><td>Returns debit/credit legs, account effects, balance status and flag reasons.</td></tr>
+                <tr><td>Holding/account effect cards</td><td><code>GET /uploads/{batchId}/account-effects</code></td><td>Returns current, debit, credit, net and proposed quantities.</td></tr>
+                <tr><td>Combined preview</td><td><code>GET /uploads/{batchId}/preview</code></td><td>Provides batch, account effects and security mappings in one response.</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout success"><strong>Pagination annotation confirmed.</strong> The proposed transaction URL is correct. Use the pagination metadata returned by Laravel rather than calculating page counts in the browser.</div>
+
+        <h2>2. Exception list and detail panel</h2>
+        <p>Load unresolved exception rows with:</p>
+        <pre>GET /api/cscs/uploads/{batchId}/exceptions?status=UNRESOLVED&amp;page=1&amp;per_page=10</pre>
+        <p>The annotation used <code>resolution_status=UNRESOLVED</code>. The API now accepts both <code>status</code> and <code>resolution_status</code> as equivalent filters, so the frontend can use either form. <code>status</code> remains the preferred documented name.</p>
+
+        <p>The right-hand detail panel should use the selected exception object from this paginated response. A separate request is not required unless the frontend also wants the complete transaction context; in that case, call the transaction-detail endpoint using the selected row’s transaction number.</p>
+
+        <h3>One resolution endpoint for three actions</h3>
+        <pre>POST /api/cscs/uploads/{batchId}/exceptions/{exceptionId}/resolve</pre>
+        <table>
+            <thead><tr><th>Button</th><th>Payload</th></tr></thead>
+            <tbody>
+                <tr><td>Confirm Mapping</td><td><code>{ "resolution_type": "MAP_ACCOUNT", "register_account_id": 445, "reason": "Confirmed against the shareholder register." }</code></td></tr>
+                <tr><td>Mark as Replay</td><td><code>{ "resolution_type": "CONFIRM_REPLAY", "reason": "Confirmed as a previously posted movement." }</code></td></tr>
+                <tr><td>Exclude Record</td><td><code>{ "resolution_type": "RULE_EXCLUDED", "reason": "Excluded under the documented reconciliation rule." }</code></td></tr>
+            </tbody>
+        </table>
+        <p><code>reason</code> is mandatory and must contain 10–1000 characters. After any resolution, refresh the exception list and call <code>POST /uploads/{batchId}/revalidate</code> before submission.</p>
+    </section>
+
+    <section class="page-break">
+        <h2>3. Creating or selecting an account</h2>
+        <p>The account-related buttons use existing shareholder APIs; CSCS does not need to duplicate shareholder creation.</p>
+        <table>
+            <thead><tr><th>Action</th><th>Endpoint</th><th>Next step</th></tr></thead>
+            <tbody>
+                <tr><td>Search for an account</td><td>Use the existing shareholder/register-account search endpoints.</td><td>Pass the selected register-account ID to <code>MAP_ACCOUNT</code>.</td></tr>
+                <tr><td>Create New Shareholder</td><td><code>POST /api/shareholders</code></td><td>Create the register account after receiving the shareholder ID.</td></tr>
+                <tr><td>Create Register Account</td><td><code>POST /api/shareholders/{shareholderId}/register-accounts</code></td><td>Pass the returned register-account ID to <code>MAP_ACCOUNT</code>.</td></tr>
+            </tbody>
+        </table>
+        <div class="callout warning"><strong>Important:</strong> creating a shareholder or register account does not resolve the CSCS exception by itself. The frontend must complete the sequence by calling the exception resolution endpoint.</div>
+
+        <h2>4. Remaining reconciliation actions</h2>
+        <table>
+            <thead><tr><th>Button</th><th>Endpoint</th><th>Body</th></tr></thead>
+            <tbody>
+                <tr><td>Save / Revalidate</td><td><code>POST /uploads/{batchId}/revalidate</code></td><td><code>{ "comment": "Optional reconciliation note" }</code></td></tr>
+                <tr><td>Submit for Approval</td><td><code>POST /uploads/{batchId}/submit</code></td><td><code>{ "comment": "Optional submission note" }</code></td></tr>
+                <tr><td>Cancel Batch</td><td><code>POST /uploads/{batchId}/cancel</code></td><td><code>{ "comment": "Required reason of at least 10 characters" }</code></td></tr>
+            </tbody>
+        </table>
+        <p>“Save &amp; Continue Later” may simply navigate away because the staged batch and every resolution are already persisted. There is no unsaved draft payload that needs a separate endpoint.</p>
+
+        <div class="callout"><strong>Button rendering:</strong> use <code>data.allowed_actions</code> from <code>GET /uploads/{batchId}</code>. Do not infer available actions only from the displayed status.</div>
+
+        <h2>5. Checker review screen</h2>
+        <table>
+            <thead><tr><th>Screen section</th><th>Endpoint</th></tr></thead>
+            <tbody>
+                <tr><td>Metadata, totals, proposed holdings and mappings</td><td><code>GET /uploads/{batchId}/preview</code></td></tr>
+                <tr><td>Transaction groups</td><td><code>GET /uploads/{batchId}/transactions</code></td></tr>
+                <tr><td>Approval timeline</td><td><code>GET /uploads/{batchId}/events</code> and <code>GET /uploads/{batchId}/approvals</code></td></tr>
+                <tr><td>Comments and review notes</td><td><code>GET /uploads/{batchId}/comments</code></td></tr>
+                <tr><td>Post a standalone comment</td><td><code>POST /uploads/{batchId}/comments</code> with <code>{ "comment": "..." }</code></td></tr>
+            </tbody>
+        </table>
+
+        <div class="avoid-break">
+            <h3>Checker decisions</h3>
+            <pre>POST /api/cscs/uploads/{batchId}/approve
+{ "comment": "Independent review completed." }
+
+POST /api/cscs/uploads/{batchId}/query
+{ "comment": "Please confirm the source instruction reference.",
+  "transaction_numbers": ["TXN-001"], "row_ids": [45] }
+
+POST /api/cscs/uploads/{batchId}/reject
+{ "comment": "Required rejection reason of at least 10 characters." }</pre>
+        </div>
+    </section>
+
+    <section>
+        <h2>6. Posting authorization</h2>
+        <p>Approval and posting are intentionally separate controlled actions. Approval moves the batch to <code>APPROVED_AWAITING_POST</code>; it does not update live holdings. Only the posting action changes holdings.</p>
+
+        <h3>Populate the confirmation modal</h3>
+        <pre>GET /api/cscs/uploads/{batchId}/posting-readiness</pre>
+        <p>The response contains a top-level <code>ready</code> boolean, a summary of records/accounts, and individual checks for:</p>
+        <ul>
+            <li>approved posting state;</li>
+            <li>unchanged immutable snapshot hash;</li>
+            <li>active and unchanged security mappings;</li>
+            <li>valid account mappings;</li>
+            <li>current holdings matching the approved snapshot;</li>
+            <li>movements not previously posted; and</li>
+            <li>no blocking exceptions.</li>
+        </ul>
+        <p>Disable “Authorize Posting” unless <code>data.ready === true</code> and <code>allowed_actions</code> contains <code>post</code>.</p>
+
+        <h3>Authorize and monitor posting</h3>
+        <pre>POST /api/cscs/uploads/{batchId}/post
+{ "comment": "Optional operational authorization comment." }
+
+GET /api/cscs/uploads/{batchId}/posting-status</pre>
+        <p>The POST returns HTTP <code>202 Accepted</code>. Poll posting status while the state is <code>POSTING_QUEUED</code> or <code>POSTING</code>. Stop polling at <code>POSTED</code>, <code>POSTING_FAILED</code> or <code>STALE</code>.</p>
+
+        <div class="callout warning"><strong>Role separation:</strong> the maker cannot post their own batch. Depending on the active policy, the checker who approved it may also be prohibited from posting. Treat HTTP 403 as an authorization decision, not a retryable error.</div>
+
+        <h2>7. Post-posting verification screen</h2>
+        <pre>GET /api/cscs/uploads/{batchId}/verification-summary</pre>
+        <p>This consolidated response is designed for the proposed final screen. It returns:</p>
+        <ul>
+            <li>verification and workflow status;</li>
+            <li>posted record and transaction-group counts;</li>
+            <li>failed rows, debit, credit and net totals;</li>
+            <li>updated shareholder records and created accounts;</li>
+            <li>resolved exceptions and replay counts;</li>
+            <li>approved totals for variance comparison; and</li>
+            <li>the complete post-verification check result.</li>
+        </ul>
+        <p>The UI should show success only when <code>verification_status</code> is <code>VERIFIED</code>. The backend performs verification in the same controlled transaction as posting.</p>
+    </section>
+
+    <section class="closing">
+        <h2>8. Reports and audit downloads</h2>
+        <p>The existing export endpoint now supports the four formats shown in the design:</p>
+        <table>
+            <thead><tr><th>Design card</th><th>Request</th></tr></thead>
+            <tbody>
+                <tr><td>Audit Report — PDF</td><td><code>GET /uploads/{batchId}/export?type=audit&amp;format=pdf</code></td></tr>
+                <tr><td>Posting Report — CSV</td><td><code>GET /uploads/{batchId}/export?type=posting&amp;format=csv</code></td></tr>
+                <tr><td>Reconciliation Report — PDF</td><td><code>GET /uploads/{batchId}/export?type=reconciliation&amp;format=pdf</code></td></tr>
+                <tr><td>Activity Log — Excel</td><td><code>GET /uploads/{batchId}/export?type=activity&amp;format=xls</code></td></tr>
+            </tbody>
+        </table>
+        <p><code>format=xlsx</code> is also supported for the activity log. Existing CSV exports for rows, exceptions, reconciliation, preview and posting remain available.</p>
+
+        <h2>9. Frontend implementation sequence</h2>
+        <ol>
+            <li>Load batch, preview, transactions and exceptions in parallel.</li>
+            <li>Render actions from <code>allowed_actions</code>.</li>
+            <li>Resolve exception rows using the single resolution endpoint.</li>
+            <li>Revalidate, ensure zero blocking exceptions, then submit.</li>
+            <li>On checker review, load preview, transactions, approvals, events and comments.</li>
+            <li>Approve, query or reject according to the returned actions.</li>
+            <li>Before posting, call posting readiness and display each check.</li>
+            <li>Authorize posting, poll posting status, then load verification summary.</li>
+            <li>Use the export URLs directly for report download buttons.</li>
+        </ol>
+
+        <h2>10. Standard handling</h2>
+        <table>
+            <thead><tr><th>HTTP status</th><th>Meaning</th><th>Frontend behavior</th></tr></thead>
+            <tbody>
+                <tr><td>200 / 201</td><td>Read or mutation completed</td><td>Refresh the affected batch panels.</td></tr>
+                <tr><td>202</td><td>Background processing accepted</td><td>Begin status polling.</td></tr>
+                <tr><td>403</td><td>Role or maker-checker restriction</td><td>Hide/disable action and display the returned message.</td></tr>
+                <tr><td>404</td><td>Batch, row or transaction not found</td><td>Return to the batch list or clear the stale selection.</td></tr>
+                <tr><td>422</td><td>Validation or workflow-state conflict</td><td>Show field errors; refresh batch state before retrying.</td></tr>
+            </tbody>
+        </table>
+
+        <div class="callout success"><strong>Conclusion:</strong> every annotated concern now has either an existing endpoint or a newly completed endpoint. The frontend can proceed without mock-only data or unsupported action buttons.</div>
+    </section>
+</body>
+</html>

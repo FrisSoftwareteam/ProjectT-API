@@ -66,6 +66,36 @@ class CscsUploadBatch extends Model
         return $this->belongsTo(Register::class);
     }
 
+    public function uploader()
+    {
+        return $this->belongsTo(AdminUser::class, 'uploaded_by');
+    }
+
+    public function reconciler()
+    {
+        return $this->belongsTo(AdminUser::class, 'reconciled_by');
+    }
+
+    public function submitter()
+    {
+        return $this->belongsTo(AdminUser::class, 'submitted_by');
+    }
+
+    public function approver()
+    {
+        return $this->belongsTo(AdminUser::class, 'approved_by');
+    }
+
+    public function rejector()
+    {
+        return $this->belongsTo(AdminUser::class, 'rejected_by');
+    }
+
+    public function poster()
+    {
+        return $this->belongsTo(AdminUser::class, 'posted_by');
+    }
+
     public function approvalActions()
     {
         return $this->hasMany(CscsApprovalAction::class, 'batch_id');

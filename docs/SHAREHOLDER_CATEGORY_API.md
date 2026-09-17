@@ -1,6 +1,6 @@
 # Shareholder Category API
 
-Shareholder categories preserve the register-specific Estock classification without misusing security share classes. The broad legal type remains on `shareholders.holder_type`; the detailed category is linked through `shareholder_register_accounts.shareholder_category_id`.
+Shareholder categories preserve the register-specific FRIS classification without misusing security share classes. The broad legal type remains on `shareholders.holder_type`; the detailed category is linked through `shareholder_register_accounts.shareholder_category_id`.
 
 All endpoints require Sanctum authentication and the indicated shareholder permission.
 
@@ -27,7 +27,7 @@ Example category payload:
   "requires_joint_holders": false,
   "requires_review": true,
   "is_active": true,
-  "source_system": "ESTOCK"
+  "source_system": "FRIS"
 }
 ```
 
@@ -52,8 +52,8 @@ The existing register-account creation endpoint now accepts `shareholder_categor
 POST /api/shareholders/{shareholderId}/register-accounts
 ```
 
-CSV shareholder imports may include the optional stable column `shareholder_category_code`. Lowercase Estock codes are normalized to uppercase before validation.
+CSV shareholder imports may include the optional stable column `shareholder_category_code`. Lowercase legacy category codes are normalized to uppercase before validation.
 
-## Seeded Estock categories
+## Seeded FRIS categories
 
 The production-safe `ShareholderCategorySeeder` creates codes `A`, `I`, `C`, `D`, `J`, `M`, `N`, `O`, `P`, `Q`, `R`, `S`, `T`, `U`, `V`, `X`, `Y`, and `Z`. Joint categories are flagged, and ambiguous `R` and `V` categories require review.

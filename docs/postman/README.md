@@ -8,6 +8,7 @@ Import `ProjectT-API.postman_collection.json` into Postman.
 2. Run `Authentication > POST - Auth - Simulate Login`.
 3. The simulate-login test script automatically stores the returned bearer token in the collection variable `token`.
 4. Update ID variables such as `company_id`, `register_id`, `shareholder`, and `declaration_id` to records available in the target environment.
+5. For CSCS report downloads, set `cscs_export_type` and `cscs_export_format`. Useful pairs are `audit/pdf`, `posting/csv`, `reconciliation/pdf`, and `activity/xls` or `activity/xlsx`.
 
 The collection uses inherited Bearer authentication for protected routes. Public authentication routes override it with `noauth`.
 
@@ -41,6 +42,7 @@ They remain in the collection for completeness and are marked with warnings.
 - Register create/update examples use `instrument_type_id`, `unit_precision_type`, and `decimal_precision`. Decimal registers accept 2–4 places; whole-number registers omit `decimal_precision`.
 - Register-bearing responses expose `unit_precision` metadata so clients can format raw decimal unit strings consistently.
 - CSCS upload is staging-only. After upload, follow `reconcile -> submit -> approve -> post`; upload and approval never directly change holdings. The posting endpoint queues an atomic, replay-protected posting job.
+- Before posting, run the CSCS posting-readiness request and require `data.ready` to be true. After posting, use verification-summary for the final screen. The CSCS folder also contains standalone review-comment requests.
 - Configure an active CSCS security mapping before reconciliation, and use different authenticated users for maker and checker actions. See `docs/CSCS_API.md`, `docs/CSCS_FRONTEND_INTEGRATION_GUIDE.md`, and `docs/CSCS_UPLOAD_RECONCILIATION_WORKFLOW.md`.
 - Shareholder bulk import uses `POST /api/shareholders/bulk` with a `file` field. A ready sample is available at `docs/postman/shareholder_bulk_import_sample.csv`; update `register_id` and `share_class_id` to match the target environment before uploading.
 - Required shareholder bulk import columns are `holder_type`, `first_name`, `email`, `phone`, `status`, `address_line1`, `register_id`, `share_class_id`, and `quantity`. Mandate columns are optional, but if any mandate field is provided then bank name, account name, and bank account number are required.

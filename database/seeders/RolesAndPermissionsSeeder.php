@@ -59,16 +59,6 @@ class RolesAndPermissionsSeeder extends Seeder
             'cscs.export',
             'cscs.admin',
 
-            // Controlled legacy migrations
-            'legacy_migrations.view',
-            'legacy_migrations.create',
-            'legacy_migrations.stage',
-            'legacy_migrations.reconcile',
-            'legacy_migrations.submit',
-            'legacy_migrations.approve',
-            'legacy_migrations.publish',
-            'legacy_migrations.rollback',
-
             // Shareholder Mandate Management
             'shareholder_mandates.view',
             'shareholder_mandates.create',
@@ -274,7 +264,6 @@ class RolesAndPermissionsSeeder extends Seeder
             'shareholder_change_requests.view', 'shareholder_change_requests.create', 'shareholder_change_requests.approve',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
             'cscs.view', 'cscs.upload', 'cscs.reconcile', 'cscs.submit', 'cscs.review', 'cscs.approve', 'cscs.post', 'cscs.export', 'cscs.admin',
-            'legacy_migrations.view', 'legacy_migrations.create', 'legacy_migrations.stage', 'legacy_migrations.reconcile', 'legacy_migrations.submit', 'legacy_migrations.approve', 'legacy_migrations.publish', 'legacy_migrations.rollback',
             'certificates.view', 'certificates.create', 'certificates.edit', 'certificates.issue',
             'warrants.view', 'warrants.create', 'warrants.edit',
             'reports.view', 'reports.generate', 'reports.export',
@@ -405,7 +394,6 @@ class RolesAndPermissionsSeeder extends Seeder
         $role->syncPermissions([
             'compliance.view', 'compliance.manage', 'compliance.reports',
             'cscs.view', 'cscs.review', 'cscs.approve', 'cscs.export',
-            'legacy_migrations.view', 'legacy_migrations.approve',
             'shareholders.view',
             'shares.view',
             'certificates.view',
@@ -425,7 +413,6 @@ class RolesAndPermissionsSeeder extends Seeder
         $role->syncPermissions([
             'reconciliation.view', 'reconciliation.process', 'reconciliation.manage',
             'cscs.view', 'cscs.upload', 'cscs.reconcile', 'cscs.submit', 'cscs.post', 'cscs.export',
-            'legacy_migrations.view', 'legacy_migrations.create', 'legacy_migrations.stage', 'legacy_migrations.reconcile', 'legacy_migrations.submit', 'legacy_migrations.publish',
             'shareholders.view',
             'shares.view',
             'certificates.view',
@@ -444,7 +431,6 @@ class RolesAndPermissionsSeeder extends Seeder
         $role->syncPermissions([
             'audit.internal.view', 'audit.internal.manage', 'audit.internal.reports',
             'cscs.view', 'cscs.review', 'cscs.approve', 'cscs.export',
-            'legacy_migrations.view', 'legacy_migrations.approve', 'legacy_migrations.rollback',
             'shareholders.view',
             'shares.view',
             'certificates.view',
