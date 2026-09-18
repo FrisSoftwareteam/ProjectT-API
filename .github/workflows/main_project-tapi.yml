@@ -38,14 +38,15 @@ jobs:
           composer install --no-dev --prefer-dist --no-interaction --no-progress
           composer dump-autoload --optimize
 
-      # Optional: run Laravel optimizations (won't fail pipeline)
+      # Cache only environment-independent Laravel artifacts. Configuration must
+      # be resolved on Azure, where the production app settings are available.
       - name: Laravel optimizations
         if: steps.check_files.outputs.exists == 'true'
         run: |
           php artisan config:clear || true
-          php artisan config:cache || true
           php artisan route:cache || true
           php artisan view:cache || true
+          rm -f bootstrap/cache/config.php
 
       - name: Create deployment package
         run: |
