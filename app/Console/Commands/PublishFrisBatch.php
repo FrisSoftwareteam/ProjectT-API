@@ -288,6 +288,16 @@ class PublishFrisBatch extends Command
 
         $this->info('FRIS batch '.$batch->id.' published.');
 
+        $emailExitCode = $this->call('fris:promote-emails', [
+            '--batch' => [$batch->id],
+            '--apply' => true,
+        ]);
+        if ($emailExitCode !== self::SUCCESS) {
+            $this->warn('The batch is published, but automatic FRIS email promotion requires attention.');
+
+            return self::FAILURE;
+        }
+
         return self::SUCCESS;
     }
 
