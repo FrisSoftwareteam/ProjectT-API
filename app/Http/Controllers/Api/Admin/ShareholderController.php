@@ -47,19 +47,25 @@ class ShareholderController extends Controller
 
         $search = trim((string) $request->query('search', ''));
         if ($search !== '') {
-            $query->where(function ($q) use ($search) {
-                $like = '%'.$search.'%';
-                $q->where('first_name', 'like', $like)
-                    ->orWhere('last_name', 'like', $like)
-                    ->orWhere('middle_name', 'like', $like)
-                    ->orWhere('email', 'like', $like)
-                    ->orWhere('phone', 'like', $like)
-                    ->orWhere('account_no', 'like', $like)
-                    ->orWhereHas('registerAccounts', function ($accountQuery) use ($like) {
-                        $accountQuery->where('chn', 'like', $like)
-                            ->orWhere('cscs_account_no', 'like', $like)
-                            ->orWhere('shareholder_no', 'like', $like);
+            $terms = preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY);
+            $query->where(function ($outer) use ($terms) {
+                foreach ($terms as $term) {
+                    $like = '%'.$term.'%';
+                    $outer->where(function ($q) use ($like) {
+                        $q->where('first_name', 'like', $like)
+                            ->orWhere('last_name', 'like', $like)
+                            ->orWhere('middle_name', 'like', $like)
+                            ->orWhere('full_name', 'like', $like)
+                            ->orWhere('email', 'like', $like)
+                            ->orWhere('phone', 'like', $like)
+                            ->orWhere('account_no', 'like', $like)
+                            ->orWhereHas('registerAccounts', function ($accountQuery) use ($like) {
+                                $accountQuery->where('chn', 'like', $like)
+                                    ->orWhere('cscs_account_no', 'like', $like)
+                                    ->orWhere('shareholder_no', 'like', $like);
+                            });
                     });
+                }
             });
         }
 

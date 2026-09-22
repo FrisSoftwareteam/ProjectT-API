@@ -15,6 +15,7 @@ use App\Models\DividendPayment;
 use App\Models\DividendApprovalAction;
 use App\Models\DividendApprovalDelegation;
 use App\Services\DividendNotificationService;
+use App\Services\CautionService;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Log;
@@ -25,7 +26,8 @@ use Carbon\Carbon;
 class DividendEntitlementController extends Controller
 {
     public function __construct(
-        private readonly DividendNotificationService $dividendNotificationService
+        private readonly DividendNotificationService $dividendNotificationService,
+        private readonly CautionService $cautionService
     ) {
     }
 
@@ -554,10 +556,10 @@ class DividendEntitlementController extends Controller
             }
 
             $perPage = (int) $request->input('per_page', 50);
-            $page = (int) $request->input('page', 1);
+            $search = trim((string) $request->input('search', ''));
 
             // Get eligible accounts
-            $accounts = $this->getEligibleAccounts($declaration, $perPage);
+            $accounts = $this->getEligibleAccounts($declaration, $perPage, $search);
 
             // Compute entitlements
             $result = $this->computeEntitlements($accounts, $declaration);
@@ -729,6 +731,16 @@ class DividendEntitlementController extends Controller
                     return response()->json([
                         'success' => false,
                         'message' => 'Approval already recorded for this role',
+                    ], 422);
+                }
+
+                if ($activeStep === 3 && $actorRole === 'ACCOUNTS' && !$this->roleAlreadyApproved($declaration->id, 'AUDIT')) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => 'Accounts cannot approve until Audit has approved this declaration',
+                        'errors' => [
+                            'status' => ['Audit approval is required before Accounts approval.'],
+                        ],
                     ], 422);
                 }
 
@@ -1576,7 +1588,7 @@ class DividendEntitlementController extends Controller
     /**
      * Get eligible shareholder accounts
      */
-    private function getEligibleAccounts(DividendDeclaration $declaration, int $perPage)
+    private function getEligibleAccounts(DividendDeclaration $declaration, int $perPage, string $search = '')
     {
         $shareClassIds = $declaration->shareClasses->pluck('id')->toArray();
         $recordDateEnd = Carbon::parse($declaration->record_date)->endOfDay();
@@ -1594,6 +1606,27 @@ class DividendEntitlementController extends Controller
                   ->where('quantity', '>', 0)
                   ->where('last_updated_at', '<=', $recordDateEnd);
             });
+
+        if ($search !== '') {
+            $terms = preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY);
+            $query->where(function ($outer) use ($terms) {
+                foreach ($terms as $term) {
+                    $like = '%'.$term.'%';
+                    $outer->where(function ($q) use ($like) {
+                        $q->where('shareholder_no', 'like', $like)
+                            ->orWhere('chn', 'like', $like)
+                            ->orWhere('cscs_account_no', 'like', $like)
+                            ->orWhereHas('shareholder', function ($sq) use ($like) {
+                                $sq->where('full_name', 'like', $like)
+                                    ->orWhere('first_name', 'like', $like)
+                                    ->orWhere('last_name', 'like', $like)
+                                    ->orWhere('middle_name', 'like', $like)
+                                    ->orWhere('account_no', 'like', $like);
+                            });
+                    });
+                }
+            });
+        }
 
         return $query->paginate($perPage);
     }
@@ -1701,7 +1734,7 @@ class DividendEntitlementController extends Controller
      */
     private function checkEligibility(ShareholderRegisterAccount $account, DividendDeclaration $declaration): array
     {
-        if ($declaration->exclude_caution_accounts && $account->shareholder && $account->shareholder->status === 'caution') {
+        if ($declaration->exclude_caution_accounts && $this->cautionService->isCautioned($account->id)) {
             return [
                 'is_payable' => false,
                 'reason' => 'CAUTION_ACCOUNT'
@@ -1907,7 +1940,7 @@ class DividendEntitlementController extends Controller
      */
     private function determineEligibilityForAccount(ShareholderRegisterAccount $account, DividendDeclaration $declaration): array
     {
-        if ($declaration->exclude_caution_accounts && $account->shareholder && $account->shareholder->status === 'caution') {
+        if ($declaration->exclude_caution_accounts && $this->cautionService->isCautioned($account->id)) {
             return [
                 'is_payable' => false,
                 'reason' => 'CAUTION',
@@ -1948,8 +1981,8 @@ class DividendEntitlementController extends Controller
             ->where('last_updated_at', '<=', $recordDateEnd);
 
         if ($declaration->exclude_caution_accounts) {
-            $query->whereHas('registerAccount.shareholder', function ($q) {
-                $q->where('status', '!=', 'caution');
+            $query->whereDoesntHave('registerAccount.cautions', function ($q) {
+                $q->whereNull('removed_at');
             });
         }
 

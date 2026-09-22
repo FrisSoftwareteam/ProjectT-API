@@ -223,6 +223,41 @@ class ShareholderFilterApiTest extends TestCase
             ->assertJsonPath('data.0.id', $target);
     }
 
+    public function test_multi_word_name_search_matches_across_first_middle_last_name(): void
+    {
+        $target = DB::table('shareholders')->insertGetId([
+            'account_no' => 'ACCOUNT-lucy',
+            'holder_type' => 'individual',
+            'first_name' => 'Lucy',
+            'middle_name' => 'I',
+            'last_name' => 'Ekpo',
+            'full_name' => 'Lucy Ekpo',
+            'email' => 'lucy@example.com',
+            'phone' => '0800-lucy',
+            'status' => 'active',
+        ]);
+        $other = $this->createShareholder('unrelated');
+
+        // Simulates encodeURIComponent('Lucy I Ekpo') decoded server-side to "Lucy I Ekpo".
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search='.rawurlencode('Lucy I Ekpo'))
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $target);
+
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search='.rawurlencode('Lucy Ekpo'))
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonPath('data.0.id', $target);
+
+        // A word that matches nobody must still exclude the result (AND across words, not OR).
+        $this->withoutMiddleware()
+            ->getJson('/api/shareholders?search='.rawurlencode('Lucy Nonexistent'))
+            ->assertOk()
+            ->assertJsonPath('total', 0);
+    }
+
     public function test_shareholders_can_be_searched_by_chn(): void
     {
         [$register] = $this->createRegisters();
