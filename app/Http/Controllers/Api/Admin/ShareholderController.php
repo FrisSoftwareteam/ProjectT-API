@@ -50,23 +50,29 @@ class ShareholderController extends Controller
 
         $search = trim((string) $request->query('search', ''));
         if ($search !== '') {
-            $query->where(function ($q) use ($search, $registerId, $shareClassId) {
-                $like = '%'.$search.'%';
-                $q->where('first_name', 'like', $like)
-                    ->orWhere('last_name', 'like', $like)
-                    ->orWhere('middle_name', 'like', $like)
-                    ->orWhere('email', 'like', $like)
-                    ->orWhere('phone', 'like', $like)
-                    ->orWhere('account_no', 'like', $like)
-                    ->orWhereHas('registerAccounts', function ($accountQuery) use ($like, $registerId, $shareClassId) {
-                        $this->applyRegisterAccountFilters($accountQuery, $registerId, $shareClassId);
+            $terms = preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY);
+            $query->where(function ($outer) use ($terms, $registerId, $shareClassId) {
+                foreach ($terms as $term) {
+                    $like = '%'.$term.'%';
+                    $outer->where(function ($q) use ($like, $registerId, $shareClassId) {
+                        $q->where('first_name', 'like', $like)
+                            ->orWhere('last_name', 'like', $like)
+                            ->orWhere('middle_name', 'like', $like)
+                            ->orWhere('full_name', 'like', $like)
+                            ->orWhere('email', 'like', $like)
+                            ->orWhere('phone', 'like', $like)
+                            ->orWhere('account_no', 'like', $like)
+                            ->orWhereHas('registerAccounts', function ($accountQuery) use ($like, $registerId, $shareClassId) {
+                                $this->applyRegisterAccountFilters($accountQuery, $registerId, $shareClassId);
 
-                        $accountQuery->where(function ($accountSearchQuery) use ($like) {
-                            $accountSearchQuery->where('chn', 'like', $like)
-                                ->orWhere('cscs_account_no', 'like', $like)
-                                ->orWhere('shareholder_no', 'like', $like);
-                        });
+                                $accountQuery->where(function ($accountSearchQuery) use ($like) {
+                                    $accountSearchQuery->where('chn', 'like', $like)
+                                        ->orWhere('cscs_account_no', 'like', $like)
+                                        ->orWhere('shareholder_no', 'like', $like);
+                                });
+                            });
                     });
+                }
             });
         }
 
@@ -88,7 +94,7 @@ class ShareholderController extends Controller
             }
         }], 'quantity');
 
-        $query->with(['registerAccounts' => function ($q) {
+        $query->with(['registerAccounts' => function ($q) use ($registerId) {
             $q->select(
                 'id',
                 'shareholder_id',
@@ -99,6 +105,10 @@ class ShareholderController extends Controller
                 'cscs_account_no',
                 'status'
             )->with(['category', 'register']);
+
+            if ($registerId !== null) {
+                $q->where('register_id', $registerId);
+            }
         }]);
 
         $perPage = $request->integer('per_page', 20);

@@ -108,6 +108,14 @@ class ShareholderRegisterAccount extends Model
     }
 
     /**
+     * Cautions recorded against this account.
+     */
+    public function cautions()
+    {
+        return $this->hasMany(ShareholderCaution::class, 'sra_id');
+    }
+
+    /**
      * Generate a deterministic-looking shareholder register account number.
      */
     public static function generateAccountNumber(int $shareholderId): string
