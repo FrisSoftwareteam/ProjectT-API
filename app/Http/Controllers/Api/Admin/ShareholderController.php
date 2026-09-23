@@ -96,7 +96,7 @@ class ShareholderController extends Controller
             }
         }], 'quantity');
 
-        $query->with(['registerAccounts' => function ($q) {
+        $query->with(['registerAccounts' => function ($q) use ($registerId) {
             $q->select(
                 'id',
                 'shareholder_id',
@@ -107,6 +107,10 @@ class ShareholderController extends Controller
                 'cscs_account_no',
                 'status'
             )->with(['category', 'register']);
+
+            if ($registerId !== null) {
+                $q->where('register_id', $registerId);
+            }
         }]);
 
         $perPage = $request->integer('per_page', 20);

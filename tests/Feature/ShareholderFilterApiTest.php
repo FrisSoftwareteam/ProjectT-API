@@ -107,6 +107,21 @@ class ShareholderFilterApiTest extends TestCase
             ->assertJsonPath('meta.unit_precision.decimal_places', 2);
     }
 
+    public function test_register_filter_only_returns_accounts_for_the_selected_register(): void
+    {
+        [$firstRegister, $secondRegister] = $this->createRegisters();
+        $shareholder = $this->createShareholder('multi-register');
+        $this->createRegisterAccount($shareholder, $firstRegister);
+        $this->createRegisterAccount($shareholder, $secondRegister);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?register_id={$firstRegister}")
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonCount(1, 'data.0.register_accounts')
+            ->assertJsonPath('data.0.register_accounts.0.register_id', $firstRegister);
+    }
+
     public function test_shareholders_can_be_filtered_by_share_class(): void
     {
         [$firstRegister, $secondRegister] = $this->createRegisters();
@@ -193,6 +208,21 @@ class ShareholderFilterApiTest extends TestCase
             ->assertOk()
             ->assertJsonPath('total', 1)
             ->assertJsonPath('data.0.id', $inFirstRegister);
+    }
+
+    public function test_register_and_search_combined_with_no_matches_returns_empty_result(): void
+    {
+        [$firstRegister, $secondRegister] = $this->createRegisters();
+        $inSecondRegister = $this->createShareholder('only-in-second');
+        $this->createRegisterAccount($inSecondRegister, $secondRegister);
+
+        // Shareholder exists and matches the search term, but not in the selected register.
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?search=only-in-second&register_id={$firstRegister}")
+            ->assertOk()
+            ->assertJsonPath('total', 0)
+            ->assertJsonPath('data', [])
+            ->assertJsonStructure(['current_page', 'per_page', 'last_page', 'total']);
     }
 
     public function test_search_with_no_matches_returns_empty_result(): void
