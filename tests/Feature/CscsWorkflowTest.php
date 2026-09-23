@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\ProcessCscsImportJob;
+use App\Http\Controllers\Api\CscsUploadController;
 use App\Models\AdminUser;
 use App\Models\CscsApprovalPolicy;
 use App\Models\CscsBatchSnapshot;
@@ -17,6 +18,7 @@ use App\Models\SharePosition;
 use App\Services\CscsImportService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -176,6 +178,32 @@ class CscsWorkflowTest extends TestCase
         }
     }
 
+    public function test_transactions_can_be_filtered_by_balance_status(): void
+    {
+        $result = $this->service->import($this->files('100', '90'), $this->register->id, $this->maker->id);
+
+        $unbalanced = $this->transactionsResponse($result['batch_id'], ['balance_status' => 'UNBALANCED']);
+        $balanced = $this->transactionsResponse($result['batch_id'], ['balance_status' => 'BALANCED']);
+
+        $this->assertSame(1, $unbalanced['total']);
+        $this->assertSame('UNBALANCED', $unbalanced['data'][0]['balance_status']);
+        $this->assertFalse($unbalanced['data'][0]['is_balanced']);
+        $this->assertSame(0, $balanced['total']);
+    }
+
+    public function test_transaction_legs_return_current_and_proposed_holdings(): void
+    {
+        $result = $this->stageBatch();
+
+        $payload = $this->transactionsResponse($result['batch_id']);
+        $legs = collect($payload['data'][0]['legs'])->keyBy('sign');
+
+        $this->assertSame('300000.000000', $legs['-']['current_holdings']);
+        $this->assertSame('51111.000000', $legs['-']['proposed_holdings']);
+        $this->assertSame('1000.000000', $legs['+']['current_holdings']);
+        $this->assertSame('249889.000000', $legs['+']['proposed_holdings']);
+    }
+
     public function test_duplicate_file_is_rejected_before_a_second_batch_is_processed(): void
     {
         $this->stageBatch();
@@ -321,6 +349,14 @@ class CscsWorkflowTest extends TestCase
         $this->service->submit($result['batch_id'], $this->maker->id);
 
         return CscsUploadBatch::findOrFail($result['batch_id']);
+    }
+
+    private function transactionsResponse(int $batchId, array $query = []): array
+    {
+        $controller = app(CscsUploadController::class);
+
+        return $controller->transactions(Request::create('/api/cscs/uploads/'.$batchId.'/transactions', 'GET', $query), $batchId)
+            ->getData(true);
     }
 
     private function stageBatch(): array

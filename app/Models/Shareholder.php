@@ -115,6 +115,9 @@ class Shareholder extends Model
         if ($this->relationLoaded('activeCautions')) {
             return $this->activeCautions->isNotEmpty();
         }
+        if (array_key_exists('active_cautions_count', $this->attributes)) {
+            return (int) $this->attributes['active_cautions_count'] > 0;
+        }
         return $this->activeCautions()->exists();
     }
 
@@ -122,6 +125,9 @@ class Shareholder extends Model
     {
         if ($this->relationLoaded('activeCautions')) {
             return $this->activeCautions->count();
+        }
+        if (array_key_exists('active_cautions_count', $this->attributes)) {
+            return (int) $this->attributes['active_cautions_count'];
         }
         return $this->activeCautions()->count();
     }

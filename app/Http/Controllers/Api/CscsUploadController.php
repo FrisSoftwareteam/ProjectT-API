@@ -117,9 +117,17 @@ class CscsUploadController extends Controller
     public function transactions(Request $request, int $batchId): JsonResponse
     {
         $this->batch($batchId);
-        $validated = $request->validate(['per_page' => ['nullable', 'integer', 'min:1', 'max:100'], 'page' => ['nullable', 'integer', 'min:1']]);
+        $validated = $request->validate([
+            'balance_status' => ['nullable', Rule::in(['BALANCED', 'UNBALANCED'])],
+            'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
+            'page' => ['nullable', 'integer', 'min:1'],
+        ]);
         $groups = CscsUploadRow::where('batch_id', $batchId)->where('file_type', 'movement')->whereNotNull('tran_no')
             ->orderBy('tran_no')->orderBy('id')->get()->groupBy('tran_no')->map(fn ($rows, $number) => $this->transactionPayload((string) $number, $rows))->values();
+        if (isset($validated['balance_status'])) {
+            $balanced = $validated['balance_status'] === 'BALANCED';
+            $groups = $groups->where('is_balanced', $balanced)->values();
+        }
         $perPage = $validated['per_page'] ?? 50;
         $page = $validated['page'] ?? 1;
         $paginator = new LengthAwarePaginator($groups->forPage($page, $perPage)->values(), $groups->count(), $perPage, $page, ['path' => $request->url(), 'query' => $request->query()]);
@@ -460,6 +468,15 @@ class CscsUploadController extends Controller
             }
         }
 
+        $isBalanced = $rows->count() === 2 && bccomp($credit, $debit, 6) === 0;
+        $legs = $rows->map(function (CscsUploadRow $row) {
+            $leg = $row->toArray();
+            $leg['current_holdings'] = $row->actual_before_qty ?? $row->proposed_before_qty ?? $row->before_qty;
+            $leg['proposed_holdings'] = $row->actual_after_qty ?? $row->proposed_after_qty ?? $row->after_qty;
+
+            return $leg;
+        })->values();
+
         return [
             'transaction_number' => $number,
             'trade_date' => optional($rows->first()->trade_date)->format('Y-m-d'),
@@ -468,9 +485,10 @@ class CscsUploadController extends Controller
             'credit_total' => $credit,
             'net_total' => bcsub($credit, $debit, 6),
             'leg_count' => $rows->count(),
-            'is_balanced' => $rows->count() === 2 && bccomp($credit, $debit, 6) === 0,
+            'is_balanced' => $isBalanced,
+            'balance_status' => $isBalanced ? 'BALANCED' : 'UNBALANCED',
             'status' => $rows->pluck('resolution_status')->unique()->values(),
-            'legs' => $rows,
+            'legs' => $legs,
         ];
     }
 

@@ -45,9 +45,12 @@ class ShareholderController extends Controller
 
         $query = Shareholder::query();
 
+        $registerId = $validated['register_id'] ?? null;
+        $shareClassId = $validated['share_class_id'] ?? null;
+
         $search = trim((string) $request->query('search', ''));
         if ($search !== '') {
-            $query->where(function ($q) use ($search) {
+            $query->where(function ($q) use ($search, $registerId, $shareClassId) {
                 $like = '%'.$search.'%';
                 $q->where('first_name', 'like', $like)
                     ->orWhere('last_name', 'like', $like)
@@ -55,30 +58,25 @@ class ShareholderController extends Controller
                     ->orWhere('email', 'like', $like)
                     ->orWhere('phone', 'like', $like)
                     ->orWhere('account_no', 'like', $like)
-                    ->orWhereHas('registerAccounts', function ($accountQuery) use ($like) {
-                        $accountQuery->where('chn', 'like', $like)
-                            ->orWhere('cscs_account_no', 'like', $like)
-                            ->orWhere('shareholder_no', 'like', $like);
+                    ->orWhereHas('registerAccounts', function ($accountQuery) use ($like, $registerId, $shareClassId) {
+                        $this->applyRegisterAccountFilters($accountQuery, $registerId, $shareClassId);
+
+                        $accountQuery->where(function ($accountSearchQuery) use ($like) {
+                            $accountSearchQuery->where('chn', 'like', $like)
+                                ->orWhere('cscs_account_no', 'like', $like)
+                                ->orWhere('shareholder_no', 'like', $like);
+                        });
                     });
             });
         }
-
-        $registerId = $validated['register_id'] ?? null;
-        $shareClassId = $validated['share_class_id'] ?? null;
 
         if ($registerId !== null || $shareClassId !== null) {
             $query->whereHas('registerAccounts', function ($accountQuery) use ($registerId, $shareClassId) {
-                if ($registerId !== null) {
-                    $accountQuery->where('register_id', $registerId);
-                }
-
-                if ($shareClassId !== null) {
-                    $accountQuery->whereHas('sharePositions', function ($positionQuery) use ($shareClassId) {
-                        $positionQuery->where('share_class_id', $shareClassId);
-                    });
-                }
+                $this->applyRegisterAccountFilters($accountQuery, $registerId, $shareClassId);
             });
         }
+
+        $query->withCount('activeCautions');
 
         $query->withSum(['holdings as total_holdings' => function ($holdingQuery) use ($registerId, $shareClassId) {
             if ($registerId !== null) {
@@ -119,6 +117,19 @@ class ShareholderController extends Controller
         }
 
         return response()->json($response);
+    }
+
+    private function applyRegisterAccountFilters($accountQuery, ?int $registerId, ?int $shareClassId): void
+    {
+        if ($registerId !== null) {
+            $accountQuery->where('register_id', $registerId);
+        }
+
+        if ($shareClassId !== null) {
+            $accountQuery->whereHas('sharePositions', function ($positionQuery) use ($shareClassId) {
+                $positionQuery->where('share_class_id', $shareClassId);
+            });
+        }
     }
 
     public function store(ShareholderRequest $request)
