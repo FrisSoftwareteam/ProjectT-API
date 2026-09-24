@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\FrisMigrationBatch;
+use App\Services\Fris\FrisRegisterMetadataResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -313,12 +314,16 @@ class PublishFrisBatch extends Command
     /** @return array{company_id:int,register_id:int,share_class_id:int} */
     private function ensureRegisterTargets(FrisMigrationBatch $batch, mixed $now): array
     {
-        $issuerCode = 'FRIS-'.$batch->register_code;
-        $companyId = DB::table('companies')->where('issuer_code', $issuerCode)->value('id');
+        $metadata = app(FrisRegisterMetadataResolver::class)->resolve(
+            (int) $batch->register_code,
+            $batch->company_name,
+        );
+        $instrumentTypeId = $this->instrumentTypeId($metadata['instrument_type_code']);
+        $companyId = DB::table('companies')->where('issuer_code', $metadata['issuer_code'])->value('id');
         if ($companyId === null) {
             $companyId = DB::table('companies')->insertGetId([
-                'issuer_code' => $issuerCode,
-                'name' => $batch->company_name ?: $issuerCode,
+                'issuer_code' => $metadata['issuer_code'],
+                'name' => $metadata['company_name'],
                 'status' => 'active',
                 'created_at' => $now,
                 'updated_at' => $now,
@@ -327,37 +332,49 @@ class PublishFrisBatch extends Command
 
         $registerId = DB::table('registers')
             ->where('company_id', $companyId)
-            ->where('register_code', (string) $batch->register_code)
+            ->where('register_code', $metadata['register_code'])
             ->value('id');
         if ($registerId === null) {
             $registerId = DB::table('registers')->insertGetId([
                 'company_id' => $companyId,
-                'register_code' => (string) $batch->register_code,
-                'name' => $batch->company_name ?: 'FRIS Register '.$batch->register_code,
-                'is_default' => true,
+                'register_code' => $metadata['register_code'],
+                'name' => $metadata['register_name'],
+                'is_default' => $metadata['is_default'],
                 'status' => 'active',
-                'instrument_type' => 'equity',
-                'instrument_type_id' => DB::table('instrument_types')->where('code', 'ordinary_share')->value('id'),
+                'instrument_type' => $metadata['instrument_category'],
+                'instrument_type_id' => $instrumentTypeId,
                 'capital_behaviour_type' => 'constant',
-                'unit_precision_type' => 'decimal',
-                'decimal_precision' => 6,
+                'unit_precision_type' => $metadata['unit_precision_type'],
+                'decimal_precision' => $metadata['decimal_precision'],
                 'created_at' => $now,
+                'updated_at' => $now,
+            ]);
+        }
+
+        if ($metadata['is_default']) {
+            DB::table('registers')
+                ->where('company_id', $companyId)
+                ->where('id', '<>', $registerId)
+                ->update(['is_default' => false, 'updated_at' => $now]);
+        } elseif (! DB::table('registers')->where('company_id', $companyId)->where('is_default', true)->exists()) {
+            DB::table('registers')->where('id', $registerId)->update([
+                'is_default' => true,
                 'updated_at' => $now,
             ]);
         }
 
         $shareClassId = DB::table('share_classes')
             ->where('register_id', $registerId)
-            ->where('class_code', 'ORD')
+            ->where('class_code', $metadata['class_code'])
             ->value('id');
         if ($shareClassId === null) {
             $shareClassId = DB::table('share_classes')->insertGetId([
                 'register_id' => $registerId,
-                'class_code' => 'ORD',
+                'class_code' => $metadata['class_code'],
                 'currency' => 'NGN',
                 'par_value' => 0,
-                'description' => 'Ordinary shares imported from FRIS',
-                'name' => 'Ordinary',
+                'description' => $metadata['class_description'],
+                'name' => $metadata['class_name'],
                 'created_at' => $now,
                 'updated_at' => $now,
             ]);
@@ -368,24 +385,28 @@ class PublishFrisBatch extends Command
 
     private function finalizeOperationalSetup(int $registerId, int $shareClassId, FrisMigrationBatch $batch, mixed $now): void
     {
+        $metadata = app(FrisRegisterMetadataResolver::class)->resolve(
+            (int) $batch->register_code,
+            $batch->company_name,
+        );
         $positionTotal = DB::table('share_positions')
             ->where('share_class_id', $shareClassId)
             ->sum('quantity');
 
         DB::table('registers')->where('id', $registerId)->update([
-            'instrument_type' => 'equity',
-            'instrument_type_id' => DB::table('instrument_types')->where('code', 'ordinary_share')->value('id'),
+            'instrument_type' => $metadata['instrument_category'],
+            'instrument_type_id' => $this->instrumentTypeId($metadata['instrument_type_code']),
             'capital_behaviour_type' => 'constant',
             'paid_up_capital' => $positionTotal,
             'total_units_outstanding' => $positionTotal,
             'remaining_outstanding_units' => $positionTotal,
-            'unit_precision_type' => 'decimal',
-            'decimal_precision' => 6,
+            'unit_precision_type' => $metadata['unit_precision_type'],
+            'decimal_precision' => $metadata['decimal_precision'],
             'updated_at' => $now,
         ]);
 
         DB::table('cscs_security_mappings')->updateOrInsert(
-            ['security_code' => 'FRIS'.$batch->register_code],
+            ['security_code' => $metadata['cscs_security_code']],
             [
                 'register_id' => $registerId,
                 'share_class_id' => $shareClassId,
@@ -394,6 +415,16 @@ class PublishFrisBatch extends Command
                 'created_at' => $now,
             ]
         );
+    }
+
+    private function instrumentTypeId(string $code): int
+    {
+        $id = DB::table('instrument_types')->where('code', $code)->value('id');
+        if ($id === null) {
+            throw new \RuntimeException("Required instrument type is missing: {$code}");
+        }
+
+        return (int) $id;
     }
 
     private function holderType(string $name): string

@@ -2,7 +2,7 @@
     "info": {
         "_postman_id": "1aa59e6a-c071-48fa-a4cc-projecttapi001",
         "name": "ProjectT API - Complete Collection",
-        "description": "Generated from Laravel's registered API routes. Includes all 223 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
+        "description": "Generated from Laravel's registered API routes. Includes all 228 API operations, example payloads, query parameters, route variables, multipart upload examples, and inherited Bearer authentication.\n\nSet `base_url` and `token` before use. OAuth redirect/callback and simulation endpoints override inherited authentication. Empty `{}` bodies indicate endpoints that currently accept no defined payload or whose external integration payload is not yet specified in backend validation.",
         "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
     },
     "auth": {
@@ -159,6 +159,11 @@
         },
         {
             "key": "shareTransaction",
+            "value": "1",
+            "type": "string"
+        },
+        {
+            "key": "changeRequest",
             "value": "1",
             "type": "string"
         },
@@ -4289,7 +4294,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/transactions",
+                            "raw": "{{base_url}}/api/cscs/uploads/{{batchId}}/transactions?balance_status=UNBALANCED&per_page=50&page=1",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -4299,6 +4304,23 @@
                                 "uploads",
                                 "{{batchId}}",
                                 "transactions"
+                            ],
+                            "query": [
+                                {
+                                    "key": "balance_status",
+                                    "value": "UNBALANCED",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "50",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "page",
+                                    "value": "1",
+                                    "disabled": false
+                                }
                             ]
                         },
                         "description": "Backend action: `CscsUploadController@transactions`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:cscs.view"
@@ -6802,6 +6824,165 @@
             ]
         },
         {
+            "name": "Shareholder Change Requests",
+            "item": [
+                {
+                    "name": "GET - Shareholder Change Request - Index",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests?status=submitted&search=Ada&date_from=2026-01-01&date_to=2026-12-31&per_page=15",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests"
+                            ],
+                            "query": [
+                                {
+                                    "key": "status",
+                                    "value": "submitted",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "search",
+                                    "value": "Ada",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "date_from",
+                                    "value": "2026-01-01",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "date_to",
+                                    "value": "2026-12-31",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "15",
+                                    "disabled": false
+                                }
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@index`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "GET - Shareholder Change Request - Show",
+                    "request": {
+                        "method": "GET",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests/{{changeRequest}}",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests",
+                                "{{changeRequest}}"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@show`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.view"
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder Change Request - Approve",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests/{{changeRequest}}/approve",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests",
+                                "{{changeRequest}}",
+                                "approve"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@approve`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.approve",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"remarks\": \"Supporting documents reviewed and approved\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder Change Request - Reject",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholder-change-requests/{{changeRequest}}/reject",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholder-change-requests",
+                                "{{changeRequest}}",
+                                "reject"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@reject`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.approve",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"remarks\": \"Supporting documents do not match the proposed update\"\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                }
+            ]
+        },
+        {
             "name": "Shareholder Register Accounts",
             "item": [
                 {
@@ -6859,7 +7040,7 @@
                             }
                         ],
                         "url": {
-                            "raw": "{{base_url}}/api/shareholders?search=Ada&register_id={{register_id}}&share_class_id={{share_class_id}}",
+                            "raw": "{{base_url}}/api/shareholders?search=Ada&register_id={{register_id}}&share_class_id={{share_class_id}}&per_page=20",
                             "host": [
                                 "{{base_url}}"
                             ],
@@ -6881,6 +7062,11 @@
                                 {
                                     "key": "share_class_id",
                                     "value": "{{share_class_id}}",
+                                    "disabled": false
+                                },
+                                {
+                                    "key": "per_page",
+                                    "value": "20",
                                     "disabled": false
                                 }
                             ]
@@ -7221,6 +7407,45 @@
                         "body": {
                             "mode": "raw",
                             "raw": "{\n    \"address_line1\": \"2 Marina Road\",\n    \"city\": \"Lagos\",\n    \"state\": \"Lagos\",\n    \"postal_code\": \"100001\",\n    \"country\": \"Nigeria\",\n    \"is_primary\": true\n}",
+                            "options": {
+                                "raw": {
+                                    "language": "json"
+                                }
+                            }
+                        }
+                    },
+                    "response": []
+                },
+                {
+                    "name": "POST - Shareholder Change Request - Store",
+                    "request": {
+                        "method": "POST",
+                        "header": [
+                            {
+                                "key": "Accept",
+                                "value": "application/json"
+                            },
+                            {
+                                "key": "Content-Type",
+                                "value": "application/json"
+                            }
+                        ],
+                        "url": {
+                            "raw": "{{base_url}}/api/shareholders/{{shareholder}}/change-requests",
+                            "host": [
+                                "{{base_url}}"
+                            ],
+                            "path": [
+                                "api",
+                                "shareholders",
+                                "{{shareholder}}",
+                                "change-requests"
+                            ]
+                        },
+                        "description": "Backend action: `ShareholderChangeRequestController@store`.\n\nAccess middleware:\n- Illuminate\\Auth\\Middleware\\Authenticate:sanctum\n- Spatie\\Permission\\Middleware\\PermissionMiddleware:shareholder_change_requests.create",
+                        "body": {
+                            "mode": "raw",
+                            "raw": "{\n    \"first_name\": \"Ada\",\n    \"last_name\": \"Okafor\",\n    \"email\": \"ada.updated@example.com\",\n    \"phone\": \"08012345678\",\n    \"address\": {\n        \"address_line1\": \"2 Marina Road\",\n        \"address_line2\": null,\n        \"city\": \"Lagos\",\n        \"state\": \"Lagos\",\n        \"postal_code\": \"100001\",\n        \"country\": \"Nigeria\"\n    },\n    \"reason\": \"Shareholder submitted updated profile details\"\n}",
                             "options": {
                                 "raw": {
                                     "language": "json"

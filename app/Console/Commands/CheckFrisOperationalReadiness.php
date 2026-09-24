@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Models\FrisMigrationBatch;
+use App\Services\Fris\FrisRegisterMetadataResolver;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -23,30 +24,40 @@ class CheckFrisOperationalReadiness extends Command
             return self::FAILURE;
         }
 
-        $company = DB::table('companies')->where('issuer_code', 'FRIS-'.$batch->register_code)->first();
-        $register = $company
-            ? DB::table('registers')->where('company_id', $company->id)->where('register_code', (string) $batch->register_code)->first()
-            : null;
-        $shareClass = $register
-            ? DB::table('share_classes')->where('register_id', $register->id)->where('class_code', 'ORD')->first()
-            : null;
+        $metadata = app(FrisRegisterMetadataResolver::class)->resolve(
+            (int) $batch->register_code,
+            $batch->company_name,
+        );
+        $register = DB::table('fris_migration_profiles as p')
+            ->join('shareholder_register_accounts as sra', 'sra.id', '=', 'p.sra_id')
+            ->join('registers as r', 'r.id', '=', 'sra.register_id')
+            ->where('p.batch_id', $batch->id)
+            ->select('r.*')
+            ->first();
+        $company = $register ? DB::table('companies')->where('id', $register->company_id)->first() : null;
+        $shareClass = DB::table('fris_migration_profiles as p')
+            ->join('share_positions as sp', 'sp.sra_id', '=', 'p.sra_id')
+            ->join('share_classes as sc', 'sc.id', '=', 'sp.share_class_id')
+            ->where('p.batch_id', $batch->id)
+            ->select('sc.*')
+            ->first();
 
         if ($this->option('repair') && $register && $shareClass) {
             $now = now();
             $positionTotal = DB::table('share_positions')->where('share_class_id', $shareClass->id)->sum('quantity');
             DB::table('registers')->where('id', $register->id)->update([
-                'instrument_type' => 'equity',
-                'instrument_type_id' => DB::table('instrument_types')->where('code', 'ordinary_share')->value('id'),
+                'instrument_type' => $metadata['instrument_category'],
+                'instrument_type_id' => DB::table('instrument_types')->where('code', $metadata['instrument_type_code'])->value('id'),
                 'capital_behaviour_type' => 'constant',
                 'paid_up_capital' => $positionTotal,
                 'total_units_outstanding' => $positionTotal,
                 'remaining_outstanding_units' => $positionTotal,
-                'unit_precision_type' => 'decimal',
-                'decimal_precision' => 6,
+                'unit_precision_type' => $metadata['unit_precision_type'],
+                'decimal_precision' => $metadata['decimal_precision'],
                 'updated_at' => $now,
             ]);
             DB::table('cscs_security_mappings')->updateOrInsert(
-                ['security_code' => 'FRIS'.$batch->register_code],
+                ['security_code' => $metadata['cscs_security_code']],
                 [
                     'register_id' => $register->id,
                     'share_class_id' => $shareClass->id,
@@ -60,6 +71,7 @@ class CheckFrisOperationalReadiness extends Command
 
         $mapping = $register && $shareClass
             ? DB::table('cscs_security_mappings')
+                ->where('security_code', $metadata['cscs_security_code'])
                 ->where('register_id', $register->id)
                 ->where('share_class_id', $shareClass->id)
                 ->where('is_active', true)
@@ -98,9 +110,12 @@ class CheckFrisOperationalReadiness extends Command
 
         $checks = [
             'company_exists' => (bool) $company,
+            'company_group_correct' => (bool) $company && $company->issuer_code === $metadata['issuer_code'],
             'register_exists' => (bool) $register,
             'share_class_exists' => (bool) $shareClass,
-            'instrument_type_set' => (bool) ($register?->instrument_type_id),
+            'share_class_code_correct' => (bool) $shareClass && $shareClass->class_code === $metadata['class_code'],
+            'instrument_type_correct' => (bool) $register
+                && DB::table('instrument_types')->where('id', $register->instrument_type_id)->value('code') === $metadata['instrument_type_code'],
             'capital_totals_set' => abs((float) ($register?->total_units_outstanding ?? 0) - (float) $positionTotal) <= 0.000001,
             'cscs_mapping_exists' => (bool) $mapping,
             'position_count' => $positionCount,
@@ -117,9 +132,11 @@ class CheckFrisOperationalReadiness extends Command
         }
 
         $passed = $checks['company_exists']
+            && $checks['company_group_correct']
             && $checks['register_exists']
             && $checks['share_class_exists']
-            && $checks['instrument_type_set']
+            && $checks['share_class_code_correct']
+            && $checks['instrument_type_correct']
             && $checks['capital_totals_set']
             && $checks['cscs_mapping_exists'];
 
