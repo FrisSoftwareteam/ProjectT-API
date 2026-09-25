@@ -121,9 +121,9 @@ class ShareholderChangeRequestService
      */
     public function approve(ShareholderChangeRequest $changeRequest, AdminUser $approver, ?string $remarks): array
     {
-        if ($changeRequest->status !== 'submitted') {
+        if (! in_array($changeRequest->status, ['submitted', 'info_requested'], true)) {
             throw ValidationException::withMessages([
-                'status' => ['Only pending (submitted) updates can be approved.'],
+                'status' => ['Only pending (submitted or awaiting more info) updates can be approved.'],
             ]);
         }
 
@@ -158,9 +158,9 @@ class ShareholderChangeRequestService
 
     public function reject(ShareholderChangeRequest $changeRequest, AdminUser $approver, string $remarks): void
     {
-        if ($changeRequest->status !== 'submitted') {
+        if (! in_array($changeRequest->status, ['submitted', 'info_requested'], true)) {
             throw ValidationException::withMessages([
-                'status' => ['Only pending (submitted) updates can be rejected.'],
+                'status' => ['Only pending (submitted or awaiting more info) updates can be rejected.'],
             ]);
         }
 
@@ -185,6 +185,31 @@ class ShareholderChangeRequestService
         });
 
         $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'rejected');
+    }
+
+    public function requestMoreInfo(
+        ShareholderChangeRequest $changeRequest,
+        AdminUser $actor,
+        string $type,
+        ?string $note
+    ): ShareholderChangeRequest {
+        if ($changeRequest->status !== 'submitted') {
+            throw ValidationException::withMessages([
+                'status' => ['Only a pending (submitted) update can have more information requested.'],
+            ]);
+        }
+
+        $changeRequest->update([
+            'status' => 'info_requested',
+            'info_requested_type' => $type,
+            'info_requested_note' => $note,
+            'info_requested_by' => $actor->id,
+            'info_requested_at' => now(),
+        ]);
+
+        $this->notificationService->infoRequested($changeRequest->fresh(), $actor->id);
+
+        return $changeRequest->fresh();
     }
 
     protected function applyChange(ShareholderChangeRequest $changeRequest): array
@@ -302,7 +327,7 @@ class ShareholderChangeRequestService
     {
         $exists = ShareholderChangeRequest::where('shareholder_id', $shareholderId)
             ->whereIn('request_type', $requestTypes)
-            ->where('status', 'submitted')
+            ->whereIn('status', ['submitted', 'info_requested'])
             ->exists();
 
         if ($exists) {

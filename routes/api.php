@@ -183,6 +183,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::get('/{changeRequest}', [ShareholderChangeRequestController::class, 'show'])->middleware('permission:shareholder_change_requests.view');
         Route::post('/{changeRequest}/approve', [ShareholderChangeRequestController::class, 'approve'])->middleware('permission:shareholder_change_requests.approve');
         Route::post('/{changeRequest}/reject', [ShareholderChangeRequestController::class, 'reject'])->middleware('permission:shareholder_change_requests.approve');
+        Route::post('/{changeRequest}/request-info', [ShareholderChangeRequestController::class, 'requestInfo'])->middleware('permission:shareholder_change_requests.approve');
     });
 
     Route::prefix('shareholder-categories')->group(function () {

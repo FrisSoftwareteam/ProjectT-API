@@ -36,6 +36,18 @@ class ShareholderChangeRequestNotificationService
         );
     }
 
+    public function infoRequested(ShareholderChangeRequest $changeRequest, int $actorId): void
+    {
+        $this->sendSafely(
+            fn () => $this->submitterOnly($changeRequest),
+            $changeRequest,
+            $actorId,
+            'SHAREHOLDER_CHANGE_INFO_REQUESTED',
+            'More information requested',
+            "More information was requested on your {$this->typeLabel($changeRequest)} update for {$this->shareholderLabel($changeRequest)} ({$changeRequest->control_no})."
+        );
+    }
+
     private function approvers(ShareholderChangeRequest $changeRequest): Collection
     {
         $permission = $changeRequest->request_type === 'bank_mandate'

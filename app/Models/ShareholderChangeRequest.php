@@ -23,6 +23,10 @@ class ShareholderChangeRequest extends Model
         'control_no',
         'submitted_by',
         'submitted_at',
+        'info_requested_type',
+        'info_requested_note',
+        'info_requested_by',
+        'info_requested_at',
     ];
 
     protected $casts = [
@@ -30,6 +34,7 @@ class ShareholderChangeRequest extends Model
         'payload_new' => 'array',
         'submitted_at' => 'datetime',
         'updated_at' => 'datetime',
+        'info_requested_at' => 'datetime',
     ];
 
     public function shareholder()
@@ -40,6 +45,11 @@ class ShareholderChangeRequest extends Model
     public function submitter()
     {
         return $this->belongsTo(AdminUser::class, 'submitted_by');
+    }
+
+    public function infoRequestedBy()
+    {
+        return $this->belongsTo(AdminUser::class, 'info_requested_by');
     }
 
     public function approvals()
