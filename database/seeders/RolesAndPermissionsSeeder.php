@@ -248,6 +248,8 @@ class RolesAndPermissionsSeeder extends Seeder
         $this->createReconciliationRole();
         $this->createInternalAuditRole();
         $this->createMailingRole();
+        $this->createShareholderChangeApproverRole();
+        $this->createBankMandateApproverRole();
 
         $this->command->info('✓ Roles and permissions seeded successfully!');
     }
@@ -468,6 +470,45 @@ class RolesAndPermissionsSeeder extends Seeder
             'shareholders.view',
             'notifications.view', 'notifications.send', 'notifications.manage',
             'reports.view',
+        ]);
+    }
+
+    /**
+     * Reviews and decides on pending shareholder record changes (personal
+     * info, contact details, identity documents, profile pictures) — every
+     * change type except bank mandates, which require the separate
+     * Bank Mandate Approver role given their higher fraud risk.
+     */
+    private function createShareholderChangeApproverRole()
+    {
+        $role = Role::firstOrCreate([
+            'name' => 'Shareholder Change Approver',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
+            'shareholder_change_requests.view',
+            'shareholder_change_requests.approve',
+            'shareholders.view',
+            'notifications.view',
+        ]);
+    }
+
+    /**
+     * Approves bank mandate changes specifically — kept separate from the
+     * general Shareholder Change Approver role since this is the change
+     * type that decides where a shareholder's dividend payments go.
+     */
+    private function createBankMandateApproverRole()
+    {
+        $role = Role::firstOrCreate([
+            'name' => 'Bank Mandate Approver',
+            'guard_name' => 'web',
+        ]);
+        $role->syncPermissions([
+            'shareholder_change_requests.view',
+            'shareholder_change_requests.approve_mandate',
+            'shareholders.view',
+            'notifications.view',
         ]);
     }
 }
