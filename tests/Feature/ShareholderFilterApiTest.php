@@ -210,6 +210,24 @@ class ShareholderFilterApiTest extends TestCase
             ->assertJsonPath('data.0.id', $inFirstRegister);
     }
 
+    public function test_account_search_and_register_filter_must_match_the_same_register_account(): void
+    {
+        [$firstRegister, $secondRegister] = $this->createRegisters();
+        $shareholder = $this->createShareholder('cross-account-search');
+        $this->createRegisterAccount($shareholder, $firstRegister);
+        DB::table('shareholder_register_accounts')->insert([
+            'shareholder_id' => $shareholder,
+            'register_id' => $secondRegister,
+            'chn' => 'C0618216AD',
+            'status' => 'active',
+        ]);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?search=C0618216AD&register_id={$firstRegister}")
+            ->assertOk()
+            ->assertJsonPath('total', 0);
+    }
+
     public function test_register_and_search_combined_with_no_matches_returns_empty_result(): void
     {
         [$firstRegister, $secondRegister] = $this->createRegisters();
