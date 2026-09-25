@@ -7,8 +7,8 @@ use App\Http\Requests\BulkShareholderRequest;
 use App\Http\Requests\CreateShareholderRegisterAccountRequest;
 use App\Http\Requests\ShareholderAddressRequest;
 use App\Http\Requests\ShareholderAddressUpdateRequest;
-use App\Http\Requests\ShareholderIdentityRequest;
-use App\Http\Requests\ShareholderMandateRequest;
+use App\Http\Requests\ShareholderIdentityChangeRequest;
+use App\Http\Requests\ShareholderMandateChangeRequest;
 use App\Http\Requests\ShareholderRequest;
 use App\Models\Shareholder;
 use App\Models\ShareholderAddress;
@@ -20,6 +20,7 @@ use App\Models\Register;
 use App\Rules\ValidIdentificationNumber;
 use App\Services\ShareholderAccountNumberService;
 use App\Services\ShareholderBulkImportService;
+use App\Services\ShareholderChangeRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -33,7 +34,8 @@ class ShareholderController extends Controller
 {
     public function __construct(
         protected ShareholderAccountNumberService $accountNumberService,
-        protected ShareholderBulkImportService $bulkImportService
+        protected ShareholderBulkImportService $bulkImportService,
+        protected ShareholderChangeRequestService $changeRequestService
     ) {}
 
     public function index(Request $request)
@@ -450,9 +452,36 @@ class ShareholderController extends Controller
     public function update(ShareholderRequest $request, $id)
     {
         $shareholder = Shareholder::findOrFail($id);
-        $shareholder->update($request->validated());
 
-        return response()->json($shareholder->fresh());
+        if (empty($request->validated())) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => ['fields' => ['At least one field must be provided to submit a pending update.']],
+            ], 422);
+        }
+
+        try {
+            $changeRequest = $this->changeRequestService->submitProfileUpdate(
+                $shareholder,
+                $request->validated(),
+                null,
+                null,
+                $request->user()->id
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Shareholder update submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
     public function uploadProfilePicture(Request $request, Shareholder $shareholder): JsonResponse
@@ -460,27 +489,31 @@ class ShareholderController extends Controller
         try {
             $validated = $request->validate([
                 'profile_picture' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+                'reason' => ['nullable', 'string', 'max:255'],
             ]);
 
-            $previousPath = $this->publicProfilePicturePath($shareholder->profile_picture);
             $path = $validated['profile_picture']->store(
-                "profile-pictures/shareholders/{$shareholder->id}",
+                "profile-pictures/shareholders/{$shareholder->id}/pending",
                 'public'
             );
 
-            $shareholder->update([
-                'profile_picture' => Storage::disk('public')->url($path),
-            ]);
-
-            if ($previousPath !== null && $previousPath !== $path) {
-                Storage::disk('public')->delete($previousPath);
+            try {
+                $changeRequest = $this->changeRequestService->submitProfilePictureChange(
+                    $shareholder,
+                    Storage::disk('public')->url($path),
+                    $validated['reason'] ?? null,
+                    $request->user()->id
+                );
+            } catch (ValidationException $e) {
+                Storage::disk('public')->delete($path);
+                throw $e;
             }
 
             return response()->json([
                 'success' => true,
-                'message' => 'Shareholder profile picture uploaded successfully',
-                'data' => $shareholder->fresh(),
-            ]);
+                'message' => 'Profile picture change submitted for approval',
+                'data' => $changeRequest,
+            ], 202);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -520,25 +553,61 @@ class ShareholderController extends Controller
         return response()->json($address);
     }
 
-    public function addMandate($id, ShareholderMandateRequest $request)
+    public function addMandate($id, ShareholderMandateChangeRequest $request)
     {
-        $payload = $request->validated();
-        $payload['shareholder_id'] = $id;
-        $shareholderMandate = ShareholderMandate::create($payload);
+        $shareholder = Shareholder::findOrFail($id);
 
-        return response()->json($shareholderMandate);
+        try {
+            $changeRequest = $this->changeRequestService->submitMandateChange(
+                $shareholder,
+                null,
+                $request->proposedFields(),
+                $request->validated('reason'),
+                $request->user()->id
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Bank mandate change submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
-    public function updateMandate(ShareholderMandateRequest $request, $shareholderId, $mandateId)
+    public function updateMandate(ShareholderMandateChangeRequest $request, $shareholderId, $mandateId)
     {
-        $shareholderMandate = ShareholderMandate::where('id', $mandateId)
+        $shareholder = Shareholder::findOrFail($shareholderId);
+        $mandate = ShareholderMandate::where('id', $mandateId)
             ->where('shareholder_id', $shareholderId)
             ->firstOrFail();
-        $payload = $request->validated();
-        $payload['shareholder_id'] = $shareholderId;
-        $shareholderMandate->update($payload);
 
-        return response()->json($shareholderMandate);
+        try {
+            $changeRequest = $this->changeRequestService->submitMandateChange(
+                $shareholder,
+                $mandate,
+                $request->proposedFields(),
+                $request->validated('reason'),
+                $request->user()->id
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Bank mandate change submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
     public function getAllShareholdersParameters($id)
@@ -555,7 +624,7 @@ class ShareholderController extends Controller
         return response()->json($shareholderMandates);
     }
 
-    public function shareholderIdentityCreate(ShareholderIdentityRequest $request, $shareholderId)
+    public function shareholderIdentityCreate(ShareholderIdentityChangeRequest $request, $shareholderId)
     {
         $shareholder = Shareholder::find($shareholderId);
         if (! $shareholder) {
@@ -565,38 +634,68 @@ class ShareholderController extends Controller
             ], 404);
         }
 
-        $payload = $request->validated();
-        $payload['shareholder_id'] = $shareholder->id;
+        try {
+            $changeRequest = $this->changeRequestService->submitIdentityChange(
+                $shareholder,
+                null,
+                $request->proposedFields(),
+                $request->validated('reason'),
+                $request->user()->id
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
-        Log::info('Shareholder identity create request: '.json_encode($payload));
-        $shareholderIdentity = ShareholderIdentity::create($payload);
-
-        return response()->json($shareholderIdentity);
+        return response()->json([
+            'success' => true,
+            'message' => 'Identity change submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
     public function shareholderIdentityUpdate(
-        ShareholderIdentityRequest $request,
+        ShareholderIdentityChangeRequest $request,
         $shareholderId,
         $identityId
     ) {
+        $shareholder = Shareholder::find($shareholderId);
         $shareholderIdentity = ShareholderIdentity::query()
             ->whereKey($identityId)
             ->where('shareholder_id', $shareholderId)
             ->first();
 
-        if (! $shareholderIdentity) {
+        if (! $shareholder || ! $shareholderIdentity) {
             return response()->json([
                 'success' => false,
                 'message' => 'Resource not found.',
             ], 404);
         }
 
-        $payload = $request->validated();
-        unset($payload['shareholder_id']);
+        try {
+            $changeRequest = $this->changeRequestService->submitIdentityChange(
+                $shareholder,
+                $shareholderIdentity,
+                $request->proposedFields(),
+                $request->validated('reason'),
+                $request->user()->id
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
 
-        $shareholderIdentity->update($payload);
-
-        return response()->json($shareholderIdentity);
+        return response()->json([
+            'success' => true,
+            'message' => 'Identity change submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
     public function addRegisterAccount(CreateShareholderRegisterAccountRequest $request, $shareholderId)
@@ -651,28 +750,5 @@ class ShareholderController extends Controller
     private function generateShareholderNo(int $shareholderId): string
     {
         return 'SRA-'.str_pad((string) $shareholderId, 8, '0', STR_PAD_LEFT).'-'.strtoupper(Str::random(4));
-    }
-
-    private function publicProfilePicturePath(?string $profilePicture): ?string
-    {
-        if ($profilePicture === null || $profilePicture === '') {
-            return null;
-        }
-
-        $path = parse_url($profilePicture, PHP_URL_PATH);
-        if (! is_string($path) || $path === '') {
-            return null;
-        }
-
-        $path = ltrim($path, '/');
-        if (str_starts_with($path, 'storage/')) {
-            return substr($path, strlen('storage/'));
-        }
-
-        if (str_starts_with($path, 'profile-pictures/')) {
-            return $path;
-        }
-
-        return null;
     }
 }

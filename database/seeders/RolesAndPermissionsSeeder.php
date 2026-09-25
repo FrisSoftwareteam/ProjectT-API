@@ -39,6 +39,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'shareholder_change_requests.view',
             'shareholder_change_requests.create',
             'shareholder_change_requests.approve',
+            'shareholder_change_requests.approve_mandate',
 
             // Share Management
             'shares.view',
@@ -271,7 +272,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'users.view', 'users.create', 'users.edit', 'users.delete', 'users.activate', 'users.deactivate',
             'shareholders.view', 'shareholders.create', 'shareholders.edit', 'shareholders.export',
             'shareholder_identities.view', 'shareholder_identities.create', 'shareholder_identities.edit', 'shareholder_identities.export',
-            'shareholder_change_requests.view', 'shareholder_change_requests.create', 'shareholder_change_requests.approve',
+            'shareholder_change_requests.view', 'shareholder_change_requests.create', 'shareholder_change_requests.approve', 'shareholder_change_requests.approve_mandate',
             'shares.view', 'shares.create', 'shares.edit', 'shares.export',
             'cscs.view', 'cscs.upload', 'cscs.reconcile', 'cscs.submit', 'cscs.review', 'cscs.approve', 'cscs.post', 'cscs.export', 'cscs.admin',
             'legacy_migrations.view', 'legacy_migrations.create', 'legacy_migrations.stage', 'legacy_migrations.reconcile', 'legacy_migrations.submit', 'legacy_migrations.approve', 'legacy_migrations.publish', 'legacy_migrations.rollback',

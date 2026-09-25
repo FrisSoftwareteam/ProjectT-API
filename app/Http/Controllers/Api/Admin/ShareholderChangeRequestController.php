@@ -6,21 +6,18 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\ShareholderChangeRequestDecisionRequest;
 use App\Http\Requests\ShareholderChangeRequestStoreRequest;
 use App\Models\Shareholder;
-use App\Models\ShareholderChangeApproval;
 use App\Models\ShareholderChangeRequest;
-use App\Services\ShareholderChangeRequestReferenceService;
+use App\Services\ShareholderChangeRequestService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Arr;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class ShareholderChangeRequestController extends Controller
 {
     public function __construct(
-        protected ShareholderChangeRequestReferenceService $referenceService
+        protected ShareholderChangeRequestService $changeRequestService
     ) {}
 
     /**
@@ -30,41 +27,25 @@ class ShareholderChangeRequestController extends Controller
     public function store(ShareholderChangeRequestStoreRequest $request, Shareholder $shareholder): JsonResponse
     {
         try {
-            $proposedFields = $request->proposedFields();
-            $proposedAddress = $request->proposedAddress();
-
-            $payloadOld = collect($proposedFields)
-                ->keys()
-                ->mapWithKeys(fn ($field) => [$field => $shareholder->{$field}])
-                ->toArray();
-            $payloadNew = $proposedFields;
-
-            if ($proposedAddress !== null) {
-                $primaryAddress = $shareholder->addresses()->where('is_primary', true)->first();
-
-                $payloadOld['address'] = collect($proposedAddress)
-                    ->keys()
-                    ->mapWithKeys(fn ($field) => [$field => $primaryAddress?->{$field}])
-                    ->toArray();
-                $payloadNew['address'] = $proposedAddress;
-            }
-
-            $changeRequest = ShareholderChangeRequest::create([
-                'shareholder_id' => $shareholder->id,
-                'request_type' => $this->inferRequestType($proposedFields, $proposedAddress !== null),
-                'payload_old' => $payloadOld,
-                'payload_new' => $payloadNew,
-                'reason' => $request->validated('reason'),
-                'status' => 'submitted',
-                'control_no' => $this->referenceService->generate(),
-                'submitted_by' => $request->user()->id,
-            ]);
+            $changeRequest = $this->changeRequestService->submitProfileUpdate(
+                $shareholder,
+                $request->proposedFields(),
+                $request->proposedAddress(),
+                $request->validated('reason'),
+                $request->user()->id
+            );
 
             return response()->json([
                 'success' => true,
                 'message' => 'Pending shareholder update submitted for approval',
                 'data' => $changeRequest,
             ], 201);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
         } catch (\Exception $e) {
             Log::error('Error submitting shareholder change request: '.$e->getMessage(), [
                 'shareholder_id' => $shareholder->id,
@@ -185,57 +166,26 @@ class ShareholderChangeRequestController extends Controller
      */
     public function approve(ShareholderChangeRequestDecisionRequest $request, ShareholderChangeRequest $changeRequest): JsonResponse
     {
-        if ($changeRequest->status !== 'submitted') {
+        if (! $this->canDecide($request, $changeRequest)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only pending (submitted) updates can be approved',
-            ], 422);
-        }
-
-        $addressPayload = $changeRequest->payload_new['address'] ?? null;
-
-        if ($addressPayload !== null && ! $changeRequest->shareholder->hasActiveAddress()) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Shareholder has no primary address on file to update. Add one via the addresses endpoint before approving this request.',
-            ], 422);
+                'message' => 'You are not authorized to approve bank mandate changes',
+            ], 403);
         }
 
         try {
-            $shareholder = DB::transaction(function () use ($request, $changeRequest, $addressPayload) {
-                $shareholder = Shareholder::findOrFail($changeRequest->shareholder_id);
-
-                $flatPayload = Arr::except($changeRequest->payload_new, ['address']);
-                if (! empty($flatPayload)) {
-                    $shareholder->update($flatPayload);
-                }
-
-                if ($addressPayload !== null) {
-                    $shareholder->addresses()->where('is_primary', true)->first()->update($addressPayload);
-                }
-
-                ShareholderChangeApproval::create([
-                    'change_request_id' => $changeRequest->id,
-                    'level_no' => 1,
-                    'decision' => 'approved',
-                    'decided_by' => $request->user()->id,
-                    'decided_at' => now(),
-                    'remarks' => $request->validated('remarks'),
-                ]);
-
-                $changeRequest->update(['status' => 'applied']);
-
-                return $shareholder->fresh()->load('activeCautions', 'addresses');
-            });
+            $result = $this->changeRequestService->approve($changeRequest, $request->user(), $request->validated('remarks'));
 
             return response()->json([
                 'success' => true,
                 'message' => 'Change request approved and applied to shareholder',
-                'data' => [
-                    'change_request' => $changeRequest->fresh(),
-                    'shareholder' => $shareholder,
-                ],
+                'data' => array_merge(['change_request' => $changeRequest->fresh()], $result),
             ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->errors()['status'][0] ?? 'Validation failed',
+            ], 422);
         } catch (\Exception $e) {
             Log::error('Error approving shareholder change request: '.$e->getMessage(), [
                 'change_request_id' => $changeRequest->id,
@@ -255,32 +205,26 @@ class ShareholderChangeRequestController extends Controller
      */
     public function reject(ShareholderChangeRequestDecisionRequest $request, ShareholderChangeRequest $changeRequest): JsonResponse
     {
-        if ($changeRequest->status !== 'submitted') {
+        if (! $this->canDecide($request, $changeRequest)) {
             return response()->json([
                 'success' => false,
-                'message' => 'Only pending (submitted) updates can be rejected',
-            ], 422);
+                'message' => 'You are not authorized to reject bank mandate changes',
+            ], 403);
         }
 
         try {
-            DB::transaction(function () use ($request, $changeRequest) {
-                ShareholderChangeApproval::create([
-                    'change_request_id' => $changeRequest->id,
-                    'level_no' => 1,
-                    'decision' => 'rejected',
-                    'decided_by' => $request->user()->id,
-                    'decided_at' => now(),
-                    'remarks' => $request->validated('remarks'),
-                ]);
-
-                $changeRequest->update(['status' => 'rejected']);
-            });
+            $this->changeRequestService->reject($changeRequest, $request->user(), $request->validated('remarks'));
 
             return response()->json([
                 'success' => true,
                 'message' => 'Change request rejected',
                 'data' => $changeRequest->fresh(),
             ]);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->errors()['status'][0] ?? 'Validation failed',
+            ], 422);
         } catch (\Exception $e) {
             Log::error('Error rejecting shareholder change request: '.$e->getMessage(), [
                 'change_request_id' => $changeRequest->id,
@@ -295,31 +239,16 @@ class ShareholderChangeRequestController extends Controller
     }
 
     /**
-     * Derive a friendly request_type label from which fields were actually
-     * proposed. Falls back to the generic 'profile_update' whenever a
-     * submission mixes fields from more than one category.
+     * Bank mandate changes require the dedicated approve_mandate permission
+     * in addition to the general shareholder_change_requests.approve gate
+     * already enforced at the route level for every other request type.
      */
-    private function inferRequestType(array $flatFields, bool $hasAddress): string
+    private function canDecide(Request $request, ShareholderChangeRequest $changeRequest): bool
     {
-        if ($hasAddress) {
-            return empty($flatFields) ? 'address_change' : 'profile_update';
+        if ($changeRequest->request_type !== 'bank_mandate') {
+            return true;
         }
 
-        $keys = array_keys($flatFields);
-
-        if ($keys === ['email']) {
-            return 'email_change';
-        }
-
-        if ($keys === ['phone']) {
-            return 'phone_change';
-        }
-
-        $nameFields = ['first_name', 'last_name', 'middle_name'];
-        if (! empty($keys) && empty(array_diff($keys, $nameFields))) {
-            return 'name_change';
-        }
-
-        return 'profile_update';
+        return (bool) $request->user()?->can('shareholder_change_requests.approve_mandate');
     }
 }
