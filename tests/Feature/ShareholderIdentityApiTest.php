@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminUser;
 use App\Models\Shareholder;
 use App\Models\ShareholderIdentity;
 use Illuminate\Database\Schema\Blueprint;
@@ -9,11 +10,26 @@ use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
+/**
+ * Identity changes no longer write to shareholder_identities directly (PT-184):
+ * every create/update now submits a pending ShareholderChangeRequest instead.
+ * The approve/reject/apply mechanics are covered end-to-end in
+ * ShareholderUpdateApprovalApiTest; this file only covers submission.
+ */
 class ShareholderIdentityApiTest extends TestCase
 {
     protected function setUp(): void
     {
         parent::setUp();
+
+        Schema::create('admin_users', function (Blueprint $table) {
+            $table->id();
+            $table->string('email')->unique();
+            $table->string('first_name');
+            $table->string('last_name');
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
 
         Schema::create('shareholders', function (Blueprint $table) {
             $table->id();
@@ -39,44 +55,72 @@ class ShareholderIdentityApiTest extends TestCase
             $table->string('file_ref')->nullable();
             $table->timestamps();
         });
+
+        Schema::create('shareholder_change_requests', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_id');
+            $table->string('request_type');
+            $table->json('payload_old');
+            $table->json('payload_new');
+            $table->string('reason')->nullable();
+            $table->string('status')->default('submitted');
+            $table->string('control_no', 40);
+            $table->unsignedBigInteger('submitted_by');
+            $table->timestamp('submitted_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent();
+        });
     }
 
     protected function tearDown(): void
     {
+        Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholder_identities');
         Schema::dropIfExists('shareholders');
+        Schema::dropIfExists('admin_users');
 
         parent::tearDown();
     }
 
-    public function test_identity_can_be_created_without_shareholder_id_in_payload(): void
+    public function test_identity_create_submits_a_pending_change_request(): void
     {
+        $actor = $this->createAdmin('maker@example.com');
         $shareholder = $this->createShareholder('one');
 
         $this->withoutMiddleware()
+            ->actingAs($actor, 'sanctum')
             ->postJson("/api/shareholders/{$shareholder->id}/identities", $this->payload())
-            ->assertOk()
-            ->assertJsonPath('shareholder_id', $shareholder->id);
+            ->assertStatus(202)
+            ->assertJsonPath('data.request_type', 'identity_change')
+            ->assertJsonPath('data.status', 'submitted')
+            ->assertJsonPath('data.payload_new.id_value', '12345678901')
+            ->assertJsonPath('data.payload_new.identity_id', null);
 
-        $this->assertDatabaseHas('shareholder_identities', [
+        $this->assertDatabaseMissing('shareholder_identities', [
             'shareholder_id' => $shareholder->id,
-            'id_value' => '12345678901',
         ]);
     }
 
-    public function test_identity_update_uses_identity_id_and_preserves_ownership(): void
+    public function test_identity_update_submits_a_pending_change_request_referencing_the_identity(): void
     {
+        $actor = $this->createAdmin('maker@example.com');
         $shareholder = $this->createShareholder('one');
         $identity = $this->createIdentity($shareholder, 'OLD-VALUE');
 
         $this->withoutMiddleware()
+            ->actingAs($actor, 'sanctum')
             ->putJson(
                 "/api/shareholders/{$shareholder->id}/identities/{$identity->id}",
                 $this->payload(['id_value' => '22222222222'])
             )
-            ->assertOk()
-            ->assertJsonPath('id_value', '22222222222')
-            ->assertJsonPath('shareholder_id', $shareholder->id);
+            ->assertStatus(202)
+            ->assertJsonPath('data.payload_new.identity_id', $identity->id)
+            ->assertJsonPath('data.payload_new.id_value', '22222222222')
+            ->assertJsonPath('data.payload_old.id_value', 'OLD-VALUE');
+
+        $this->assertDatabaseHas('shareholder_identities', [
+            'id' => $identity->id,
+            'id_value' => 'OLD-VALUE',
+        ]);
     }
 
     public function test_identity_cannot_be_updated_through_another_shareholder_url(): void
@@ -99,20 +143,6 @@ class ShareholderIdentityApiTest extends TestCase
         ]);
     }
 
-    public function test_legacy_payload_shareholder_id_must_match_url(): void
-    {
-        $shareholder = $this->createShareholder('one');
-        $other = $this->createShareholder('other');
-
-        $this->withoutMiddleware()
-            ->postJson(
-                "/api/shareholders/{$shareholder->id}/identities",
-                $this->payload(['shareholder_id' => $other->id])
-            )
-            ->assertUnprocessable()
-            ->assertJsonValidationErrors('shareholder_id');
-    }
-
     public static function validIdentificationProvider(): array
     {
         return [
@@ -128,15 +158,17 @@ class ShareholderIdentityApiTest extends TestCase
     #[DataProvider('validIdentificationProvider')]
     public function test_identity_accepts_correctly_formatted_id_value(string $idType, string $idValue): void
     {
+        $actor = $this->createAdmin('maker-'.$idType.'@example.com');
         $shareholder = $this->createShareholder('valid-'.$idType);
 
         $this->withoutMiddleware()
+            ->actingAs($actor, 'sanctum')
             ->postJson(
                 "/api/shareholders/{$shareholder->id}/identities",
                 $this->payload(['id_type' => $idType, 'id_value' => $idValue])
             )
-            ->assertOk()
-            ->assertJsonPath('id_value', $idValue);
+            ->assertStatus(202)
+            ->assertJsonPath('data.payload_new.id_value', $idValue);
     }
 
     public static function invalidIdentificationProvider(): array
@@ -157,15 +189,27 @@ class ShareholderIdentityApiTest extends TestCase
     #[DataProvider('invalidIdentificationProvider')]
     public function test_identity_rejects_incorrectly_formatted_id_value(string $idType, string $idValue): void
     {
+        $actor = $this->createAdmin('maker-invalid@example.com');
         $shareholder = $this->createShareholder('invalid-'.$idType.'-'.strlen($idValue));
 
         $this->withoutMiddleware()
+            ->actingAs($actor, 'sanctum')
             ->postJson(
                 "/api/shareholders/{$shareholder->id}/identities",
                 $this->payload(['id_type' => $idType, 'id_value' => $idValue])
             )
             ->assertUnprocessable()
             ->assertJsonValidationErrors('id_value');
+    }
+
+    private function createAdmin(string $email): AdminUser
+    {
+        return AdminUser::query()->create([
+            'email' => $email,
+            'first_name' => 'Test',
+            'last_name' => 'User',
+            'is_active' => true,
+        ]);
     }
 
     private function createShareholder(string $suffix): Shareholder
@@ -195,7 +239,6 @@ class ShareholderIdentityApiTest extends TestCase
         return array_merge([
             'id_type' => 'nin',
             'id_value' => '12345678901',
-            'verified_status' => 'pending',
         ], $overrides);
     }
 }

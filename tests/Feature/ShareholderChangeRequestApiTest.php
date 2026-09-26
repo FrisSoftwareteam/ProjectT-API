@@ -80,6 +80,10 @@ class ShareholderChangeRequestApiTest extends TestCase
             $table->foreignId('submitted_by');
             $table->timestamp('submitted_at')->useCurrent();
             $table->timestamp('updated_at')->useCurrent();
+            $table->string('info_requested_type')->nullable();
+            $table->string('info_requested_note')->nullable();
+            $table->unsignedBigInteger('info_requested_by')->nullable();
+            $table->timestamp('info_requested_at')->nullable();
         });
 
         Schema::create('shareholder_change_approvals', function (Blueprint $table) {
@@ -346,13 +350,14 @@ class ShareholderChangeRequestApiTest extends TestCase
     public function test_approve_applies_changes_to_shareholder_and_marks_applied(): void
     {
         $actor = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $maker = $this->createAdmin('maker@example.com');
         $shareholder = $this->createShareholder('one');
         $changeRequest = ShareholderChangeRequest::factory()->create([
             'shareholder_id' => $shareholder->id,
             'payload_old' => ['email' => $shareholder->email],
             'payload_new' => ['email' => 'approved.email@example.com'],
             'status' => 'submitted',
-            'submitted_by' => $actor->id,
+            'submitted_by' => $maker->id,
         ]);
 
         $this->withoutMiddleware(LogApiActivity::class)
@@ -379,6 +384,7 @@ class ShareholderChangeRequestApiTest extends TestCase
     public function test_approve_address_change_updates_primary_address(): void
     {
         $actor = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $maker = $this->createAdmin('maker@example.com');
         $shareholder = $this->createShareholder('addrapprove');
         $address = $this->createAddress($shareholder, ['address_line1' => 'Old Address, Lagos']);
 
@@ -388,7 +394,7 @@ class ShareholderChangeRequestApiTest extends TestCase
             'payload_old' => ['address' => ['address_line1' => 'Old Address, Lagos']],
             'payload_new' => ['address' => ['address_line1' => '2 Aminu Kano Crescent, Ikoyi']],
             'status' => 'submitted',
-            'submitted_by' => $actor->id,
+            'submitted_by' => $maker->id,
         ]);
 
         $this->withoutMiddleware(LogApiActivity::class)
@@ -406,6 +412,7 @@ class ShareholderChangeRequestApiTest extends TestCase
     public function test_approve_address_change_fails_cleanly_when_no_primary_address_exists(): void
     {
         $actor = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $maker = $this->createAdmin('maker@example.com');
         $shareholder = $this->createShareholder('addrnoaddr');
 
         $changeRequest = ShareholderChangeRequest::factory()->create([
@@ -414,7 +421,7 @@ class ShareholderChangeRequestApiTest extends TestCase
             'payload_old' => ['address' => ['address_line1' => null]],
             'payload_new' => ['address' => ['address_line1' => '2 Aminu Kano Crescent, Ikoyi']],
             'status' => 'submitted',
-            'submitted_by' => $actor->id,
+            'submitted_by' => $maker->id,
         ]);
 
         $this->withoutMiddleware(LogApiActivity::class)
@@ -450,13 +457,14 @@ class ShareholderChangeRequestApiTest extends TestCase
     public function test_reject_leaves_shareholder_unchanged_and_requires_remarks(): void
     {
         $actor = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $maker = $this->createAdmin('maker@example.com');
         $shareholder = $this->createShareholder('one');
         $changeRequest = ShareholderChangeRequest::factory()->create([
             'shareholder_id' => $shareholder->id,
             'payload_old' => ['email' => $shareholder->email],
             'payload_new' => ['email' => 'rejected.email@example.com'],
             'status' => 'submitted',
-            'submitted_by' => $actor->id,
+            'submitted_by' => $maker->id,
         ]);
 
         $this->withoutMiddleware(LogApiActivity::class)
@@ -498,6 +506,198 @@ class ShareholderChangeRequestApiTest extends TestCase
             ->actingAs($actor, 'sanctum')
             ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/approve", [])
             ->assertForbidden();
+    }
+
+    public function test_index_can_be_filtered_by_shareholder_id(): void
+    {
+        $actor = $this->createAdminWithPermission('checker@example.com', 'shareholder_change_requests.view');
+        $target = $this->createShareholder('target');
+        $other = $this->createShareholder('other');
+        $wanted = $this->createChangeRequest($target, $actor, 'submitted');
+        $this->createChangeRequest($other, $actor, 'submitted');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->getJson("/api/shareholder-change-requests?shareholder_id={$target->id}")
+            ->assertOk()
+            ->assertJsonCount(1, 'data.data')
+            ->assertJsonPath('data.data.0.id', $wanted->id);
+    }
+
+    public function test_index_rows_include_shareholder_name_account_and_submitter_name(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $checker = $this->createAdminWithPermission('checker@example.com', 'shareholder_change_requests.view');
+        $shareholder = $this->createShareholder('listed');
+        $this->createChangeRequest($shareholder, $maker, 'submitted');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($checker, 'sanctum')
+            ->getJson('/api/shareholder-change-requests')
+            ->assertOk()
+            ->assertJsonPath('data.data.0.shareholder.full_name', $shareholder->full_name)
+            ->assertJsonPath('data.data.0.shareholder.account_no', $shareholder->account_no)
+            ->assertJsonPath('data.data.0.submitter.id', $maker->id)
+            ->assertJsonPath('data.data.0.submitter.name', 'Test Admin')
+            ->assertJsonPath('data.data.0.submitter.email', 'maker@example.com');
+    }
+
+    public function test_submit_response_includes_submitter_name(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'submitter.name.check@example.com',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.submitter.id', $actor->id)
+            ->assertJsonPath('data.submitter.name', 'Test Admin')
+            ->assertJsonPath('data.submitter.email', 'maker@example.com');
+    }
+
+    public function test_approver_name_appears_on_the_change_request_after_a_decision(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $changeRequest = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholder->id,
+            'payload_old' => ['email' => $shareholder->email],
+            'payload_new' => ['email' => 'approver.name.check@example.com'],
+            'status' => 'submitted',
+            'submitted_by' => $maker->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.approver.id', $approver->id)
+            ->assertJsonPath('data.change_request.approver.name', 'Test Admin')
+            ->assertJsonPath('data.change_request.approver.email', 'approver@example.com');
+    }
+
+    public function test_a_submitter_cannot_approve_their_own_change_request(): void
+    {
+        $actor = $this->createAdminWithPermission('maker-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $changeRequest = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholder->id,
+            'status' => 'submitted',
+            'submitted_by' => $actor->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/approve", [])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'You cannot approve your own submission');
+
+        $this->assertDatabaseHas('shareholder_change_requests', [
+            'id' => $changeRequest->id,
+            'status' => 'submitted',
+        ]);
+    }
+
+    public function test_a_submitter_cannot_reject_their_own_change_request(): void
+    {
+        $actor = $this->createAdminWithPermission('maker-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $changeRequest = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholder->id,
+            'status' => 'submitted',
+            'submitted_by' => $actor->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/reject", ['remarks' => 'trying to self-reject'])
+            ->assertStatus(403)
+            ->assertJsonPath('message', 'You cannot reject your own submission');
+    }
+
+    public function test_remarks_is_optional_on_approve(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $changeRequest = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholder->id,
+            'payload_old' => ['email' => $shareholder->email],
+            'payload_new' => ['email' => 'no.remarks@example.com'],
+            'status' => 'submitted',
+            'submitted_by' => $maker->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+    }
+
+    public function test_request_more_info_moves_status_and_can_still_be_approved_afterwards(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $changeRequest = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholder->id,
+            'payload_old' => ['email' => $shareholder->email],
+            'payload_new' => ['email' => 'more.info@example.com'],
+            'status' => 'submitted',
+            'submitted_by' => $maker->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/request-info", [
+                'type' => 'banker_confirmation',
+                'note' => 'Please provide a bank-issued letter confirming the new signatory.',
+            ])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'info_requested')
+            ->assertJsonPath('data.info_requested_type', 'banker_confirmation')
+            ->assertJsonPath('data.info_requested_by.id', $approver->id);
+
+        $this->assertDatabaseHas('shareholder_change_requests', [
+            'id' => $changeRequest->id,
+            'status' => 'info_requested',
+        ]);
+
+        // Still decidable once the requested info comes back.
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+    }
+
+    public function test_request_more_info_requires_a_valid_type_and_only_a_pending_submitted_request(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $applied = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholder->id,
+            'status' => 'applied',
+            'submitted_by' => $maker->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$applied->id}/request-info", ['type' => 'not-a-real-type'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('type');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$applied->id}/request-info", ['type' => 'shareholder_request'])
+            ->assertStatus(422);
     }
 
     private function createAdmin(string $email): AdminUser
