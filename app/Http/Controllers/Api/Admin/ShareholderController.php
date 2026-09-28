@@ -41,22 +41,24 @@ class ShareholderController extends Controller
     public function index(Request $request)
     {
         $validated = $request->validate([
+            'company_id' => ['nullable', 'integer', 'exists:companies,id'],
             'register_id' => ['nullable', 'integer', 'exists:registers,id'],
             'share_class_id' => ['nullable', 'integer', 'exists:share_classes,id'],
         ]);
 
         $query = Shareholder::query();
 
+        $companyId = $validated['company_id'] ?? null;
         $registerId = $validated['register_id'] ?? null;
         $shareClassId = $validated['share_class_id'] ?? null;
 
         $search = trim((string) $request->query('search', ''));
         if ($search !== '') {
             $terms = preg_split('/\s+/', $search, -1, PREG_SPLIT_NO_EMPTY);
-            $query->where(function ($outer) use ($terms, $registerId, $shareClassId) {
+            $query->where(function ($outer) use ($terms, $companyId, $registerId, $shareClassId) {
                 foreach ($terms as $term) {
                     $like = '%'.$term.'%';
-                    $outer->where(function ($q) use ($like, $registerId, $shareClassId) {
+                    $outer->where(function ($q) use ($like, $companyId, $registerId, $shareClassId) {
                         $q->where('first_name', 'like', $like)
                             ->orWhere('last_name', 'like', $like)
                             ->orWhere('middle_name', 'like', $like)
@@ -64,8 +66,8 @@ class ShareholderController extends Controller
                             ->orWhere('email', 'like', $like)
                             ->orWhere('phone', 'like', $like)
                             ->orWhere('account_no', 'like', $like)
-                            ->orWhereHas('registerAccounts', function ($accountQuery) use ($like, $registerId, $shareClassId) {
-                                $this->applyRegisterAccountFilters($accountQuery, $registerId, $shareClassId);
+                            ->orWhereHas('registerAccounts', function ($accountQuery) use ($like, $companyId, $registerId, $shareClassId) {
+                                $this->applyRegisterAccountFilters($accountQuery, $companyId, $registerId, $shareClassId);
 
                                 $accountQuery->where(function ($accountSearchQuery) use ($like) {
                                     $accountSearchQuery->where('chn', 'like', $like)
@@ -78,15 +80,21 @@ class ShareholderController extends Controller
             });
         }
 
-        if ($registerId !== null || $shareClassId !== null) {
-            $query->whereHas('registerAccounts', function ($accountQuery) use ($registerId, $shareClassId) {
-                $this->applyRegisterAccountFilters($accountQuery, $registerId, $shareClassId);
+        if ($companyId !== null || $registerId !== null || $shareClassId !== null) {
+            $query->whereHas('registerAccounts', function ($accountQuery) use ($companyId, $registerId, $shareClassId) {
+                $this->applyRegisterAccountFilters($accountQuery, $companyId, $registerId, $shareClassId);
             });
         }
 
         $query->withCount('activeCautions');
 
-        $query->withSum(['holdings as total_holdings' => function ($holdingQuery) use ($registerId, $shareClassId) {
+        $query->withSum(['holdings as total_holdings' => function ($holdingQuery) use ($companyId, $registerId, $shareClassId) {
+            if ($companyId !== null) {
+                $holdingQuery->whereIn('shareholder_register_accounts.register_id', function ($sub) use ($companyId) {
+                    $sub->select('id')->from('registers')->where('company_id', $companyId);
+                });
+            }
+
             if ($registerId !== null) {
                 $holdingQuery->where('shareholder_register_accounts.register_id', $registerId);
             }
@@ -96,7 +104,7 @@ class ShareholderController extends Controller
             }
         }], 'quantity');
 
-        $query->with(['registerAccounts' => function ($q) use ($registerId) {
+        $query->with(['registerAccounts' => function ($q) use ($companyId, $registerId) {
             $q->select(
                 'id',
                 'shareholder_id',
@@ -110,6 +118,10 @@ class ShareholderController extends Controller
 
             if ($registerId !== null) {
                 $q->where('register_id', $registerId);
+            } elseif ($companyId !== null) {
+                $q->whereHas('register', function ($registerQuery) use ($companyId) {
+                    $registerQuery->where('company_id', $companyId);
+                });
             }
         }]);
 
@@ -131,10 +143,14 @@ class ShareholderController extends Controller
         return response()->json($response);
     }
 
-    private function applyRegisterAccountFilters($accountQuery, ?int $registerId, ?int $shareClassId): void
+    private function applyRegisterAccountFilters($accountQuery, ?int $companyId, ?int $registerId, ?int $shareClassId): void
     {
         if ($registerId !== null) {
             $accountQuery->where('register_id', $registerId);
+        } elseif ($companyId !== null) {
+            $accountQuery->whereHas('register', function ($registerQuery) use ($companyId) {
+                $registerQuery->where('company_id', $companyId);
+            });
         }
 
         if ($shareClassId !== null) {

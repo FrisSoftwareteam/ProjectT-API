@@ -27,8 +27,15 @@ class ShareholderFilterApiTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('companies', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->timestamps();
+        });
+
         Schema::create('registers', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('company_id')->nullable();
             $table->string('register_code')->unique();
             $table->string('unit_precision_type')->default('decimal');
             $table->unsignedTinyInteger('decimal_precision')->nullable();
@@ -84,6 +91,7 @@ class ShareholderFilterApiTest extends TestCase
         Schema::dropIfExists('shareholder_categories');
         Schema::dropIfExists('share_classes');
         Schema::dropIfExists('registers');
+        Schema::dropIfExists('companies');
         Schema::dropIfExists('shareholders');
 
         parent::tearDown();
@@ -120,6 +128,73 @@ class ShareholderFilterApiTest extends TestCase
             ->assertJsonPath('total', 1)
             ->assertJsonCount(1, 'data.0.register_accounts')
             ->assertJsonPath('data.0.register_accounts.0.register_id', $firstRegister);
+    }
+
+    public function test_shareholders_can_be_filtered_by_company_across_multiple_registers(): void
+    {
+        $companyA = DB::table('companies')->insertGetId(['name' => 'Company A']);
+        $companyB = DB::table('companies')->insertGetId(['name' => 'Company B']);
+        $registerA1 = DB::table('registers')->insertGetId(['register_code' => 'A-REG-1', 'company_id' => $companyA]);
+        $registerA2 = DB::table('registers')->insertGetId(['register_code' => 'A-REG-2', 'company_id' => $companyA]);
+        $registerB1 = DB::table('registers')->insertGetId(['register_code' => 'B-REG-1', 'company_id' => $companyB]);
+
+        $inCompanyAviaReg1 = $this->createShareholder('company-a-1');
+        $inCompanyAviaReg2 = $this->createShareholder('company-a-2');
+        $inCompanyB = $this->createShareholder('company-b');
+        $this->createRegisterAccount($inCompanyAviaReg1, $registerA1);
+        $this->createRegisterAccount($inCompanyAviaReg2, $registerA2);
+        $this->createRegisterAccount($inCompanyB, $registerB1);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?company_id={$companyA}")
+            ->assertOk()
+            ->assertJsonPath('total', 2)
+            ->assertJsonPath('data.0.id', $inCompanyAviaReg1)
+            ->assertJsonPath('data.1.id', $inCompanyAviaReg2);
+    }
+
+    public function test_company_filter_only_returns_accounts_for_registers_under_that_company(): void
+    {
+        $companyA = DB::table('companies')->insertGetId(['name' => 'Company A']);
+        $companyB = DB::table('companies')->insertGetId(['name' => 'Company B']);
+        $registerA = DB::table('registers')->insertGetId(['register_code' => 'A-REG', 'company_id' => $companyA]);
+        $registerB = DB::table('registers')->insertGetId(['register_code' => 'B-REG', 'company_id' => $companyB]);
+
+        $shareholder = $this->createShareholder('multi-company');
+        $this->createRegisterAccount($shareholder, $registerA);
+        $this->createRegisterAccount($shareholder, $registerB);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?company_id={$companyA}")
+            ->assertOk()
+            ->assertJsonPath('total', 1)
+            ->assertJsonCount(1, 'data.0.register_accounts')
+            ->assertJsonPath('data.0.register_accounts.0.register_id', $registerA);
+    }
+
+    public function test_total_holdings_respects_company_filter_across_registers(): void
+    {
+        $companyA = DB::table('companies')->insertGetId(['name' => 'Company A']);
+        $companyB = DB::table('companies')->insertGetId(['name' => 'Company B']);
+        $registerA1 = DB::table('registers')->insertGetId(['register_code' => 'A-REG-1', 'company_id' => $companyA]);
+        $registerA2 = DB::table('registers')->insertGetId(['register_code' => 'A-REG-2', 'company_id' => $companyA]);
+        $registerB = DB::table('registers')->insertGetId(['register_code' => 'B-REG', 'company_id' => $companyB]);
+        $classA1 = $this->createShareClass($registerA1, 'ORD');
+        $classA2 = $this->createShareClass($registerA2, 'ORD');
+        $classB = $this->createShareClass($registerB, 'ORD');
+
+        $shareholder = $this->createShareholder('cross-company-holdings');
+        $accountA1 = $this->createRegisterAccount($shareholder, $registerA1);
+        $accountA2 = $this->createRegisterAccount($shareholder, $registerA2);
+        $accountB = $this->createRegisterAccount($shareholder, $registerB);
+        $this->createPosition($accountA1, $classA1, 100);
+        $this->createPosition($accountA2, $classA2, 50);
+        $this->createPosition($accountB, $classB, 900);
+
+        $this->withoutMiddleware()
+            ->getJson("/api/shareholders?company_id={$companyA}")
+            ->assertOk()
+            ->assertJsonPath('data.0.total_holdings', '150.000000');
     }
 
     public function test_shareholders_can_be_filtered_by_share_class(): void
