@@ -98,13 +98,22 @@ class ShareholderChangeRequestService
         return $this->submit($shareholder, 'identity_change', $payloadOld, $payloadNew, $reason, $submittedBy);
     }
 
+    /**
+     * @param string|null $pendingPictureUrl the staged replacement picture, or null to submit a deletion
+     */
     public function submitProfilePictureChange(
         Shareholder $shareholder,
-        string $pendingPictureUrl,
+        ?string $pendingPictureUrl,
         ?string $reason,
         int $submittedBy
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['profile_picture_change']);
+
+        if ($pendingPictureUrl === null && $shareholder->profile_picture === null) {
+            throw ValidationException::withMessages([
+                'profile_picture' => ['This shareholder has no profile picture to delete.'],
+            ]);
+        }
 
         return $this->submit(
             $shareholder,

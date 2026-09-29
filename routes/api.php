@@ -160,6 +160,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/bulk', [ShareholderController::class, 'bulkStore'])->middleware('permission:shareholders.create');
         Route::post('/with-details', [ShareholderController::class, 'storeWithDetails'])->middleware('permission:shareholders.create');
         Route::post('/{shareholder}/profile-picture', [ShareholderController::class, 'uploadProfilePicture'])->middleware('permission:shareholders.edit');
+        Route::delete('/{shareholder}/profile-picture', [ShareholderController::class, 'deleteProfilePicture'])->middleware('permission:shareholders.edit');
         Route::get('/{shareholder}', [ShareholderController::class, 'show'])->middleware('permission:shareholders.view');
         Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit');
         Route::delete('/{shareholder}', [ShareholderController::class, 'destroy'])->middleware('permission:shareholders.delete');

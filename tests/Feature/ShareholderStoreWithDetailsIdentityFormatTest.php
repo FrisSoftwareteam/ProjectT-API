@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Models\AdminUser;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
@@ -11,6 +14,15 @@ class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        Schema::create('admin_users', function (Blueprint $table) {
+            $table->id();
+            $table->string('email')->unique();
+            $table->string('first_name');
+            $table->string('last_name');
+            $table->boolean('is_active')->default(true);
+            $table->timestamps();
+        });
 
         Schema::create('shareholders', function (Blueprint $table) {
             $table->id();
@@ -32,7 +44,32 @@ class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
             $table->string('next_of_kin_phone')->nullable();
             $table->string('next_of_kin_relationship')->nullable();
             $table->string('status')->default('active');
+            $table->string('profile_picture')->nullable();
             $table->timestamps();
+        });
+
+        Schema::create('shareholder_change_requests', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_id');
+            $table->string('request_type');
+            $table->json('payload_old');
+            $table->json('payload_new');
+            $table->string('reason')->nullable();
+            $table->string('status')->default('submitted');
+            $table->string('control_no', 40);
+            $table->unsignedBigInteger('submitted_by');
+            $table->timestamp('submitted_at')->useCurrent();
+            $table->timestamp('updated_at')->useCurrent();
+        });
+
+        Schema::create('shareholder_change_approvals', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('change_request_id');
+            $table->unsignedInteger('level_no');
+            $table->string('decision');
+            $table->unsignedBigInteger('decided_by');
+            $table->timestamp('decided_at')->useCurrent();
+            $table->string('remarks')->nullable();
         });
 
         Schema::create('shareholder_addresses', function (Blueprint $table) {
@@ -125,9 +162,58 @@ class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
         Schema::dropIfExists('shareholder_categories');
         Schema::dropIfExists('shareholder_bank_mandates');
         Schema::dropIfExists('shareholder_addresses');
+        Schema::dropIfExists('shareholder_change_approvals');
+        Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholders');
+        Schema::dropIfExists('admin_users');
 
         parent::tearDown();
+    }
+
+    public function test_store_with_details_accepts_an_optional_profile_picture_as_pending(): void
+    {
+        Storage::fake('public');
+
+        $actor = AdminUser::query()->create([
+            'email' => 'maker@example.com',
+            'first_name' => 'Test',
+            'last_name' => 'Admin',
+            'is_active' => true,
+        ]);
+
+        $response = $this->withoutMiddleware()
+            ->actingAs($actor, 'sanctum')
+            ->post('/api/shareholders/with-details', $this->payload([
+                'profile_picture' => UploadedFile::fake()->image('new.png')->size(256),
+            ]));
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('pending_profile_picture.request_type', 'profile_picture_change')
+            ->assertJsonPath('pending_profile_picture.status', 'submitted')
+            ->assertJsonPath('data.profile_picture', null);
+
+        $shareholderId = $response->json('data.id');
+        $this->assertDatabaseHas('shareholder_change_requests', [
+            'shareholder_id' => $shareholderId,
+            'request_type' => 'profile_picture_change',
+            'status' => 'submitted',
+        ]);
+        $this->assertDatabaseHas('shareholders', [
+            'id' => $shareholderId,
+            'profile_picture' => null,
+        ]);
+    }
+
+    public function test_store_with_details_works_without_a_profile_picture(): void
+    {
+        $response = $this->withoutMiddleware()
+            ->postJson('/api/shareholders/with-details', $this->payload());
+
+        $response
+            ->assertCreated()
+            ->assertJsonPath('pending_profile_picture', null)
+            ->assertJsonPath('data.profile_picture', null);
     }
 
     public function test_store_with_details_rejects_a_malformed_identity_value(): void

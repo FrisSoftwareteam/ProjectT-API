@@ -269,6 +269,152 @@ class ShareholderProfilePictureUploadTest extends TestCase
         Storage::disk('public')->assertMissing($this->storagePathFromUrl($pendingUrl));
     }
 
+    public function test_delete_submits_a_pending_deletion_without_touching_the_live_picture(): void
+    {
+        Storage::fake('public');
+
+        $actor = $this->createAdmin();
+        $shareholder = $this->createShareholder([
+            'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
+        ]);
+        Storage::disk('public')->put('profile-pictures/shareholders/1/old.jpg', 'old-picture');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($actor, 'sanctum')
+            ->deleteJson("/api/shareholders/{$shareholder->id}/profile-picture", ['reason' => 'Shareholder requested removal'])
+            ->assertStatus(202)
+            ->assertJsonPath('data.request_type', 'profile_picture_change')
+            ->assertJsonPath('data.status', 'submitted')
+            ->assertJsonPath('data.payload_old.profile_picture', $shareholder->profile_picture)
+            ->assertJsonPath('data.payload_new.profile_picture', null);
+
+        $shareholder->refresh();
+        $this->assertNotNull($shareholder->profile_picture);
+        Storage::disk('public')->assertExists('profile-pictures/shareholders/1/old.jpg');
+    }
+
+    public function test_delete_is_rejected_when_shareholder_has_no_picture(): void
+    {
+        $actor = $this->createAdmin();
+        $shareholder = $this->createShareholder();
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($actor, 'sanctum')
+            ->deleteJson("/api/shareholders/{$shareholder->id}/profile-picture")
+            ->assertStatus(422);
+    }
+
+    public function test_approving_a_deletion_clears_the_live_picture_and_removes_the_file(): void
+    {
+        Storage::fake('public');
+
+        $maker = $this->createAdmin();
+        $approver = $this->createAdmin();
+        $shareholder = $this->createShareholder([
+            'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
+        ]);
+        Storage::disk('public')->put('profile-pictures/shareholders/1/old.jpg', 'old-picture');
+
+        $submit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->deleteJson("/api/shareholders/{$shareholder->id}/profile-picture");
+        $changeRequestId = $submit->json('data.id');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequestId}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied')
+            ->assertJsonPath('data.shareholder.profile_picture', null);
+
+        $shareholder->refresh();
+        $this->assertNull($shareholder->profile_picture);
+        Storage::disk('public')->assertMissing('profile-pictures/shareholders/1/old.jpg');
+    }
+
+    public function test_rejecting_a_deletion_leaves_the_live_picture_untouched(): void
+    {
+        Storage::fake('public');
+
+        $maker = $this->createAdmin();
+        $approver = $this->createAdmin();
+        $shareholder = $this->createShareholder([
+            'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
+        ]);
+        Storage::disk('public')->put('profile-pictures/shareholders/1/old.jpg', 'old-picture');
+
+        $submit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->deleteJson("/api/shareholders/{$shareholder->id}/profile-picture");
+        $changeRequestId = $submit->json('data.id');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequestId}/reject", ['remarks' => 'Not authorized to remove'])
+            ->assertOk()
+            ->assertJsonPath('data.status', 'rejected');
+
+        $shareholder->refresh();
+        $this->assertSame('/storage/profile-pictures/shareholders/1/old.jpg', $shareholder->profile_picture);
+        Storage::disk('public')->assertExists('profile-pictures/shareholders/1/old.jpg');
+    }
+
+    public function test_create_shareholder_with_a_picture_submits_it_as_pending(): void
+    {
+        Storage::fake('public');
+
+        $actor = $this->createAdmin();
+
+        $response = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($actor, 'sanctum')
+            ->post('/api/shareholders', [
+                'holder_type' => 'individual',
+                'first_name' => 'New',
+                'last_name' => 'Holder',
+                'email' => 'new.holder@example.com',
+                'phone' => '08099999999',
+                'status' => 'active',
+                'profile_picture' => UploadedFile::fake()->image('avatar.png')->size(256),
+            ]);
+
+        $response->assertCreated();
+        $shareholderId = $response->json('id');
+        $this->assertIsInt($shareholderId);
+        $this->assertNull($response->json('profile_picture'));
+        $this->assertSame('submitted', $response->json('pending_profile_picture.status'));
+        $this->assertSame('profile_picture_change', $response->json('pending_profile_picture.request_type'));
+
+        $this->assertDatabaseHas('shareholder_change_requests', [
+            'shareholder_id' => $shareholderId,
+            'request_type' => 'profile_picture_change',
+            'status' => 'submitted',
+        ]);
+        $this->assertDatabaseHas('shareholders', [
+            'id' => $shareholderId,
+            'profile_picture' => null,
+        ]);
+    }
+
+    public function test_create_shareholder_without_a_picture_still_works(): void
+    {
+        $actor = $this->createAdmin();
+
+        $response = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($actor, 'sanctum')
+            ->postJson('/api/shareholders', [
+                'holder_type' => 'individual',
+                'first_name' => 'No',
+                'last_name' => 'Picture',
+                'email' => 'no.picture@example.com',
+                'phone' => '08088888888',
+                'status' => 'active',
+            ]);
+
+        $response->assertCreated();
+        $this->assertNull($response->json('profile_picture'));
+        $this->assertArrayNotHasKey('pending_profile_picture', $response->json());
+    }
+
     public function test_shareholder_profile_picture_is_returned_on_search_and_show(): void
     {
         $actor = $this->createAdmin();
