@@ -4,13 +4,13 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\AdminUser;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
-use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Laravel\Socialite\Facades\Socialite;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Laravel\Socialite\Facades\Socialite;
+use RuntimeException;
 
 class AuthController extends Controller
 {
@@ -27,21 +27,21 @@ class AuthController extends Controller
 
             if (empty($clientId) || empty($clientSecret) || empty($redirectUri)) {
                 Log::error('Microsoft OAuth configuration incomplete', [
-                    'has_client_id' => !empty($clientId),
-                    'has_client_secret' => !empty($clientSecret),
-                    'has_redirect_uri' => !empty($redirectUri)
+                    'has_client_id' => ! empty($clientId),
+                    'has_client_secret' => ! empty($clientSecret),
+                    'has_redirect_uri' => ! empty($redirectUri),
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
                     'message' => 'Microsoft OAuth is not properly configured',
-                    'error' => 'Missing required configuration values'
+                    'error' => 'Missing required configuration values',
                 ], 500);
             }
 
             Log::info('Initiating Microsoft OAuth redirect', [
                 'client_id' => $clientId,
-                'redirect_uri' => $redirectUri
+                'redirect_uri' => $redirectUri,
             ]);
 
             $redirectUrl = Socialite::driver('microsoft')
@@ -52,7 +52,7 @@ class AuthController extends Controller
             return response()->json([
                 'success' => true,
                 'redirect_url' => $redirectUrl,
-                'message' => 'Redirect to Microsoft OAuth'
+                'message' => 'Redirect to Microsoft OAuth',
             ]);
         } catch (\Exception $e) {
             Log::error('Microsoft OAuth redirect failed', [
@@ -60,13 +60,13 @@ class AuthController extends Controller
                 'exception' => get_class($e),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
-            
+
             return response()->json([
                 'success' => false,
                 'message' => 'Microsoft OAuth configuration error',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -82,37 +82,64 @@ class AuthController extends Controller
                 'query_params' => $request->query(),
                 'has_code' => $request->has('code'),
                 'has_state' => $request->has('state'),
-                'has_error' => $request->has('error')
+                'has_error' => $request->has('error'),
             ]);
 
             // Check for OAuth errors in the callback
             if ($request->has('error')) {
                 Log::error('Microsoft OAuth returned error', [
                     'error' => $request->query('error'),
-                    'error_description' => $request->query('error_description')
+                    'error_description' => $request->query('error_description'),
                 ]);
-                
+
                 return response()->json([
                     'success' => false,
                     'message' => 'OAuth authentication error',
-                    'error' => $request->query('error_description') ?? $request->query('error')
+                    'error' => $request->query('error_description') ?? $request->query('error'),
                 ], 401);
             }
 
             $microsoftUser = Socialite::driver('microsoft')->stateless()->user();
-            
-            // Find or create admin user
-            $adminUser = AdminUser::firstOrCreate(
-                ['microsoft_id' => $microsoftUser->getId()],
-                [
-                    'email' => $microsoftUser->getEmail(),
-                    'first_name' => $microsoftUser->user['givenName'] ?? 'Unknown',
-                    'last_name' => $microsoftUser->user['surname'] ?? 'User',
-                    'department' => $microsoftUser->user['jobTitle'] ?? null,
-                    'is_active' => true,
-                    'microsoft_data' => $microsoftUser->user,
-                ]
-            );
+
+            $microsoftId = trim((string) $microsoftUser->getId());
+            $email = Str::lower(trim((string) $microsoftUser->getEmail()));
+
+            if ($microsoftId === '' || $email === '') {
+                throw new RuntimeException('Microsoft did not return a valid user ID and email address.');
+            }
+
+            // Microsoft authentication has completed at this point. Resolve an existing
+            // linked account first, then link a preloaded account by its email address.
+            $adminUser = AdminUser::query()
+                ->where('microsoft_id', $microsoftId)
+                ->first();
+
+            if (! $adminUser) {
+                $adminUser = AdminUser::query()
+                    ->whereRaw('LOWER(email) = ?', [$email])
+                    ->first();
+
+                if ($adminUser && $adminUser->microsoft_id !== null) {
+                    throw new RuntimeException('This email address is already linked to another Microsoft account.');
+                }
+
+                if ($adminUser) {
+                    $adminUser->update([
+                        'microsoft_id' => $microsoftId,
+                        'microsoft_data' => $microsoftUser->user,
+                    ]);
+                } else {
+                    $adminUser = AdminUser::create([
+                        'microsoft_id' => $microsoftId,
+                        'email' => $email,
+                        'first_name' => $microsoftUser->user['givenName'] ?? 'Unknown',
+                        'last_name' => $microsoftUser->user['surname'] ?? 'User',
+                        'department' => $microsoftUser->user['jobTitle'] ?? null,
+                        'is_active' => true,
+                        'microsoft_data' => $microsoftUser->user,
+                    ]);
+                }
+            }
 
             // Update last login
             $adminUser->updateLastLogin();
@@ -130,17 +157,17 @@ class AuthController extends Controller
             );
             $callbackUrl = $request->query('redirect_uri') ?? $defaultCallbackUrl;
 
-            $redirectUrl = $callbackUrl . (str_contains($callbackUrl, '?') ? '&' : '?') . http_build_query([
+            $redirectUrl = $callbackUrl.(str_contains($callbackUrl, '?') ? '&' : '?').http_build_query([
                 'status' => 'success',
                 'message' => 'Login successful',
                 'token' => $token,
                 'token_type' => 'Bearer',
                 'user_id' => $adminUser->id,
-                'email' => $adminUser->email
+                'email' => $adminUser->email,
             ]);
 
             Log::info('Redirecting to frontend after successful OAuth', [
-                'redirect_url' => $redirectUrl
+                'redirect_url' => $redirectUrl,
             ]);
 
             return redirect($redirectUrl);
@@ -151,7 +178,7 @@ class AuthController extends Controller
                 'exception' => get_class($e),
                 'file' => $e->getFile(),
                 'line' => $e->getLine(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
             ]);
 
             // Always send the final response to the configured landing page on errors (can be overridden via query)
@@ -169,15 +196,15 @@ class AuthController extends Controller
                 return response()->json([
                     'success' => false,
                     'message' => 'Authentication failed',
-                    'error' => $e->getMessage() ?: 'An unexpected error occurred during authentication'
+                    'error' => $e->getMessage() ?: 'An unexpected error occurred during authentication',
                 ], 401);
             }
 
             // Otherwise, redirect to landing page with error details
-            $redirectUrl = $errorUrl . (str_contains($errorUrl, '?') ? '&' : '?') . http_build_query([
+            $redirectUrl = $errorUrl.(str_contains($errorUrl, '?') ? '&' : '?').http_build_query([
                 'status' => 'error',
                 'error' => 'authentication_failed',
-                'error_description' => $e->getMessage() ?: 'An unexpected error occurred during authentication'
+                'error_description' => $e->getMessage() ?: 'An unexpected error occurred during authentication',
             ]);
 
             return redirect($redirectUrl);
@@ -197,17 +224,17 @@ class AuthController extends Controller
         try {
             $adminUser = AdminUser::where('email', $request->email)->first();
 
-            if (!$adminUser) {
+            if (! $adminUser) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'User not found'
+                    'message' => 'User not found',
                 ], 404);
             }
 
-            if (!$adminUser->is_active) {
+            if (! $adminUser->is_active) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Account is inactive'
+                    'message' => 'Account is inactive',
                 ], 403);
             }
 
@@ -223,16 +250,16 @@ class AuthController extends Controller
                 'user' => $adminUser,
                 'token' => $token,
                 'token_type' => 'Bearer',
-                'simulation_mode' => true
+                'simulation_mode' => true,
             ]);
 
         } catch (\Exception $e) {
-            Log::error('Simulated login failed: ' . $e->getMessage());
-            
+            Log::error('Simulated login failed: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Simulated authentication failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -249,7 +276,7 @@ class AuthController extends Controller
         return response()->json([
             'success' => true,
             'users' => $users,
-            'message' => 'Available users for simulation'
+            'message' => 'Available users for simulation',
         ]);
     }
 
@@ -259,12 +286,12 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         $user = $request->user();
-        
+
         return response()->json([
             'success' => true,
             'user' => $user,
             'roles' => $user->roles->pluck('name'),
-            'permissions' => $user->getAllPermissions()->pluck('name')
+            'permissions' => $user->getAllPermissions()->pluck('name'),
         ]);
     }
 
@@ -279,15 +306,15 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Logged out successfully'
+                'message' => 'Logged out successfully',
             ]);
         } catch (\Exception $e) {
-            Log::error('Logout failed: ' . $e->getMessage());
-            
+            Log::error('Logout failed: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Logout failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -303,15 +330,15 @@ class AuthController extends Controller
 
             return response()->json([
                 'success' => true,
-                'message' => 'Logged out from all devices successfully'
+                'message' => 'Logged out from all devices successfully',
             ]);
         } catch (\Exception $e) {
-            Log::error('Logout all failed: ' . $e->getMessage());
-            
+            Log::error('Logout all failed: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Logout from all devices failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
@@ -323,10 +350,10 @@ class AuthController extends Controller
     {
         try {
             $user = $request->user();
-            
+
             // Revoke current token
             $request->user()->currentAccessToken()->delete();
-            
+
             // Create new token
             $token = $user->createToken('API Token')->plainTextToken;
 
@@ -334,15 +361,15 @@ class AuthController extends Controller
                 'success' => true,
                 'message' => 'Token refreshed successfully',
                 'token' => $token,
-                'token_type' => 'Bearer'
+                'token_type' => 'Bearer',
             ]);
         } catch (\Exception $e) {
-            Log::error('Token refresh failed: ' . $e->getMessage());
-            
+            Log::error('Token refresh failed: '.$e->getMessage());
+
             return response()->json([
                 'success' => false,
                 'message' => 'Token refresh failed',
-                'error' => $e->getMessage()
+                'error' => $e->getMessage(),
             ], 500);
         }
     }
