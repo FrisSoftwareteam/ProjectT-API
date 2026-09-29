@@ -162,10 +162,23 @@ class ShareholderController extends Controller
 
     public function store(ShareholderRequest $request)
     {
+        $picture = $request->validate([
+            'profile_picture' => ['nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
+        ]);
+
         $data = $request->validated();
         $data['account_no'] = $this->accountNumberService->generate();
+        $data['full_name'] = trim(($data['first_name'] ?? '').' '.($data['last_name'] ?? ''));
 
         $shareholder = Shareholder::create($data);
+
+        if (! empty($picture['profile_picture'])) {
+            $shareholder->pending_profile_picture = $this->submitPendingProfilePicture(
+                $picture['profile_picture'],
+                $shareholder,
+                $request->user()->id
+            );
+        }
 
         return response()->json($shareholder, 201);
     }
@@ -258,6 +271,8 @@ class ShareholderController extends Controller
             'identities.*.verified_by' => 'nullable|exists:admin_users,id',
             'identities.*.verified_at' => 'nullable|date',
             'identities.*.file_ref' => 'nullable|string|max:255',
+
+            'profile_picture' => 'nullable|image|mimes:jpg,jpeg,png,webp|max:2048',
         ], [
             'shareholder.required' => 'The shareholder object is required.',
             'shareholder.array' => 'The shareholder data must be an object.',
@@ -441,6 +456,15 @@ class ShareholderController extends Controller
                 ShareholderIdentity::insert($identities);
             }
 
+            $pendingProfilePicture = null;
+            if (! empty($payload['profile_picture'])) {
+                $pendingProfilePicture = $this->submitPendingProfilePicture(
+                    $payload['profile_picture'],
+                    $shareholder,
+                    $request->user()->id
+                );
+            }
+
             DB::commit();
 
             $shareholder->load('addresses', 'mandates', 'identities', 'holdings.shareClass.register.company', 'certificates', 'registerAccounts.category');
@@ -449,6 +473,7 @@ class ShareholderController extends Controller
                 'success' => true,
                 'message' => 'Shareholder created successfully',
                 'data' => $shareholder,
+                'pending_profile_picture' => $pendingProfilePicture,
             ], 201);
         } catch (\Exception $e) {
             DB::rollBack();
@@ -548,6 +573,34 @@ class ShareholderController extends Controller
                 'errors' => $e->errors(),
             ], 422);
         }
+    }
+
+    public function deleteProfilePicture(Request $request, Shareholder $shareholder): JsonResponse
+    {
+        $validated = $request->validate([
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $changeRequest = $this->changeRequestService->submitProfilePictureChange(
+                $shareholder,
+                null,
+                $validated['reason'] ?? null,
+                $request->user()->id
+            );
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Profile picture deletion submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
     public function destroy($id)
@@ -777,5 +830,25 @@ class ShareholderController extends Controller
     private function generateShareholderNo(int $shareholderId): string
     {
         return 'SRA-'.str_pad((string) $shareholderId, 8, '0', STR_PAD_LEFT).'-'.strtoupper(Str::random(4));
+    }
+
+    /**
+     * Stage an uploaded picture for a just-created shareholder and submit it
+     * for approval, same as any other profile-picture change: the record
+     * shows the default placeholder until approved.
+     */
+    private function submitPendingProfilePicture(
+        \Illuminate\Http\UploadedFile $file,
+        Shareholder $shareholder,
+        int $submittedBy
+    ): \App\Models\ShareholderChangeRequest {
+        $path = $file->store("profile-pictures/shareholders/{$shareholder->id}/pending", 'public');
+
+        return $this->changeRequestService->submitProfilePictureChange(
+            $shareholder,
+            Storage::disk('public')->url($path),
+            null,
+            $submittedBy
+        );
     }
 }
