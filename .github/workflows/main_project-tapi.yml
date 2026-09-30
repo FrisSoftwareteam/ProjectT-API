@@ -53,6 +53,11 @@ jobs:
           zip -r app.zip . \
             -x ".git/*" ".github/*" "node_modules/*" "tests/*"
 
+      - name: Verify database deployment files
+        run: |
+          unzip -Z1 app.zip | grep -q '^database/migrations/'
+          unzip -Z1 app.zip | grep -q '^database/fris-packages/.*\.zip$'
+
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
