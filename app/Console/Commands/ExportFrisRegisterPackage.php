@@ -118,10 +118,10 @@ class ExportFrisRegisterPackage extends Command
         $headersWritten = false;
         while ($row = $stmt->fetch()) {
             if (! $headersWritten) {
-                fputcsv($handle, array_keys($row));
+                fputcsv($handle, array_keys($row), ',', '"', '');
                 $headersWritten = true;
             }
-            fputcsv($handle, $row);
+            fputcsv($handle, $row, ',', '"', '');
             $rows++;
         }
         fclose($handle);

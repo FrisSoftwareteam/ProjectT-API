@@ -139,6 +139,7 @@ class StageFrisRegisterPackage extends Command
         $chunk = max(1, (int) $this->option('chunk'));
         $now = now();
         $table = $type === 'profile' ? 'fris_migration_profiles' : 'fris_migration_units';
+        $repairedCsvRows = 0;
         $resumeAfter = $resuming
             ? (int) DB::table($table)->where('batch_id', $batch->id)->max('source_row_number')
             : 0;
@@ -149,12 +150,8 @@ class StageFrisRegisterPackage extends Command
 
         while (($values = fgetcsv($handle, null, ',', '"', '')) !== false) {
             if (count($values) !== count($headers)) {
-                throw new \RuntimeException(sprintf(
-                    '%s CSV row has %d columns, expected %d.',
-                    $type,
-                    count($values),
-                    count($headers)
-                ));
+                $values = $this->repairTrailingExtraJson($headers, $values);
+                $repairedCsvRows++;
             }
 
             $row = array_combine($headers, $values);
@@ -189,8 +186,29 @@ class StageFrisRegisterPackage extends Command
         if ($committedChunks > 0) {
             $this->line("Committed {$type} chunks: {$committedChunks}");
         }
+        if ($repairedCsvRows > 0) {
+            $this->warn("Repaired {$repairedCsvRows} {$type} CSV row(s) with fragmented trailing extra_json.");
+        }
 
         return ['rows' => $rows, 'valid' => $valid, 'errors' => $errors, 'quantity' => number_format($quantity, 6, '.', '')];
+    }
+
+    /** @param array<int, string> $headers @param array<int, string|null> $values @return array<int, string|null> */
+    private function repairTrailingExtraJson(array $headers, array $values): array
+    {
+        $expected = count($headers);
+        if (count($values) > $expected && end($headers) === 'extra_json') {
+            return array_merge(
+                array_slice($values, 0, $expected - 1),
+                [implode(',', array_slice($values, $expected - 1))]
+            );
+        }
+
+        throw new \RuntimeException(sprintf(
+            'CSV row has %d columns, expected %d.',
+            count($values),
+            $expected
+        ));
     }
 
     /** @param array<string, mixed> $manifest */
