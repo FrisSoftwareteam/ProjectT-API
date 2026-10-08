@@ -313,6 +313,13 @@ class ShareholderChangeRequestController extends Controller
             ], 403);
         }
 
+        if ($changeRequest->request_type === 'chn_update' && ! $request->user()?->can('shareholder_change_requests.approve_chn')) {
+            return response()->json([
+                'success' => false,
+                'message' => "You are not authorized to {$action} CHN changes",
+            ], 403);
+        }
+
         return null;
     }
 

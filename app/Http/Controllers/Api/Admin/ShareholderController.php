@@ -695,6 +695,46 @@ class ShareholderController extends Controller
         ], 202);
     }
 
+    public function updateChn(Request $request, $shareholderId, $registerAccountId)
+    {
+        $shareholder = Shareholder::findOrFail($shareholderId);
+        $registerAccount = ShareholderRegisterAccount::where('id', $registerAccountId)
+            ->where('shareholder_id', $shareholderId)
+            ->firstOrFail();
+
+        $validated = $request->validate([
+            'chn' => ['nullable', 'string', 'max:50'],
+            'reason' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $changeRequest = $this->changeRequestService->submitChnChange(
+                $shareholder,
+                $registerAccount,
+                $request->user(),
+                $validated['chn'] ?? null,
+                $validated['reason'] ?? null
+            );
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'CHN change submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
+    }
+
     public function getAllShareholdersParameters($id)
     {
         $shareholderMandates = Shareholder::find($id)::with(

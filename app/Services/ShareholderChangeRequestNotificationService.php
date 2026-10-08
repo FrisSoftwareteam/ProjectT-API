@@ -50,9 +50,11 @@ class ShareholderChangeRequestNotificationService
 
     private function approvers(ShareholderChangeRequest $changeRequest): Collection
     {
-        $permission = $changeRequest->request_type === 'bank_mandate'
-            ? 'shareholder_change_requests.approve_mandate'
-            : 'shareholder_change_requests.approve';
+        $permission = match ($changeRequest->request_type) {
+            'bank_mandate' => 'shareholder_change_requests.approve_mandate',
+            'chn_update' => 'shareholder_change_requests.approve_chn',
+            default => 'shareholder_change_requests.approve',
+        };
 
         return AdminUser::query()->where('is_active', true)->permission($permission)->get();
     }

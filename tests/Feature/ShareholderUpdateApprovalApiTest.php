@@ -207,6 +207,32 @@ class ShareholderUpdateApprovalApiTest extends TestCase
         ]);
     }
 
+    public function test_an_approve_mandate_only_approver_can_actually_reach_the_approve_route(): void
+    {
+        // Regression test: the approve/reject/request-info routes used to be
+        // gated by the general .approve permission ONLY, so a user holding
+        // just approve_mandate (no general .approve) was blocked at the
+        // route itself before ever reaching the mandate-specific check in
+        // the controller — approve_mandate was effectively unusable alone.
+        // Keeps PermissionMiddleware active (unlike the other tests here)
+        // specifically to prove the route itself, not just the controller
+        // logic, actually lets this permission through.
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_mandates.create');
+        $approver = $this->createAdminWithPermission('mandate-approver@example.com', 'shareholder_change_requests.approve_mandate');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/mandates", $this->mandatePayload());
+        $submit->assertStatus(202);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+    }
+
     public function test_updating_an_existing_mandate_applies_to_the_same_row_on_approval(): void
     {
         $maker = $this->createAdmin('maker@example.com');

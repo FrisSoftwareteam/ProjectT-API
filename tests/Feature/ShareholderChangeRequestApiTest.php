@@ -68,6 +68,23 @@ class ShareholderChangeRequestApiTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('registers', function (Blueprint $table) {
+            $table->id();
+            $table->string('register_code')->unique();
+            $table->timestamps();
+        });
+
+        Schema::create('shareholder_register_accounts', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('shareholder_id');
+            $table->foreignId('register_id');
+            $table->string('shareholder_no')->nullable();
+            $table->string('chn')->nullable();
+            $table->string('cscs_account_no')->nullable();
+            $table->string('status')->default('active');
+            $table->timestamps();
+        });
+
         Schema::create('shareholder_change_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('shareholder_id');
@@ -146,6 +163,8 @@ class ShareholderChangeRequestApiTest extends TestCase
         Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholder_cautions');
         Schema::dropIfExists('shareholder_addresses');
+        Schema::dropIfExists('shareholder_register_accounts');
+        Schema::dropIfExists('registers');
         Schema::dropIfExists('shareholders');
         Schema::dropIfExists('admin_users');
 
@@ -869,6 +888,111 @@ class ShareholderChangeRequestApiTest extends TestCase
 
         $shareholder->refresh();
         $this->assertSame('Renamed', $shareholder->first_name);
+    }
+
+    // -----------------------------------------------------------------
+    // CHN updates
+    // -----------------------------------------------------------------
+
+    public function test_submitting_a_chn_change_requires_edit_chn_permission(): void
+    {
+        $actor = $this->createAdmin('no-permissions@example.com');
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", [
+                'chn' => 'NEW-CHN-456',
+            ])
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'OLD-CHN-123',
+        ]);
+    }
+
+    public function test_chn_change_submits_a_pending_request_without_touching_the_live_value(): void
+    {
+        $actor = $this->createAdminWithPermissions('chn-editor@example.com', ['shareholder_change_requests.edit_chn']);
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", [
+                'chn' => 'NEW-CHN-456',
+                'reason' => 'Correcting CSCS mapping',
+            ])
+            ->assertStatus(202)
+            ->assertJsonPath('data.request_type', 'chn_update')
+            ->assertJsonPath('data.status', 'submitted')
+            ->assertJsonPath('data.payload_old.chn', 'OLD-CHN-123')
+            ->assertJsonPath('data.payload_new.chn', 'NEW-CHN-456');
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'OLD-CHN-123',
+        ]);
+    }
+
+    public function test_approving_a_chn_change_requires_approve_chn_permission(): void
+    {
+        $maker = $this->createAdminWithPermissions('chn-editor@example.com', ['shareholder_change_requests.edit_chn']);
+        $generalApprover = $this->createAdminWithPermission('general-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", ['chn' => 'NEW-CHN-456']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($generalApprover, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'OLD-CHN-123',
+        ]);
+    }
+
+    public function test_approving_a_chn_change_updates_the_correct_register_account(): void
+    {
+        $maker = $this->createAdminWithPermissions('chn-editor@example.com', ['shareholder_change_requests.edit_chn']);
+        $approver = $this->createAdminWithPermission('chn-approver@example.com', 'shareholder_change_requests.approve_chn');
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", ['chn' => 'NEW-CHN-456']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied')
+            ->assertJsonPath('data.register_account.chn', 'NEW-CHN-456');
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'NEW-CHN-456',
+        ]);
+    }
+
+    private function createRegisterAccount(Shareholder $shareholder, ?string $chn = null): int
+    {
+        $registerId = \Illuminate\Support\Facades\DB::table('registers')->insertGetId(['register_code' => 'REG-'.uniqid()]);
+
+        return \Illuminate\Support\Facades\DB::table('shareholder_register_accounts')->insertGetId([
+            'shareholder_id' => $shareholder->id,
+            'register_id' => $registerId,
+            'chn' => $chn,
+            'status' => 'active',
+        ]);
     }
 
     private function createAdminWithPermissions(string $email, array $permissions): AdminUser

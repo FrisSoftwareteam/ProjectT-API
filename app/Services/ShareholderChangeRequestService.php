@@ -8,6 +8,7 @@ use App\Models\ShareholderChangeApproval;
 use App\Models\ShareholderChangeRequest;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
+use App\Models\ShareholderRegisterAccount;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
@@ -119,6 +120,23 @@ class ShareholderChangeRequestService
         }
     }
 
+    /**
+     * Single-category variant of assertFieldPermissions(), for change types
+     * (CHN) that aren't part of the flat profile-update payload.
+     */
+    private function assertHasPermission(AdminUser $actor, string $permission, string $label): void
+    {
+        foreach (self::LEGACY_BYPASS_PERMISSIONS as $bypass) {
+            if ($actor->can($bypass)) {
+                return;
+            }
+        }
+
+        if (! $actor->can($permission)) {
+            throw new AuthorizationException("You do not have permission to edit: {$label}");
+        }
+    }
+
     public function submitMandateChange(
         Shareholder $shareholder,
         ?ShareholderMandate $existingMandate,
@@ -138,6 +156,26 @@ class ShareholderChangeRequestService
         $payloadNew['mandate_id'] = $existingMandate?->id;
 
         return $this->submit($shareholder, 'bank_mandate', $payloadOld, $payloadNew, $reason, $submittedBy);
+    }
+
+    public function submitChnChange(
+        Shareholder $shareholder,
+        ShareholderRegisterAccount $registerAccount,
+        AdminUser $actor,
+        ?string $newChn,
+        ?string $reason
+    ): ShareholderChangeRequest {
+        $this->assertHasPermission($actor, 'shareholder_change_requests.edit_chn', 'CHN');
+        $this->guardNoPendingRequest($shareholder->id, ['chn_update']);
+
+        return $this->submit(
+            $shareholder,
+            'chn_update',
+            ['chn' => $registerAccount->chn, 'register_account_id' => $registerAccount->id],
+            ['chn' => $newChn, 'register_account_id' => $registerAccount->id],
+            $reason,
+            $actor->id
+        );
     }
 
     public function submitIdentityChange(
@@ -292,6 +330,7 @@ class ShareholderChangeRequestService
             'bank_mandate' => $this->applyMandateChange($shareholder, $changeRequest),
             'identity_change' => $this->applyIdentityChange($shareholder, $changeRequest),
             'profile_picture_change' => $this->applyProfilePictureChange($shareholder, $changeRequest),
+            'chn_update' => $this->applyChnChange($shareholder, $changeRequest),
             default => $this->applyProfileChange($shareholder, $changeRequest),
         };
     }
@@ -312,6 +351,18 @@ class ShareholderChangeRequestService
         }
 
         return ['shareholder' => $shareholder, 'mandate' => $mandate];
+    }
+
+    private function applyChnChange(Shareholder $shareholder, ShareholderChangeRequest $changeRequest): array
+    {
+        $registerAccountId = $changeRequest->payload_new['register_account_id'];
+        $registerAccount = ShareholderRegisterAccount::where('id', $registerAccountId)
+            ->where('shareholder_id', $shareholder->id)
+            ->firstOrFail();
+
+        $registerAccount->update(['chn' => $changeRequest->payload_new['chn']]);
+
+        return ['shareholder' => $shareholder, 'register_account' => $registerAccount];
     }
 
     private function applyIdentityChange(Shareholder $shareholder, ShareholderChangeRequest $changeRequest): array
