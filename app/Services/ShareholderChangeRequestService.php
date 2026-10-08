@@ -8,6 +8,7 @@ use App\Models\ShareholderChangeApproval;
 use App\Models\ShareholderChangeRequest;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -24,6 +25,34 @@ class ShareholderChangeRequestService
 {
     private const PROFILE_REQUEST_TYPES = ['name_change', 'email_change', 'phone_change', 'address_change', 'profile_update'];
 
+    /**
+     * Per-field category permissions (PT-191). A field missing from this map
+     * (e.g. next_of_kin_*) has no dedicated category and always falls back
+     * to requiring a legacy blanket permission.
+     */
+    private const FIELD_PERMISSIONS = [
+        'first_name' => 'shareholder_change_requests.edit_name',
+        'last_name' => 'shareholder_change_requests.edit_name',
+        'middle_name' => 'shareholder_change_requests.edit_name',
+        'email' => 'shareholder_change_requests.edit_email',
+        'phone' => 'shareholder_change_requests.edit_phone',
+        'date_of_birth' => 'shareholder_change_requests.edit_date_of_birth',
+        'sex' => 'shareholder_change_requests.edit_gender',
+        'nin' => 'shareholder_change_requests.edit_identification',
+        'bvn' => 'shareholder_change_requests.edit_identification',
+        'rc_number' => 'shareholder_change_requests.edit_identification',
+        'tax_id' => 'shareholder_change_requests.edit_identification',
+        'address' => 'shareholder_change_requests.edit_address',
+    ];
+
+    /**
+     * Holding any of these still grants full access to every category, so
+     * existing role assignments keep working exactly as before — the new
+     * per-field permissions are an additional, narrower way in, not a
+     * replacement for whoever already has blanket access.
+     */
+    private const LEGACY_BYPASS_PERMISSIONS = ['shareholder_change_requests.create', 'shareholders.edit'];
+
     public function __construct(
         protected ShareholderChangeRequestReferenceService $referenceService,
         protected ShareholderChangeRequestNotificationService $notificationService
@@ -31,11 +60,17 @@ class ShareholderChangeRequestService
 
     public function submitProfileUpdate(
         Shareholder $shareholder,
+        AdminUser $actor,
         array $proposedFields,
         ?array $proposedAddress,
-        ?string $reason,
-        int $submittedBy
+        ?string $reason
     ): ShareholderChangeRequest {
+        $fieldKeys = array_keys($proposedFields);
+        if ($proposedAddress !== null) {
+            $fieldKeys[] = 'address';
+        }
+        $this->assertFieldPermissions($actor, $fieldKeys);
+
         $this->guardNoPendingRequest($shareholder->id, self::PROFILE_REQUEST_TYPES);
 
         $payloadOld = collect($proposedFields)->keys()->mapWithKeys(fn ($field) => [$field => $shareholder->{$field}])->toArray();
@@ -53,7 +88,35 @@ class ShareholderChangeRequestService
 
         $requestType = $this->inferProfileRequestType($proposedFields, $proposedAddress !== null);
 
-        return $this->submit($shareholder, $requestType, $payloadOld, $payloadNew, $reason, $submittedBy);
+        return $this->submit($shareholder, $requestType, $payloadOld, $payloadNew, $reason, $actor->id);
+    }
+
+    /**
+     * Enforces PT-191's per-category edit permissions for every field in a
+     * profile-update submission, regardless of which controller/route it
+     * came through — this is the one place that check happens.
+     */
+    private function assertFieldPermissions(AdminUser $actor, array $fieldKeys): void
+    {
+        foreach (self::LEGACY_BYPASS_PERMISSIONS as $bypass) {
+            if ($actor->can($bypass)) {
+                return;
+            }
+        }
+
+        $unauthorized = [];
+        foreach ($fieldKeys as $field) {
+            $permission = self::FIELD_PERMISSIONS[$field] ?? null;
+            if ($permission === null || ! $actor->can($permission)) {
+                $unauthorized[] = $field;
+            }
+        }
+
+        if (! empty($unauthorized)) {
+            throw new AuthorizationException(
+                'You do not have permission to edit: '.implode(', ', $unauthorized)
+            );
+        }
     }
 
     public function submitMandateChange(

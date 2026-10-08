@@ -10,6 +10,7 @@ use App\Models\AdminUser;
 use App\Models\Shareholder;
 use App\Models\ShareholderChangeRequest;
 use App\Services\ShareholderChangeRequestService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -31,10 +32,10 @@ class ShareholderChangeRequestController extends Controller
         try {
             $changeRequest = $this->changeRequestService->submitProfileUpdate(
                 $shareholder,
+                $request->user(),
                 $request->proposedFields(),
                 $request->proposedAddress(),
-                $request->validated('reason'),
-                $request->user()->id
+                $request->validated('reason')
             );
 
             return response()->json([
@@ -42,6 +43,11 @@ class ShareholderChangeRequestController extends Controller
                 'message' => 'Pending shareholder update submitted for approval',
                 'data' => $this->formatChangeRequest($changeRequest),
             ], 201);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,

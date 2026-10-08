@@ -516,11 +516,16 @@ class ShareholderController extends Controller
         try {
             $changeRequest = $this->changeRequestService->submitProfileUpdate(
                 $shareholder,
+                $request->user(),
                 $request->validated(),
                 null,
-                null,
-                $request->user()->id
+                null
             );
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,

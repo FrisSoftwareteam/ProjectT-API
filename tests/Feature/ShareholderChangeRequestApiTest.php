@@ -700,6 +700,187 @@ class ShareholderChangeRequestApiTest extends TestCase
             ->assertStatus(422);
     }
 
+    // -----------------------------------------------------------------
+    // PT-191: per-category edit permissions
+    // -----------------------------------------------------------------
+
+    public function test_user_with_only_name_permission_can_submit_a_name_change(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+            ])
+            ->assertCreated();
+    }
+
+    public function test_user_with_only_name_permission_cannot_submit_an_address_change(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'address' => ['address_line1' => '10 Downing Street'],
+            ])
+            ->assertStatus(403);
+
+        $this->assertDatabaseMissing('shareholder_change_requests', ['shareholder_id' => $shareholder->id]);
+    }
+
+    public function test_the_same_restriction_applies_through_the_direct_update_route_too(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => $shareholder->email,
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+                'date_of_birth' => '1990-01-01',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_user_with_name_and_address_permissions_can_submit_both_together(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-and-address@example.com', [
+            'shareholder_change_requests.edit_name',
+            'shareholder_change_requests.edit_address',
+        ]);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+                'address' => ['address_line1' => '10 Downing Street'],
+            ])
+            ->assertCreated();
+    }
+
+    public function test_user_with_no_permissions_cannot_submit_any_profile_update(): void
+    {
+        $actor = $this->createAdmin('no-permissions@example.com');
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'new.email@example.com',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_legacy_blanket_permission_still_allows_every_category(): void
+    {
+        $actor = $this->createAdminWithPermission('legacy@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+                'email' => 'new.email@example.com',
+                'phone' => '08011112222',
+                'date_of_birth' => '1990-01-01',
+                'sex' => 'male',
+                'nin' => '12345678901',
+                'address' => ['address_line1' => '10 Downing Street'],
+            ])
+            ->assertCreated();
+    }
+
+    public function test_identification_fields_are_gated_by_their_own_permission(): void
+    {
+        $actor = $this->createAdminWithPermissions('id-editor@example.com', ['shareholder_change_requests.edit_identification']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'bvn' => '12345678901',
+            ])
+            ->assertCreated();
+
+        $otherShareholder = $this->createShareholder('two');
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$otherShareholder->id}/change-requests", [
+                'email' => 'should.fail@example.com',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_unmapped_field_requires_the_blanket_permission_even_with_other_categories_granted(): void
+    {
+        // next_of_kin_* has no dedicated category permission of its own, so
+        // holding every OTHER category still isn't enough for it.
+        $actor = $this->createAdminWithPermissions('no-next-of-kin-perm@example.com', [
+            'shareholder_change_requests.edit_name',
+            'shareholder_change_requests.edit_address',
+            'shareholder_change_requests.edit_date_of_birth',
+            'shareholder_change_requests.edit_gender',
+            'shareholder_change_requests.edit_email',
+            'shareholder_change_requests.edit_phone',
+            'shareholder_change_requests.edit_identification',
+        ]);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'next_of_kin_name' => 'Someone Else',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_category_permitted_submission_still_goes_through_normal_approval(): void
+    {
+        $maker = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $originalName = $shareholder->first_name;
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+            ])
+            ->assertCreated();
+
+        // Stays pending — the live record is untouched until approval.
+        $shareholder->refresh();
+        $this->assertSame($originalName, $shareholder->first_name);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+
+        $shareholder->refresh();
+        $this->assertSame('Renamed', $shareholder->first_name);
+    }
+
+    private function createAdminWithPermissions(string $email, array $permissions): AdminUser
+    {
+        $actor = $this->createAdmin($email);
+        foreach ($permissions as $permission) {
+            $actor->givePermissionTo(Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']));
+        }
+
+        return $actor;
+    }
+
     private function createAdmin(string $email): AdminUser
     {
         return AdminUser::query()->create([

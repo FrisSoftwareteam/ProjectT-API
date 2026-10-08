@@ -305,7 +305,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
 
     public function test_direct_shareholder_update_now_submits_a_pending_request_instead_of_applying(): void
     {
-        $maker = $this->createAdmin('maker@example.com');
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
         $shareholder = $this->createShareholder('one');
         $originalEmail = $shareholder->email;
 
@@ -334,7 +334,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
     {
         Notification::fake();
 
-        $maker = $this->createAdmin('maker@example.com');
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
         $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
         $shareholder = $this->createShareholder('one');
 
@@ -375,7 +375,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
     {
         Notification::fake();
 
-        $maker = $this->createAdmin('maker@example.com');
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
         $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
         $shareholder = $this->createShareholder('one');
 

@@ -162,7 +162,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/{shareholder}/profile-picture', [ShareholderController::class, 'uploadProfilePicture'])->middleware('permission:shareholders.edit');
         Route::delete('/{shareholder}/profile-picture', [ShareholderController::class, 'deleteProfilePicture'])->middleware('permission:shareholders.edit');
         Route::get('/{shareholder}', [ShareholderController::class, 'show'])->middleware('permission:shareholders.view');
-        Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit');
+        Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit|shareholder_change_requests.create|shareholder_change_requests.edit_name|shareholder_change_requests.edit_address|shareholder_change_requests.edit_date_of_birth|shareholder_change_requests.edit_gender|shareholder_change_requests.edit_email|shareholder_change_requests.edit_phone|shareholder_change_requests.edit_identification');
         Route::delete('/{shareholder}', [ShareholderController::class, 'destroy'])->middleware('permission:shareholders.delete');
         Route::post('/{shareholder}/addresses', [ShareholderController::class, 'addAddress'])->middleware('permission:shareholders.edit');
         Route::put('/{shareholder}/addresses/{address}', [ShareholderController::class, 'updateAddress'])->middleware('permission:shareholders.edit');
@@ -171,7 +171,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::post('/{shareholder}/identities', [ShareholderController::class, 'shareholderIdentityCreate'])->middleware('permission:shareholder_identities.create');
         Route::put('/{shareholder}/identities/{identity}', [ShareholderController::class, 'shareholderIdentityUpdate'])->middleware('permission:shareholder_identities.edit');
         Route::post('/{shareholder}/register-accounts', [ShareholderController::class, 'addRegisterAccount'])->middleware('permission:shareholders.edit');
-        Route::post('/{shareholder}/change-requests', [ShareholderChangeRequestController::class, 'store'])->middleware('permission:shareholder_change_requests.create');
+        Route::post('/{shareholder}/change-requests', [ShareholderChangeRequestController::class, 'store'])->middleware('permission:shareholder_change_requests.create|shareholders.edit|shareholder_change_requests.edit_name|shareholder_change_requests.edit_address|shareholder_change_requests.edit_date_of_birth|shareholder_change_requests.edit_gender|shareholder_change_requests.edit_email|shareholder_change_requests.edit_phone|shareholder_change_requests.edit_identification');
 
         // Share posting endpoints (inflow/outflow)
         Route::post('/{shareholder}/shares/allocate', [ShareAllocationController::class, 'allocate'])->middleware('permission:shares.create');
