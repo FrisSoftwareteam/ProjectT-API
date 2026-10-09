@@ -73,6 +73,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
             $table->json('payload_old');
             $table->json('payload_new');
             $table->string('reason')->nullable();
+            $table->unsignedBigInteger('resubmitted_from_id')->nullable();
             $table->string('status')->default('submitted');
             $table->string('control_no', 40);
             $table->unsignedBigInteger('submitted_by');
@@ -449,6 +450,126 @@ class ShareholderUpdateApprovalApiTest extends TestCase
             ->assertOk();
 
         Notification::assertSentTo($maker, ShareholderChangeRequestNotification::class);
+    }
+
+    public function test_approving_a_change_request_also_notifies_other_approvers_so_it_leaves_their_queue(): void
+    {
+        Notification::fake();
+
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $otherApprover = $this->createAdminWithPermission('other-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'decide.two@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $changeRequestId = $submit->json('data.id');
+
+        Notification::fake();
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequestId}/approve", [])
+            ->assertOk();
+
+        Notification::assertSentTo($maker, ShareholderChangeRequestNotification::class, function ($notification) use ($maker) {
+            return str_contains($notification->toArray($maker)['message'], 'was approved by');
+        });
+        Notification::assertSentTo($otherApprover, ShareholderChangeRequestNotification::class);
+        Notification::assertNotSentTo($approver, ShareholderChangeRequestNotification::class);
+    }
+
+    public function test_rejecting_a_change_request_includes_the_approvers_remarks_in_the_message(): void
+    {
+        Notification::fake();
+
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'decide.three@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $changeRequestId = $submit->json('data.id');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequestId}/reject", [
+                'remarks' => 'Email does not match the ID on file',
+            ])
+            ->assertOk();
+
+        Notification::assertSentTo($maker, ShareholderChangeRequestNotification::class, function ($notification) use ($maker) {
+            return str_contains(
+                $notification->toArray($maker)['message'],
+                'was returned: Email does not match the ID on file'
+            );
+        });
+    }
+
+    public function test_resubmitting_a_change_request_notifies_approvers_not_the_submitter(): void
+    {
+        Notification::fake();
+
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $firstSubmit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'resubmit.one@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $originalId = $firstSubmit->json('data.id');
+        $originalControlNo = $firstSubmit->json('data.control_no');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$originalId}/reject", [
+                'remarks' => 'Please confirm the email with the shareholder first',
+            ])
+            ->assertOk();
+
+        Notification::fake();
+
+        $resubmit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'resubmit.one.corrected@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+                'resubmitted_from_id' => $originalId,
+            ])
+            ->assertStatus(202);
+
+        $resubmit->assertJsonPath('data.resubmitted_from_id', $originalId);
+
+        Notification::assertSentTo($approver, ShareholderChangeRequestNotification::class, function ($notification) use ($approver, $originalControlNo) {
+            $message = $notification->toArray($approver)['message'];
+
+            return str_contains($message, 'was corrected and resubmitted')
+                && str_contains($message, "(was {$originalControlNo})");
+        });
+        Notification::assertNotSentTo($maker, ShareholderChangeRequestNotification::class);
     }
 
     private function mandatePayload(array $overrides = []): array

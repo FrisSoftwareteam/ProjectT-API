@@ -19,6 +19,7 @@ class ShareholderChangeRequest extends Model
         'payload_old',
         'payload_new',
         'reason',
+        'resubmitted_from_id',
         'status',
         'control_no',
         'submitted_by',
@@ -55,5 +56,15 @@ class ShareholderChangeRequest extends Model
     public function approvals()
     {
         return $this->hasMany(ShareholderChangeApproval::class, 'change_request_id');
+    }
+
+    public function resubmittedFrom()
+    {
+        return $this->belongsTo(self::class, 'resubmitted_from_id');
+    }
+
+    public function resubmittedAs()
+    {
+        return $this->hasOne(self::class, 'resubmitted_from_id');
     }
 }

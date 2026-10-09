@@ -77,6 +77,7 @@ class ShareholderChangeRequestStoreRequest extends FormRequest
             'address.country' => 'nullable|string|max:100',
 
             'reason' => 'nullable|string|max:255',
+            'resubmitted_from_id' => 'sometimes|nullable|integer|exists:shareholder_change_requests,id',
         ];
     }
 

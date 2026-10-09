@@ -92,6 +92,7 @@ class ShareholderChangeRequestApiTest extends TestCase
             $table->json('payload_old');
             $table->json('payload_new');
             $table->string('reason')->nullable();
+            $table->unsignedBigInteger('resubmitted_from_id')->nullable();
             $table->string('status')->default('submitted');
             $table->string('control_no', 40);
             $table->foreignId('submitted_by');
@@ -575,6 +576,102 @@ class ShareholderChangeRequestApiTest extends TestCase
             ->assertJsonPath('data.submitter.id', $actor->id)
             ->assertJsonPath('data.submitter.name', 'Test Admin')
             ->assertJsonPath('data.submitter.email', 'maker@example.com');
+    }
+
+    public function test_direct_update_route_returns_the_reason_that_was_submitted(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('one');
+
+        $response = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'reason.check@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+                'reason' => 'Shareholder confirmed new email by phone',
+            ]);
+
+        $response->assertStatus(202)
+            ->assertJsonPath('data.reason', 'Shareholder confirmed new email by phone');
+
+        $this->assertDatabaseHas('shareholder_change_requests', [
+            'id' => $response->json('data.id'),
+            'reason' => 'Shareholder confirmed new email by phone',
+        ]);
+    }
+
+    public function test_resubmitting_via_the_store_endpoint_links_to_the_original_and_is_visible_both_ways(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermissions('approver@example.com', [
+            'shareholder_change_requests.approve',
+            'shareholder_change_requests.view',
+        ]);
+        $shareholder = $this->createShareholder('one');
+
+        $original = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'first.attempt@example.com',
+            ])
+            ->assertCreated();
+        $originalId = $original->json('data.id');
+        $originalControlNo = $original->json('data.control_no');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$originalId}/reject", [
+                'remarks' => 'Email looks like a typo, please confirm',
+            ])
+            ->assertOk();
+
+        $resubmission = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'corrected.attempt@example.com',
+                'resubmitted_from_id' => $originalId,
+            ])
+            ->assertCreated();
+
+        $resubmission->assertJsonPath('data.resubmitted_from_id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.control_no', $originalControlNo);
+
+        $newId = $resubmission->json('data.id');
+        $newControlNo = $resubmission->json('data.control_no');
+
+        // The reverse link ("Resubmitted from CR-...") must also show up on the original.
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->getJson("/api/shareholder-change-requests/{$originalId}")
+            ->assertOk()
+            ->assertJsonPath('data.resubmitted_as.id', $newId)
+            ->assertJsonPath('data.resubmitted_as.control_no', $newControlNo);
+    }
+
+    public function test_resubmitted_from_id_must_belong_to_the_same_shareholder(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $shareholderOne = $this->createShareholder('one');
+        $shareholderTwo = $this->createShareholder('two');
+
+        $unrelated = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholderTwo->id,
+            'status' => 'rejected',
+            'submitted_by' => $actor->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholderOne->id}/change-requests", [
+                'email' => 'cross.shareholder@example.com',
+                'resubmitted_from_id' => $unrelated->id,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['resubmitted_from_id']);
     }
 
     public function test_approver_name_appears_on_the_change_request_after_a_decision(): void

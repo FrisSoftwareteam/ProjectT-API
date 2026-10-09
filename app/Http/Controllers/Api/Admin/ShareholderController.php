@@ -513,13 +513,19 @@ class ShareholderController extends Controller
             ], 422);
         }
 
+        $extra = $request->validate([
+            'reason' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'resubmitted_from_id' => ['sometimes', 'nullable', 'integer', 'exists:shareholder_change_requests,id'],
+        ]);
+
         try {
             $changeRequest = $this->changeRequestService->submitProfileUpdate(
                 $shareholder,
                 $request->user(),
                 $request->validated(),
                 null,
-                null
+                $extra['reason'] ?? null,
+                $extra['resubmitted_from_id'] ?? null
             );
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             return response()->json([
@@ -547,6 +553,7 @@ class ShareholderController extends Controller
             $validated = $request->validate([
                 'profile_picture' => ['required', 'image', 'mimes:jpg,jpeg,png,webp', 'max:2048'],
                 'reason' => ['nullable', 'string', 'max:255'],
+                'resubmitted_from_id' => ['nullable', 'integer', 'exists:shareholder_change_requests,id'],
             ]);
 
             $path = $validated['profile_picture']->store(
@@ -559,7 +566,8 @@ class ShareholderController extends Controller
                     $shareholder,
                     Storage::disk('public')->url($path),
                     $validated['reason'] ?? null,
-                    $request->user()->id
+                    $request->user()->id,
+                    $validated['resubmitted_from_id'] ?? null
                 );
             } catch (ValidationException $e) {
                 Storage::disk('public')->delete($path);
@@ -584,6 +592,7 @@ class ShareholderController extends Controller
     {
         $validated = $request->validate([
             'reason' => ['nullable', 'string', 'max:255'],
+            'resubmitted_from_id' => ['nullable', 'integer', 'exists:shareholder_change_requests,id'],
         ]);
 
         try {
@@ -591,7 +600,8 @@ class ShareholderController extends Controller
                 $shareholder,
                 null,
                 $validated['reason'] ?? null,
-                $request->user()->id
+                $request->user()->id,
+                $validated['resubmitted_from_id'] ?? null
             );
         } catch (ValidationException $e) {
             return response()->json([
@@ -648,7 +658,8 @@ class ShareholderController extends Controller
                 null,
                 $request->proposedFields(),
                 $request->validated('reason'),
-                $request->user()->id
+                $request->user()->id,
+                $request->validated('resubmitted_from_id')
             );
         } catch (ValidationException $e) {
             return response()->json([
@@ -678,7 +689,8 @@ class ShareholderController extends Controller
                 $mandate,
                 $request->proposedFields(),
                 $request->validated('reason'),
-                $request->user()->id
+                $request->user()->id,
+                $request->validated('resubmitted_from_id')
             );
         } catch (ValidationException $e) {
             return response()->json([
@@ -705,6 +717,7 @@ class ShareholderController extends Controller
         $validated = $request->validate([
             'chn' => ['nullable', 'string', 'max:50'],
             'reason' => ['nullable', 'string', 'max:255'],
+            'resubmitted_from_id' => ['nullable', 'integer', 'exists:shareholder_change_requests,id'],
         ]);
 
         try {
@@ -713,7 +726,8 @@ class ShareholderController extends Controller
                 $registerAccount,
                 $request->user(),
                 $validated['chn'] ?? null,
-                $validated['reason'] ?? null
+                $validated['reason'] ?? null,
+                $validated['resubmitted_from_id'] ?? null
             );
         } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
             return response()->json([
@@ -765,7 +779,8 @@ class ShareholderController extends Controller
                 null,
                 $request->proposedFields(),
                 $request->validated('reason'),
-                $request->user()->id
+                $request->user()->id,
+                $request->validated('resubmitted_from_id')
             );
         } catch (ValidationException $e) {
             return response()->json([
@@ -806,7 +821,8 @@ class ShareholderController extends Controller
                 $shareholderIdentity,
                 $request->proposedFields(),
                 $request->validated('reason'),
-                $request->user()->id
+                $request->user()->id,
+                $request->validated('resubmitted_from_id')
             );
         } catch (ValidationException $e) {
             return response()->json([

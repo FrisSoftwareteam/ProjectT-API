@@ -32,6 +32,7 @@ class ShareholderMandateChangeRequest extends FormRequest
             'account_number' => 'required|string|max:20',
             'bvn' => 'nullable|string|max:20',
             'reason' => 'nullable|string|max:255',
+            'resubmitted_from_id' => 'nullable|integer|exists:shareholder_change_requests,id',
         ];
     }
 

@@ -64,7 +64,8 @@ class ShareholderChangeRequestService
         AdminUser $actor,
         array $proposedFields,
         ?array $proposedAddress,
-        ?string $reason
+        ?string $reason,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $fieldKeys = array_keys($proposedFields);
         if ($proposedAddress !== null) {
@@ -89,7 +90,7 @@ class ShareholderChangeRequestService
 
         $requestType = $this->inferProfileRequestType($proposedFields, $proposedAddress !== null);
 
-        return $this->submit($shareholder, $requestType, $payloadOld, $payloadNew, $reason, $actor->id);
+        return $this->submit($shareholder, $requestType, $payloadOld, $payloadNew, $reason, $actor->id, $resubmittedFromId);
     }
 
     /**
@@ -142,7 +143,8 @@ class ShareholderChangeRequestService
         ?ShareholderMandate $existingMandate,
         array $proposedFields,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['bank_mandate']);
 
@@ -155,7 +157,7 @@ class ShareholderChangeRequestService
         $payloadNew = $proposedFields;
         $payloadNew['mandate_id'] = $existingMandate?->id;
 
-        return $this->submit($shareholder, 'bank_mandate', $payloadOld, $payloadNew, $reason, $submittedBy);
+        return $this->submit($shareholder, 'bank_mandate', $payloadOld, $payloadNew, $reason, $submittedBy, $resubmittedFromId);
     }
 
     public function submitChnChange(
@@ -163,7 +165,8 @@ class ShareholderChangeRequestService
         ShareholderRegisterAccount $registerAccount,
         AdminUser $actor,
         ?string $newChn,
-        ?string $reason
+        ?string $reason,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->assertHasPermission($actor, 'shareholder_change_requests.edit_chn', 'CHN');
         $this->guardNoPendingRequest($shareholder->id, ['chn_update']);
@@ -174,7 +177,8 @@ class ShareholderChangeRequestService
             ['chn' => $registerAccount->chn, 'register_account_id' => $registerAccount->id],
             ['chn' => $newChn, 'register_account_id' => $registerAccount->id],
             $reason,
-            $actor->id
+            $actor->id,
+            $resubmittedFromId
         );
     }
 
@@ -183,7 +187,8 @@ class ShareholderChangeRequestService
         ?ShareholderIdentity $existingIdentity,
         array $proposedFields,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['identity_change']);
 
@@ -196,7 +201,7 @@ class ShareholderChangeRequestService
         $payloadNew = $proposedFields;
         $payloadNew['identity_id'] = $existingIdentity?->id;
 
-        return $this->submit($shareholder, 'identity_change', $payloadOld, $payloadNew, $reason, $submittedBy);
+        return $this->submit($shareholder, 'identity_change', $payloadOld, $payloadNew, $reason, $submittedBy, $resubmittedFromId);
     }
 
     /**
@@ -206,7 +211,8 @@ class ShareholderChangeRequestService
         Shareholder $shareholder,
         ?string $pendingPictureUrl,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['profile_picture_change']);
 
@@ -222,7 +228,8 @@ class ShareholderChangeRequestService
             ['profile_picture' => $shareholder->profile_picture],
             ['profile_picture' => $pendingPictureUrl],
             $reason,
-            $submittedBy
+            $submittedBy,
+            $resubmittedFromId
         );
     }
 
@@ -261,7 +268,7 @@ class ShareholderChangeRequestService
             return $result;
         });
 
-        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'approved');
+        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'approved', $remarks);
 
         return $result;
     }
@@ -294,7 +301,7 @@ class ShareholderChangeRequestService
             }
         });
 
-        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'rejected');
+        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'rejected', $remarks);
     }
 
     public function requestMoreInfo(
@@ -423,20 +430,38 @@ class ShareholderChangeRequestService
         array $payloadOld,
         array $payloadNew,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
+        if ($resubmittedFromId !== null) {
+            $belongsToShareholder = ShareholderChangeRequest::where('id', $resubmittedFromId)
+                ->where('shareholder_id', $shareholder->id)
+                ->exists();
+
+            if (! $belongsToShareholder) {
+                throw ValidationException::withMessages([
+                    'resubmitted_from_id' => ['The referenced change request does not belong to this shareholder.'],
+                ]);
+            }
+        }
+
         $changeRequest = ShareholderChangeRequest::create([
             'shareholder_id' => $shareholder->id,
             'request_type' => $requestType,
             'payload_old' => $payloadOld,
             'payload_new' => $payloadNew,
             'reason' => $reason,
+            'resubmitted_from_id' => $resubmittedFromId,
             'status' => 'submitted',
             'control_no' => $this->referenceService->generate(),
             'submitted_by' => $submittedBy,
         ]);
 
-        $this->notificationService->submitted($changeRequest, $submittedBy);
+        if ($resubmittedFromId !== null) {
+            $this->notificationService->resubmitted($changeRequest, $submittedBy);
+        } else {
+            $this->notificationService->submitted($changeRequest, $submittedBy);
+        }
 
         return $changeRequest;
     }
