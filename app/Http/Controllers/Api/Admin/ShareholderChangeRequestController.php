@@ -347,12 +347,6 @@ class ShareholderChangeRequestController extends Controller
 
         $latestDecision = $changeRequest->approvals->sortByDesc('decided_at')->first();
 
-        $resubmittedFrom = $changeRequest->resubmitted_from_id
-            ? ShareholderChangeRequest::where('id', $changeRequest->resubmitted_from_id)->select('id', 'control_no')->first()
-            : null;
-
-        $resubmittedAs = ShareholderChangeRequest::where('resubmitted_from_id', $changeRequest->id)->select('id', 'control_no')->first();
-
         return [
             'id' => $changeRequest->id,
             'shareholder_id' => $changeRequest->shareholder_id,
@@ -362,8 +356,8 @@ class ShareholderChangeRequestController extends Controller
             'payload_new' => $changeRequest->payload_new,
             'reason' => $changeRequest->reason,
             'resubmitted_from_id' => $changeRequest->resubmitted_from_id,
-            'resubmitted_from' => $resubmittedFrom ? ['id' => $resubmittedFrom->id, 'control_no' => $resubmittedFrom->control_no] : null,
-            'resubmitted_as' => $resubmittedAs ? ['id' => $resubmittedAs->id, 'control_no' => $resubmittedAs->control_no] : null,
+            'resubmitted_from' => $changeRequest->resubmitted_from,
+            'resubmitted_as' => $changeRequest->resubmitted_as,
             'status' => $changeRequest->status,
             'control_no' => $changeRequest->control_no,
             'submitted_by' => $changeRequest->submitted_by,

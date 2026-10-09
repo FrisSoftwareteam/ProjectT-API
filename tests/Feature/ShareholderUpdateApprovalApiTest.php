@@ -184,6 +184,41 @@ class ShareholderUpdateApprovalApiTest extends TestCase
         $this->assertDatabaseMissing('shareholder_bank_mandates', ['shareholder_id' => $shareholder->id]);
     }
 
+    public function test_resubmitting_a_mandate_change_returns_the_expanded_link_on_the_raw_response(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve_mandate');
+        $shareholder = $this->createShareholder('one');
+
+        $firstAttempt = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/mandates", $this->mandatePayload());
+        $originalId = $firstAttempt->json('data.id');
+        $originalControlNo = $firstAttempt->json('data.control_no');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$originalId}/reject", [
+                'remarks' => 'Account name does not match',
+            ])
+            ->assertOk();
+
+        // The mandate endpoints return the raw model, not the dedicated
+        // controller's formatChangeRequest() — this is the gap that made the
+        // link appear on show()/index() but not here, now fixed at the
+        // model level with appended attributes.
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/mandates", $this->mandatePayload([
+                'account_name' => 'Corrected Account Name',
+                'resubmitted_from_id' => $originalId,
+            ]))
+            ->assertStatus(202)
+            ->assertJsonPath('data.resubmitted_from_id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.control_no', $originalControlNo);
+    }
+
     public function test_approving_a_new_mandate_request_creates_the_mandate(): void
     {
         $maker = $this->createAdmin('maker@example.com');
