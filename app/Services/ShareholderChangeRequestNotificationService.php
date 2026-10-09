@@ -20,39 +20,92 @@ class ShareholderChangeRequestNotificationService
             $actorId,
             'SHAREHOLDER_CHANGE_APPROVAL_REQUIRED',
             'Shareholder update pending approval',
-            "A {$this->typeLabel($changeRequest)} update for {$this->shareholderLabel($changeRequest)} ({$changeRequest->control_no}) is awaiting your approval."
+            "{$changeRequest->control_no} for {$this->shareholderLabel($changeRequest)} needs your review."
         );
     }
 
-    public function decided(ShareholderChangeRequest $changeRequest, int $actorId, string $decision): void
+    /**
+     * Approved → notifies both the initiator and the other approvers (so it
+     * leaves their queue too); rejected/returned → notifies the initiator
+     * only, with the approver's remarks folded into the message.
+     */
+    public function decided(ShareholderChangeRequest $changeRequest, int $actorId, string $decision, ?string $remarks = null): void
     {
+        $controlNo = $changeRequest->control_no;
+        $shareholderLabel = $this->shareholderLabel($changeRequest);
+        $event = 'SHAREHOLDER_CHANGE_'.strtoupper($decision);
+
+        if ($decision === 'approved') {
+            $this->sendSafely(
+                fn () => $this->submitterOnly($changeRequest)->merge($this->approvers($changeRequest))->unique('id')->values(),
+                $changeRequest,
+                $actorId,
+                $event,
+                'Shareholder update approved',
+                "{$controlNo} for {$shareholderLabel} was approved by {$this->actorName($actorId)}."
+            );
+
+            return;
+        }
+
+        $message = "{$controlNo} for {$shareholderLabel} was returned".($remarks ? ": {$remarks}" : '').'.';
+
         $this->sendSafely(
             fn () => $this->submitterOnly($changeRequest),
             $changeRequest,
             $actorId,
-            'SHAREHOLDER_CHANGE_'.strtoupper($decision),
-            'Shareholder update '.$decision,
-            "Your {$this->typeLabel($changeRequest)} update for {$this->shareholderLabel($changeRequest)} ({$changeRequest->control_no}) was {$decision}."
+            $event,
+            'Shareholder update returned',
+            $message
         );
     }
 
     public function infoRequested(ShareholderChangeRequest $changeRequest, int $actorId): void
     {
+        $note = $changeRequest->info_requested_note;
+        $message = "More information needed on {$changeRequest->control_no}".($note ? ": {$note}" : '').'.';
+
         $this->sendSafely(
             fn () => $this->submitterOnly($changeRequest),
             $changeRequest,
             $actorId,
             'SHAREHOLDER_CHANGE_INFO_REQUESTED',
             'More information requested',
-            "More information was requested on your {$this->typeLabel($changeRequest)} update for {$this->shareholderLabel($changeRequest)} ({$changeRequest->control_no})."
+            $message
+        );
+    }
+
+    /**
+     * Fired instead of submitted() when a submission carries a
+     * resubmitted_from_id: approvers need to know a corrected version of a
+     * previously returned request has come back in.
+     */
+    public function resubmitted(ShareholderChangeRequest $changeRequest, int $actorId): void
+    {
+        $oldControlNo = $changeRequest->resubmitted_from_id
+            ? ShareholderChangeRequest::where('id', $changeRequest->resubmitted_from_id)->value('control_no')
+            : null;
+
+        $message = "{$changeRequest->control_no} for {$this->shareholderLabel($changeRequest)} was corrected and resubmitted"
+            .($oldControlNo ? " (was {$oldControlNo})" : '').'.';
+
+        $this->sendSafely(
+            fn () => $this->approvers($changeRequest),
+            $changeRequest,
+            $actorId,
+            'SHAREHOLDER_CHANGE_RESUBMITTED',
+            'Shareholder update resubmitted',
+            $message
         );
     }
 
     private function approvers(ShareholderChangeRequest $changeRequest): Collection
     {
-        $permission = $changeRequest->request_type === 'bank_mandate'
-            ? 'shareholder_change_requests.approve_mandate'
-            : 'shareholder_change_requests.approve';
+        $permission = match ($changeRequest->request_type) {
+            'bank_mandate' => 'shareholder_change_requests.approve_mandate',
+            'chn_update' => 'shareholder_change_requests.approve_chn',
+            default => 'shareholder_change_requests.approve',
+        };
 
         return AdminUser::query()->where('is_active', true)->permission($permission)->get();
     }
@@ -100,11 +153,6 @@ class ShareholderChangeRequestNotificationService
         }
     }
 
-    private function typeLabel(ShareholderChangeRequest $changeRequest): string
-    {
-        return str_replace('_', ' ', $changeRequest->request_type);
-    }
-
     private function shareholderLabel(ShareholderChangeRequest $changeRequest): string
     {
         // Deliberately a scalar lookup, not $changeRequest->shareholder: touching that
@@ -113,5 +161,13 @@ class ShareholderChangeRequestNotificationService
         $fullName = Shareholder::where('id', $changeRequest->shareholder_id)->value('full_name');
 
         return $fullName ?? "shareholder #{$changeRequest->shareholder_id}";
+    }
+
+    private function actorName(int $actorId): string
+    {
+        $user = AdminUser::find($actorId);
+        $name = $user ? trim("{$user->first_name} {$user->last_name}") : '';
+
+        return $name !== '' ? $name : 'an approver';
     }
 }

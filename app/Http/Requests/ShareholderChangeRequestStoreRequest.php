@@ -21,6 +21,10 @@ class ShareholderChangeRequestStoreRequest extends FormRequest
         'next_of_kin_name',
         'next_of_kin_phone',
         'next_of_kin_relationship',
+        'nin',
+        'bvn',
+        'rc_number',
+        'tax_id',
     ];
 
     public function authorize(): bool
@@ -58,6 +62,10 @@ class ShareholderChangeRequestStoreRequest extends FormRequest
             'next_of_kin_name' => 'sometimes|nullable|string|max:255',
             'next_of_kin_phone' => 'sometimes|nullable|string|max:32',
             'next_of_kin_relationship' => 'sometimes|nullable|string|max:100',
+            'nin' => 'sometimes|nullable|string|max:20',
+            'bvn' => 'sometimes|nullable|string|max:20',
+            'rc_number' => 'sometimes|nullable|string|max:50',
+            'tax_id' => 'sometimes|nullable|string|max:50',
 
             // Proposed change to the shareholder's primary residential address.
             'address' => 'sometimes|array',
@@ -69,6 +77,7 @@ class ShareholderChangeRequestStoreRequest extends FormRequest
             'address.country' => 'nullable|string|max:100',
 
             'reason' => 'nullable|string|max:255',
+            'resubmitted_from_id' => 'sometimes|nullable|integer|exists:shareholder_change_requests,id',
         ];
     }
 

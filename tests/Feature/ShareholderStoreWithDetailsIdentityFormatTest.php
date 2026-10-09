@@ -55,6 +55,7 @@ class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
             $table->json('payload_old');
             $table->json('payload_new');
             $table->string('reason')->nullable();
+            $table->unsignedBigInteger('resubmitted_from_id')->nullable();
             $table->string('status')->default('submitted');
             $table->string('control_no', 40);
             $table->unsignedBigInteger('submitted_by');

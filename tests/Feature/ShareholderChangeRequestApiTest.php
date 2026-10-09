@@ -68,6 +68,23 @@ class ShareholderChangeRequestApiTest extends TestCase
             $table->timestamps();
         });
 
+        Schema::create('registers', function (Blueprint $table) {
+            $table->id();
+            $table->string('register_code')->unique();
+            $table->timestamps();
+        });
+
+        Schema::create('shareholder_register_accounts', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('shareholder_id');
+            $table->foreignId('register_id');
+            $table->string('shareholder_no')->nullable();
+            $table->string('chn')->nullable();
+            $table->string('cscs_account_no')->nullable();
+            $table->string('status')->default('active');
+            $table->timestamps();
+        });
+
         Schema::create('shareholder_change_requests', function (Blueprint $table) {
             $table->id();
             $table->foreignId('shareholder_id');
@@ -75,6 +92,7 @@ class ShareholderChangeRequestApiTest extends TestCase
             $table->json('payload_old');
             $table->json('payload_new');
             $table->string('reason')->nullable();
+            $table->unsignedBigInteger('resubmitted_from_id')->nullable();
             $table->string('status')->default('submitted');
             $table->string('control_no', 40);
             $table->foreignId('submitted_by');
@@ -146,6 +164,8 @@ class ShareholderChangeRequestApiTest extends TestCase
         Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholder_cautions');
         Schema::dropIfExists('shareholder_addresses');
+        Schema::dropIfExists('shareholder_register_accounts');
+        Schema::dropIfExists('registers');
         Schema::dropIfExists('shareholders');
         Schema::dropIfExists('admin_users');
 
@@ -558,6 +578,102 @@ class ShareholderChangeRequestApiTest extends TestCase
             ->assertJsonPath('data.submitter.email', 'maker@example.com');
     }
 
+    public function test_direct_update_route_returns_the_reason_that_was_submitted(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('one');
+
+        $response = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'reason.check@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+                'reason' => 'Shareholder confirmed new email by phone',
+            ]);
+
+        $response->assertStatus(202)
+            ->assertJsonPath('data.reason', 'Shareholder confirmed new email by phone');
+
+        $this->assertDatabaseHas('shareholder_change_requests', [
+            'id' => $response->json('data.id'),
+            'reason' => 'Shareholder confirmed new email by phone',
+        ]);
+    }
+
+    public function test_resubmitting_via_the_store_endpoint_links_to_the_original_and_is_visible_both_ways(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermissions('approver@example.com', [
+            'shareholder_change_requests.approve',
+            'shareholder_change_requests.view',
+        ]);
+        $shareholder = $this->createShareholder('one');
+
+        $original = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'first.attempt@example.com',
+            ])
+            ->assertCreated();
+        $originalId = $original->json('data.id');
+        $originalControlNo = $original->json('data.control_no');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$originalId}/reject", [
+                'remarks' => 'Email looks like a typo, please confirm',
+            ])
+            ->assertOk();
+
+        $resubmission = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'corrected.attempt@example.com',
+                'resubmitted_from_id' => $originalId,
+            ])
+            ->assertCreated();
+
+        $resubmission->assertJsonPath('data.resubmitted_from_id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.control_no', $originalControlNo);
+
+        $newId = $resubmission->json('data.id');
+        $newControlNo = $resubmission->json('data.control_no');
+
+        // The reverse link ("Resubmitted from CR-...") must also show up on the original.
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->getJson("/api/shareholder-change-requests/{$originalId}")
+            ->assertOk()
+            ->assertJsonPath('data.resubmitted_as.id', $newId)
+            ->assertJsonPath('data.resubmitted_as.control_no', $newControlNo);
+    }
+
+    public function test_resubmitted_from_id_must_belong_to_the_same_shareholder(): void
+    {
+        $actor = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $shareholderOne = $this->createShareholder('one');
+        $shareholderTwo = $this->createShareholder('two');
+
+        $unrelated = ShareholderChangeRequest::factory()->create([
+            'shareholder_id' => $shareholderTwo->id,
+            'status' => 'rejected',
+            'submitted_by' => $actor->id,
+        ]);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholderOne->id}/change-requests", [
+                'email' => 'cross.shareholder@example.com',
+                'resubmitted_from_id' => $unrelated->id,
+            ])
+            ->assertStatus(422)
+            ->assertJsonValidationErrors(['resubmitted_from_id']);
+    }
+
     public function test_approver_name_appears_on_the_change_request_after_a_decision(): void
     {
         $maker = $this->createAdmin('maker@example.com');
@@ -698,6 +814,292 @@ class ShareholderChangeRequestApiTest extends TestCase
             ->actingAs($approver, 'sanctum')
             ->postJson("/api/shareholder-change-requests/{$applied->id}/request-info", ['type' => 'shareholder_request'])
             ->assertStatus(422);
+    }
+
+    // -----------------------------------------------------------------
+    // PT-191: per-category edit permissions
+    // -----------------------------------------------------------------
+
+    public function test_user_with_only_name_permission_can_submit_a_name_change(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+            ])
+            ->assertCreated();
+    }
+
+    public function test_user_with_only_name_permission_cannot_submit_an_address_change(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'address' => ['address_line1' => '10 Downing Street'],
+            ])
+            ->assertStatus(403);
+
+        $this->assertDatabaseMissing('shareholder_change_requests', ['shareholder_id' => $shareholder->id]);
+    }
+
+    public function test_the_same_restriction_applies_through_the_direct_update_route_too(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => $shareholder->email,
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+                'date_of_birth' => '1990-01-01',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_user_with_name_and_address_permissions_can_submit_both_together(): void
+    {
+        $actor = $this->createAdminWithPermissions('name-and-address@example.com', [
+            'shareholder_change_requests.edit_name',
+            'shareholder_change_requests.edit_address',
+        ]);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+                'address' => ['address_line1' => '10 Downing Street'],
+            ])
+            ->assertCreated();
+    }
+
+    public function test_user_with_no_permissions_cannot_submit_any_profile_update(): void
+    {
+        $actor = $this->createAdmin('no-permissions@example.com');
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'email' => 'new.email@example.com',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_legacy_blanket_permission_still_allows_every_category(): void
+    {
+        $actor = $this->createAdminWithPermission('legacy@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+                'email' => 'new.email@example.com',
+                'phone' => '08011112222',
+                'date_of_birth' => '1990-01-01',
+                'sex' => 'male',
+                'nin' => '12345678901',
+                'address' => ['address_line1' => '10 Downing Street'],
+            ])
+            ->assertCreated();
+    }
+
+    public function test_identification_fields_are_gated_by_their_own_permission(): void
+    {
+        $actor = $this->createAdminWithPermissions('id-editor@example.com', ['shareholder_change_requests.edit_identification']);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'bvn' => '12345678901',
+            ])
+            ->assertCreated();
+
+        $otherShareholder = $this->createShareholder('two');
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$otherShareholder->id}/change-requests", [
+                'email' => 'should.fail@example.com',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_unmapped_field_requires_the_blanket_permission_even_with_other_categories_granted(): void
+    {
+        // next_of_kin_* has no dedicated category permission of its own, so
+        // holding every OTHER category still isn't enough for it.
+        $actor = $this->createAdminWithPermissions('no-next-of-kin-perm@example.com', [
+            'shareholder_change_requests.edit_name',
+            'shareholder_change_requests.edit_address',
+            'shareholder_change_requests.edit_date_of_birth',
+            'shareholder_change_requests.edit_gender',
+            'shareholder_change_requests.edit_email',
+            'shareholder_change_requests.edit_phone',
+            'shareholder_change_requests.edit_identification',
+        ]);
+        $shareholder = $this->createShareholder('one');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'next_of_kin_name' => 'Someone Else',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_category_permitted_submission_still_goes_through_normal_approval(): void
+    {
+        $maker = $this->createAdminWithPermissions('name-editor@example.com', ['shareholder_change_requests.edit_name']);
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $originalName = $shareholder->first_name;
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/change-requests", [
+                'first_name' => 'Renamed',
+            ])
+            ->assertCreated();
+
+        // Stays pending — the live record is untouched until approval.
+        $shareholder->refresh();
+        $this->assertSame($originalName, $shareholder->first_name);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+
+        $shareholder->refresh();
+        $this->assertSame('Renamed', $shareholder->first_name);
+    }
+
+    // -----------------------------------------------------------------
+    // CHN updates
+    // -----------------------------------------------------------------
+
+    public function test_submitting_a_chn_change_requires_edit_chn_permission(): void
+    {
+        $actor = $this->createAdmin('no-permissions@example.com');
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", [
+                'chn' => 'NEW-CHN-456',
+            ])
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'OLD-CHN-123',
+        ]);
+    }
+
+    public function test_chn_change_submits_a_pending_request_without_touching_the_live_value(): void
+    {
+        $actor = $this->createAdminWithPermissions('chn-editor@example.com', ['shareholder_change_requests.edit_chn']);
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", [
+                'chn' => 'NEW-CHN-456',
+                'reason' => 'Correcting CSCS mapping',
+            ])
+            ->assertStatus(202)
+            ->assertJsonPath('data.request_type', 'chn_update')
+            ->assertJsonPath('data.status', 'submitted')
+            ->assertJsonPath('data.payload_old.chn', 'OLD-CHN-123')
+            ->assertJsonPath('data.payload_new.chn', 'NEW-CHN-456');
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'OLD-CHN-123',
+        ]);
+    }
+
+    public function test_approving_a_chn_change_requires_approve_chn_permission(): void
+    {
+        $maker = $this->createAdminWithPermissions('chn-editor@example.com', ['shareholder_change_requests.edit_chn']);
+        $generalApprover = $this->createAdminWithPermission('general-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", ['chn' => 'NEW-CHN-456']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($generalApprover, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'OLD-CHN-123',
+        ]);
+    }
+
+    public function test_approving_a_chn_change_updates_the_correct_register_account(): void
+    {
+        $maker = $this->createAdminWithPermissions('chn-editor@example.com', ['shareholder_change_requests.edit_chn']);
+        $approver = $this->createAdminWithPermission('chn-approver@example.com', 'shareholder_change_requests.approve_chn');
+        $shareholder = $this->createShareholder('one');
+        $registerAccount = $this->createRegisterAccount($shareholder, 'OLD-CHN-123');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/register-accounts/{$registerAccount}/chn", ['chn' => 'NEW-CHN-456']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied')
+            ->assertJsonPath('data.register_account.chn', 'NEW-CHN-456');
+
+        $this->assertDatabaseHas('shareholder_register_accounts', [
+            'id' => $registerAccount,
+            'chn' => 'NEW-CHN-456',
+        ]);
+    }
+
+    private function createRegisterAccount(Shareholder $shareholder, ?string $chn = null): int
+    {
+        $registerId = \Illuminate\Support\Facades\DB::table('registers')->insertGetId(['register_code' => 'REG-'.uniqid()]);
+
+        return \Illuminate\Support\Facades\DB::table('shareholder_register_accounts')->insertGetId([
+            'shareholder_id' => $shareholder->id,
+            'register_id' => $registerId,
+            'chn' => $chn,
+            'status' => 'active',
+        ]);
+    }
+
+    private function createAdminWithPermissions(string $email, array $permissions): AdminUser
+    {
+        $actor = $this->createAdmin($email);
+        foreach ($permissions as $permission) {
+            $actor->givePermissionTo(Permission::firstOrCreate(['name' => $permission, 'guard_name' => 'web']));
+        }
+
+        return $actor;
     }
 
     private function createAdmin(string $email): AdminUser

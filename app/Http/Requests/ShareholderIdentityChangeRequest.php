@@ -35,6 +35,7 @@ class ShareholderIdentityChangeRequest extends FormRequest
             'expires_on' => 'nullable|date',
             'file_ref' => 'nullable|string|max:255',
             'reason' => 'nullable|string|max:255',
+            'resubmitted_from_id' => 'nullable|integer|exists:shareholder_change_requests,id',
         ];
     }
 

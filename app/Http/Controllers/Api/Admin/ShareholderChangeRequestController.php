@@ -10,6 +10,7 @@ use App\Models\AdminUser;
 use App\Models\Shareholder;
 use App\Models\ShareholderChangeRequest;
 use App\Services\ShareholderChangeRequestService;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -31,10 +32,11 @@ class ShareholderChangeRequestController extends Controller
         try {
             $changeRequest = $this->changeRequestService->submitProfileUpdate(
                 $shareholder,
+                $request->user(),
                 $request->proposedFields(),
                 $request->proposedAddress(),
                 $request->validated('reason'),
-                $request->user()->id
+                $request->validated('resubmitted_from_id')
             );
 
             return response()->json([
@@ -42,6 +44,11 @@ class ShareholderChangeRequestController extends Controller
                 'message' => 'Pending shareholder update submitted for approval',
                 'data' => $this->formatChangeRequest($changeRequest),
             ], 201);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
         } catch (ValidationException $e) {
             return response()->json([
                 'success' => false,
@@ -287,9 +294,17 @@ class ShareholderChangeRequestController extends Controller
 
     /**
      * Shared authorization gate for approve/reject/request-info: bank mandate
-     * changes require the dedicated approve_mandate permission on top of the
-     * general shareholder_change_requests.approve gate already enforced at
-     * the route level, and nobody may decide on their own submission.
+     * changes require the dedicated approve_mandate/approve_chn permissions
+     * instead of the general shareholder_change_requests.approve, and
+     * nobody may decide on their own submission.
+     *
+     * This is deliberately an explicit per-type permission requirement, not
+     * a deny-list of special cases: the approve/reject/request-info routes
+     * accept approve_mandate and approve_chn too (so those permissions are
+     * actually reachable on their own), which means this method can no
+     * longer assume "reached the controller" implies "holds the general
+     * approve permission" the way it could when the route only accepted
+     * that one permission.
      */
     private function denyDecision(Request $request, ShareholderChangeRequest $changeRequest, string $action): ?JsonResponse
     {
@@ -300,10 +315,16 @@ class ShareholderChangeRequestController extends Controller
             ], 403);
         }
 
-        if ($changeRequest->request_type === 'bank_mandate' && ! $request->user()?->can('shareholder_change_requests.approve_mandate')) {
+        $requiredPermission = match ($changeRequest->request_type) {
+            'bank_mandate' => 'shareholder_change_requests.approve_mandate',
+            'chn_update' => 'shareholder_change_requests.approve_chn',
+            default => 'shareholder_change_requests.approve',
+        };
+
+        if (! $request->user()?->can($requiredPermission)) {
             return response()->json([
                 'success' => false,
-                'message' => "You are not authorized to {$action} bank mandate changes",
+                'message' => "You are not authorized to {$action} this type of change",
             ], 403);
         }
 
@@ -334,6 +355,9 @@ class ShareholderChangeRequestController extends Controller
             'payload_old' => $changeRequest->payload_old,
             'payload_new' => $changeRequest->payload_new,
             'reason' => $changeRequest->reason,
+            'resubmitted_from_id' => $changeRequest->resubmitted_from_id,
+            'resubmitted_from' => $changeRequest->resubmitted_from,
+            'resubmitted_as' => $changeRequest->resubmitted_as,
             'status' => $changeRequest->status,
             'control_no' => $changeRequest->control_no,
             'submitted_by' => $changeRequest->submitted_by,

@@ -8,6 +8,8 @@ use App\Models\ShareholderChangeApproval;
 use App\Models\ShareholderChangeRequest;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
+use App\Models\ShareholderRegisterAccount;
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -24,6 +26,34 @@ class ShareholderChangeRequestService
 {
     private const PROFILE_REQUEST_TYPES = ['name_change', 'email_change', 'phone_change', 'address_change', 'profile_update'];
 
+    /**
+     * Per-field category permissions (PT-191). A field missing from this map
+     * (e.g. next_of_kin_*) has no dedicated category and always falls back
+     * to requiring a legacy blanket permission.
+     */
+    private const FIELD_PERMISSIONS = [
+        'first_name' => 'shareholder_change_requests.edit_name',
+        'last_name' => 'shareholder_change_requests.edit_name',
+        'middle_name' => 'shareholder_change_requests.edit_name',
+        'email' => 'shareholder_change_requests.edit_email',
+        'phone' => 'shareholder_change_requests.edit_phone',
+        'date_of_birth' => 'shareholder_change_requests.edit_date_of_birth',
+        'sex' => 'shareholder_change_requests.edit_gender',
+        'nin' => 'shareholder_change_requests.edit_identification',
+        'bvn' => 'shareholder_change_requests.edit_identification',
+        'rc_number' => 'shareholder_change_requests.edit_identification',
+        'tax_id' => 'shareholder_change_requests.edit_identification',
+        'address' => 'shareholder_change_requests.edit_address',
+    ];
+
+    /**
+     * Holding any of these still grants full access to every category, so
+     * existing role assignments keep working exactly as before — the new
+     * per-field permissions are an additional, narrower way in, not a
+     * replacement for whoever already has blanket access.
+     */
+    private const LEGACY_BYPASS_PERMISSIONS = ['shareholder_change_requests.create', 'shareholders.edit'];
+
     public function __construct(
         protected ShareholderChangeRequestReferenceService $referenceService,
         protected ShareholderChangeRequestNotificationService $notificationService
@@ -31,11 +61,18 @@ class ShareholderChangeRequestService
 
     public function submitProfileUpdate(
         Shareholder $shareholder,
+        AdminUser $actor,
         array $proposedFields,
         ?array $proposedAddress,
         ?string $reason,
-        int $submittedBy
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
+        $fieldKeys = array_keys($proposedFields);
+        if ($proposedAddress !== null) {
+            $fieldKeys[] = 'address';
+        }
+        $this->assertFieldPermissions($actor, $fieldKeys);
+
         $this->guardNoPendingRequest($shareholder->id, self::PROFILE_REQUEST_TYPES);
 
         $payloadOld = collect($proposedFields)->keys()->mapWithKeys(fn ($field) => [$field => $shareholder->{$field}])->toArray();
@@ -53,7 +90,52 @@ class ShareholderChangeRequestService
 
         $requestType = $this->inferProfileRequestType($proposedFields, $proposedAddress !== null);
 
-        return $this->submit($shareholder, $requestType, $payloadOld, $payloadNew, $reason, $submittedBy);
+        return $this->submit($shareholder, $requestType, $payloadOld, $payloadNew, $reason, $actor->id, $resubmittedFromId);
+    }
+
+    /**
+     * Enforces PT-191's per-category edit permissions for every field in a
+     * profile-update submission, regardless of which controller/route it
+     * came through — this is the one place that check happens.
+     */
+    private function assertFieldPermissions(AdminUser $actor, array $fieldKeys): void
+    {
+        foreach (self::LEGACY_BYPASS_PERMISSIONS as $bypass) {
+            if ($actor->can($bypass)) {
+                return;
+            }
+        }
+
+        $unauthorized = [];
+        foreach ($fieldKeys as $field) {
+            $permission = self::FIELD_PERMISSIONS[$field] ?? null;
+            if ($permission === null || ! $actor->can($permission)) {
+                $unauthorized[] = $field;
+            }
+        }
+
+        if (! empty($unauthorized)) {
+            throw new AuthorizationException(
+                'You do not have permission to edit: '.implode(', ', $unauthorized)
+            );
+        }
+    }
+
+    /**
+     * Single-category variant of assertFieldPermissions(), for change types
+     * (CHN) that aren't part of the flat profile-update payload.
+     */
+    private function assertHasPermission(AdminUser $actor, string $permission, string $label): void
+    {
+        foreach (self::LEGACY_BYPASS_PERMISSIONS as $bypass) {
+            if ($actor->can($bypass)) {
+                return;
+            }
+        }
+
+        if (! $actor->can($permission)) {
+            throw new AuthorizationException("You do not have permission to edit: {$label}");
+        }
     }
 
     public function submitMandateChange(
@@ -61,7 +143,8 @@ class ShareholderChangeRequestService
         ?ShareholderMandate $existingMandate,
         array $proposedFields,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['bank_mandate']);
 
@@ -74,7 +157,29 @@ class ShareholderChangeRequestService
         $payloadNew = $proposedFields;
         $payloadNew['mandate_id'] = $existingMandate?->id;
 
-        return $this->submit($shareholder, 'bank_mandate', $payloadOld, $payloadNew, $reason, $submittedBy);
+        return $this->submit($shareholder, 'bank_mandate', $payloadOld, $payloadNew, $reason, $submittedBy, $resubmittedFromId);
+    }
+
+    public function submitChnChange(
+        Shareholder $shareholder,
+        ShareholderRegisterAccount $registerAccount,
+        AdminUser $actor,
+        ?string $newChn,
+        ?string $reason,
+        ?int $resubmittedFromId = null
+    ): ShareholderChangeRequest {
+        $this->assertHasPermission($actor, 'shareholder_change_requests.edit_chn', 'CHN');
+        $this->guardNoPendingRequest($shareholder->id, ['chn_update']);
+
+        return $this->submit(
+            $shareholder,
+            'chn_update',
+            ['chn' => $registerAccount->chn, 'register_account_id' => $registerAccount->id],
+            ['chn' => $newChn, 'register_account_id' => $registerAccount->id],
+            $reason,
+            $actor->id,
+            $resubmittedFromId
+        );
     }
 
     public function submitIdentityChange(
@@ -82,7 +187,8 @@ class ShareholderChangeRequestService
         ?ShareholderIdentity $existingIdentity,
         array $proposedFields,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['identity_change']);
 
@@ -95,7 +201,7 @@ class ShareholderChangeRequestService
         $payloadNew = $proposedFields;
         $payloadNew['identity_id'] = $existingIdentity?->id;
 
-        return $this->submit($shareholder, 'identity_change', $payloadOld, $payloadNew, $reason, $submittedBy);
+        return $this->submit($shareholder, 'identity_change', $payloadOld, $payloadNew, $reason, $submittedBy, $resubmittedFromId);
     }
 
     /**
@@ -105,7 +211,8 @@ class ShareholderChangeRequestService
         Shareholder $shareholder,
         ?string $pendingPictureUrl,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
         $this->guardNoPendingRequest($shareholder->id, ['profile_picture_change']);
 
@@ -121,7 +228,8 @@ class ShareholderChangeRequestService
             ['profile_picture' => $shareholder->profile_picture],
             ['profile_picture' => $pendingPictureUrl],
             $reason,
-            $submittedBy
+            $submittedBy,
+            $resubmittedFromId
         );
     }
 
@@ -160,7 +268,7 @@ class ShareholderChangeRequestService
             return $result;
         });
 
-        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'approved');
+        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'approved', $remarks);
 
         return $result;
     }
@@ -193,7 +301,7 @@ class ShareholderChangeRequestService
             }
         });
 
-        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'rejected');
+        $this->notificationService->decided($changeRequest->fresh(), $approver->id, 'rejected', $remarks);
     }
 
     public function requestMoreInfo(
@@ -229,6 +337,7 @@ class ShareholderChangeRequestService
             'bank_mandate' => $this->applyMandateChange($shareholder, $changeRequest),
             'identity_change' => $this->applyIdentityChange($shareholder, $changeRequest),
             'profile_picture_change' => $this->applyProfilePictureChange($shareholder, $changeRequest),
+            'chn_update' => $this->applyChnChange($shareholder, $changeRequest),
             default => $this->applyProfileChange($shareholder, $changeRequest),
         };
     }
@@ -249,6 +358,18 @@ class ShareholderChangeRequestService
         }
 
         return ['shareholder' => $shareholder, 'mandate' => $mandate];
+    }
+
+    private function applyChnChange(Shareholder $shareholder, ShareholderChangeRequest $changeRequest): array
+    {
+        $registerAccountId = $changeRequest->payload_new['register_account_id'];
+        $registerAccount = ShareholderRegisterAccount::where('id', $registerAccountId)
+            ->where('shareholder_id', $shareholder->id)
+            ->firstOrFail();
+
+        $registerAccount->update(['chn' => $changeRequest->payload_new['chn']]);
+
+        return ['shareholder' => $shareholder, 'register_account' => $registerAccount];
     }
 
     private function applyIdentityChange(Shareholder $shareholder, ShareholderChangeRequest $changeRequest): array
@@ -309,20 +430,38 @@ class ShareholderChangeRequestService
         array $payloadOld,
         array $payloadNew,
         ?string $reason,
-        int $submittedBy
+        int $submittedBy,
+        ?int $resubmittedFromId = null
     ): ShareholderChangeRequest {
+        if ($resubmittedFromId !== null) {
+            $belongsToShareholder = ShareholderChangeRequest::where('id', $resubmittedFromId)
+                ->where('shareholder_id', $shareholder->id)
+                ->exists();
+
+            if (! $belongsToShareholder) {
+                throw ValidationException::withMessages([
+                    'resubmitted_from_id' => ['The referenced change request does not belong to this shareholder.'],
+                ]);
+            }
+        }
+
         $changeRequest = ShareholderChangeRequest::create([
             'shareholder_id' => $shareholder->id,
             'request_type' => $requestType,
             'payload_old' => $payloadOld,
             'payload_new' => $payloadNew,
             'reason' => $reason,
+            'resubmitted_from_id' => $resubmittedFromId,
             'status' => 'submitted',
             'control_no' => $this->referenceService->generate(),
             'submitted_by' => $submittedBy,
         ]);
 
-        $this->notificationService->submitted($changeRequest, $submittedBy);
+        if ($resubmittedFromId !== null) {
+            $this->notificationService->resubmitted($changeRequest, $submittedBy);
+        } else {
+            $this->notificationService->submitted($changeRequest, $submittedBy);
+        }
 
         return $changeRequest;
     }

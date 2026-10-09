@@ -73,6 +73,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
             $table->json('payload_old');
             $table->json('payload_new');
             $table->string('reason')->nullable();
+            $table->unsignedBigInteger('resubmitted_from_id')->nullable();
             $table->string('status')->default('submitted');
             $table->string('control_no', 40);
             $table->unsignedBigInteger('submitted_by');
@@ -183,6 +184,41 @@ class ShareholderUpdateApprovalApiTest extends TestCase
         $this->assertDatabaseMissing('shareholder_bank_mandates', ['shareholder_id' => $shareholder->id]);
     }
 
+    public function test_resubmitting_a_mandate_change_returns_the_expanded_link_on_the_raw_response(): void
+    {
+        $maker = $this->createAdmin('maker@example.com');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve_mandate');
+        $shareholder = $this->createShareholder('one');
+
+        $firstAttempt = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/mandates", $this->mandatePayload());
+        $originalId = $firstAttempt->json('data.id');
+        $originalControlNo = $firstAttempt->json('data.control_no');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$originalId}/reject", [
+                'remarks' => 'Account name does not match',
+            ])
+            ->assertOk();
+
+        // The mandate endpoints return the raw model, not the dedicated
+        // controller's formatChangeRequest() — this is the gap that made the
+        // link appear on show()/index() but not here, now fixed at the
+        // model level with appended attributes.
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/mandates", $this->mandatePayload([
+                'account_name' => 'Corrected Account Name',
+                'resubmitted_from_id' => $originalId,
+            ]))
+            ->assertStatus(202)
+            ->assertJsonPath('data.resubmitted_from_id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.id', $originalId)
+            ->assertJsonPath('data.resubmitted_from.control_no', $originalControlNo);
+    }
+
     public function test_approving_a_new_mandate_request_creates_the_mandate(): void
     {
         $maker = $this->createAdmin('maker@example.com');
@@ -205,6 +241,59 @@ class ShareholderUpdateApprovalApiTest extends TestCase
             'shareholder_id' => $shareholder->id,
             'account_number' => '0123456789',
         ]);
+    }
+
+    public function test_an_approve_mandate_only_approver_can_actually_reach_the_approve_route(): void
+    {
+        // Regression test: the approve/reject/request-info routes used to be
+        // gated by the general .approve permission ONLY, so a user holding
+        // just approve_mandate (no general .approve) was blocked at the
+        // route itself before ever reaching the mandate-specific check in
+        // the controller — approve_mandate was effectively unusable alone.
+        // Keeps PermissionMiddleware active (unlike the other tests here)
+        // specifically to prove the route itself, not just the controller
+        // logic, actually lets this permission through.
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_mandates.create');
+        $approver = $this->createAdminWithPermission('mandate-approver@example.com', 'shareholder_change_requests.approve_mandate');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholders/{$shareholder->id}/mandates", $this->mandatePayload());
+        $submit->assertStatus(202);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+    }
+
+    public function test_an_approve_mandate_only_approver_cannot_approve_an_unrelated_change_request(): void
+    {
+        // The flip side of the test above: widening the route to accept
+        // approve_mandate must NOT let a mandate-only approver approve a
+        // completely unrelated request type just because they can now
+        // reach the route at all.
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $mandateOnlyApprover = $this->createAdminWithPermission('mandate-approver@example.com', 'shareholder_change_requests.approve_mandate');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'unrelated.change@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $submit->assertStatus(202);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($mandateOnlyApprover, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertStatus(403);
     }
 
     public function test_updating_an_existing_mandate_applies_to_the_same_row_on_approval(): void
@@ -305,7 +394,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
 
     public function test_direct_shareholder_update_now_submits_a_pending_request_instead_of_applying(): void
     {
-        $maker = $this->createAdmin('maker@example.com');
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
         $shareholder = $this->createShareholder('one');
         $originalEmail = $shareholder->email;
 
@@ -334,7 +423,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
     {
         Notification::fake();
 
-        $maker = $this->createAdmin('maker@example.com');
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
         $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
         $shareholder = $this->createShareholder('one');
 
@@ -375,7 +464,7 @@ class ShareholderUpdateApprovalApiTest extends TestCase
     {
         Notification::fake();
 
-        $maker = $this->createAdmin('maker@example.com');
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
         $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
         $shareholder = $this->createShareholder('one');
 
@@ -396,6 +485,126 @@ class ShareholderUpdateApprovalApiTest extends TestCase
             ->assertOk();
 
         Notification::assertSentTo($maker, ShareholderChangeRequestNotification::class);
+    }
+
+    public function test_approving_a_change_request_also_notifies_other_approvers_so_it_leaves_their_queue(): void
+    {
+        Notification::fake();
+
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $otherApprover = $this->createAdminWithPermission('other-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'decide.two@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $changeRequestId = $submit->json('data.id');
+
+        Notification::fake();
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequestId}/approve", [])
+            ->assertOk();
+
+        Notification::assertSentTo($maker, ShareholderChangeRequestNotification::class, function ($notification) use ($maker) {
+            return str_contains($notification->toArray($maker)['message'], 'was approved by');
+        });
+        Notification::assertSentTo($otherApprover, ShareholderChangeRequestNotification::class);
+        Notification::assertNotSentTo($approver, ShareholderChangeRequestNotification::class);
+    }
+
+    public function test_rejecting_a_change_request_includes_the_approvers_remarks_in_the_message(): void
+    {
+        Notification::fake();
+
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'decide.three@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $changeRequestId = $submit->json('data.id');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequestId}/reject", [
+                'remarks' => 'Email does not match the ID on file',
+            ])
+            ->assertOk();
+
+        Notification::assertSentTo($maker, ShareholderChangeRequestNotification::class, function ($notification) use ($maker) {
+            return str_contains(
+                $notification->toArray($maker)['message'],
+                'was returned: Email does not match the ID on file'
+            );
+        });
+    }
+
+    public function test_resubmitting_a_change_request_notifies_approvers_not_the_submitter(): void
+    {
+        Notification::fake();
+
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $approver = $this->createAdminWithPermission('approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('one');
+
+        $firstSubmit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'resubmit.one@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $originalId = $firstSubmit->json('data.id');
+        $originalControlNo = $firstSubmit->json('data.control_no');
+
+        $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$originalId}/reject", [
+                'remarks' => 'Please confirm the email with the shareholder first',
+            ])
+            ->assertOk();
+
+        Notification::fake();
+
+        $resubmit = $this->withoutMiddleware([PermissionMiddleware::class, LogApiActivity::class])
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'resubmit.one.corrected@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+                'resubmitted_from_id' => $originalId,
+            ])
+            ->assertStatus(202);
+
+        $resubmit->assertJsonPath('data.resubmitted_from_id', $originalId);
+
+        Notification::assertSentTo($approver, ShareholderChangeRequestNotification::class, function ($notification) use ($approver, $originalControlNo) {
+            $message = $notification->toArray($approver)['message'];
+
+            return str_contains($message, 'was corrected and resubmitted')
+                && str_contains($message, "(was {$originalControlNo})");
+        });
+        Notification::assertNotSentTo($maker, ShareholderChangeRequestNotification::class);
     }
 
     private function mandatePayload(array $overrides = []): array
