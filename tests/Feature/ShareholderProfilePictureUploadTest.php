@@ -11,6 +11,8 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Middleware\PermissionMiddleware;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -137,10 +139,53 @@ class ShareholderProfilePictureUploadTest extends TestCase
             $table->timestamp('decided_at')->useCurrent();
             $table->string('remarks')->nullable();
         });
+
+        Schema::create('permissions', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+            $table->unique(['name', 'guard_name']);
+        });
+
+        Schema::create('roles', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+            $table->unique(['name', 'guard_name']);
+        });
+
+        Schema::create('model_has_permissions', function (Blueprint $table) {
+            $table->unsignedBigInteger('permission_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+            $table->primary(['permission_id', 'model_id', 'model_type']);
+        });
+
+        Schema::create('model_has_roles', function (Blueprint $table) {
+            $table->unsignedBigInteger('role_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+            $table->primary(['role_id', 'model_id', 'model_type']);
+        });
+
+        Schema::create('role_has_permissions', function (Blueprint $table) {
+            $table->unsignedBigInteger('permission_id');
+            $table->unsignedBigInteger('role_id');
+            $table->primary(['permission_id', 'role_id']);
+        });
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
     }
 
     protected function tearDown(): void
     {
+        Schema::dropIfExists('role_has_permissions');
+        Schema::dropIfExists('model_has_roles');
+        Schema::dropIfExists('model_has_permissions');
+        Schema::dropIfExists('roles');
+        Schema::dropIfExists('permissions');
         Schema::dropIfExists('shareholder_change_approvals');
         Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholder_cautions');
@@ -211,7 +256,7 @@ class ShareholderProfilePictureUploadTest extends TestCase
         Storage::fake('public');
 
         $maker = $this->createAdmin();
-        $approver = $this->createAdmin();
+        $approver = $this->createApprover();
         $shareholder = $this->createShareholder([
             'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
         ]);
@@ -243,7 +288,7 @@ class ShareholderProfilePictureUploadTest extends TestCase
         Storage::fake('public');
 
         $maker = $this->createAdmin();
-        $approver = $this->createAdmin();
+        $approver = $this->createApprover();
         $shareholder = $this->createShareholder([
             'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
         ]);
@@ -309,7 +354,7 @@ class ShareholderProfilePictureUploadTest extends TestCase
         Storage::fake('public');
 
         $maker = $this->createAdmin();
-        $approver = $this->createAdmin();
+        $approver = $this->createApprover();
         $shareholder = $this->createShareholder([
             'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
         ]);
@@ -337,7 +382,7 @@ class ShareholderProfilePictureUploadTest extends TestCase
         Storage::fake('public');
 
         $maker = $this->createAdmin();
-        $approver = $this->createAdmin();
+        $approver = $this->createApprover();
         $shareholder = $this->createShareholder([
             'profile_picture' => '/storage/profile-pictures/shareholders/1/old.jpg',
         ]);
@@ -447,6 +492,17 @@ class ShareholderProfilePictureUploadTest extends TestCase
             'last_name' => 'Admin',
             'is_active' => true,
         ]);
+    }
+
+    private function createApprover(): AdminUser
+    {
+        $approver = $this->createAdmin();
+        $approver->givePermissionTo(Permission::firstOrCreate([
+            'name' => 'shareholder_change_requests.approve',
+            'guard_name' => 'web',
+        ]));
+
+        return $approver;
     }
 
     private function createShareholder(array $attributes = []): Shareholder

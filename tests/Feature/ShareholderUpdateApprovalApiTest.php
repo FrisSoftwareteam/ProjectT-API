@@ -233,6 +233,33 @@ class ShareholderUpdateApprovalApiTest extends TestCase
             ->assertJsonPath('data.change_request.status', 'applied');
     }
 
+    public function test_an_approve_mandate_only_approver_cannot_approve_an_unrelated_change_request(): void
+    {
+        // The flip side of the test above: widening the route to accept
+        // approve_mandate must NOT let a mandate-only approver approve a
+        // completely unrelated request type just because they can now
+        // reach the route at all.
+        $maker = $this->createAdminWithPermission('maker@example.com', 'shareholder_change_requests.create');
+        $mandateOnlyApprover = $this->createAdminWithPermission('mandate-approver@example.com', 'shareholder_change_requests.approve_mandate');
+        $shareholder = $this->createShareholder('one');
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}", [
+                'holder_type' => 'individual',
+                'first_name' => $shareholder->first_name,
+                'email' => 'unrelated.change@example.com',
+                'phone' => $shareholder->phone,
+                'status' => 'active',
+            ]);
+        $submit->assertStatus(202);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($mandateOnlyApprover, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertStatus(403);
+    }
+
     public function test_updating_an_existing_mandate_applies_to_the_same_row_on_approval(): void
     {
         $maker = $this->createAdmin('maker@example.com');

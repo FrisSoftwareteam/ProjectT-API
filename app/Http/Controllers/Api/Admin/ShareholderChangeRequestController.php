@@ -293,9 +293,17 @@ class ShareholderChangeRequestController extends Controller
 
     /**
      * Shared authorization gate for approve/reject/request-info: bank mandate
-     * changes require the dedicated approve_mandate permission on top of the
-     * general shareholder_change_requests.approve gate already enforced at
-     * the route level, and nobody may decide on their own submission.
+     * changes require the dedicated approve_mandate/approve_chn permissions
+     * instead of the general shareholder_change_requests.approve, and
+     * nobody may decide on their own submission.
+     *
+     * This is deliberately an explicit per-type permission requirement, not
+     * a deny-list of special cases: the approve/reject/request-info routes
+     * accept approve_mandate and approve_chn too (so those permissions are
+     * actually reachable on their own), which means this method can no
+     * longer assume "reached the controller" implies "holds the general
+     * approve permission" the way it could when the route only accepted
+     * that one permission.
      */
     private function denyDecision(Request $request, ShareholderChangeRequest $changeRequest, string $action): ?JsonResponse
     {
@@ -306,17 +314,16 @@ class ShareholderChangeRequestController extends Controller
             ], 403);
         }
 
-        if ($changeRequest->request_type === 'bank_mandate' && ! $request->user()?->can('shareholder_change_requests.approve_mandate')) {
-            return response()->json([
-                'success' => false,
-                'message' => "You are not authorized to {$action} bank mandate changes",
-            ], 403);
-        }
+        $requiredPermission = match ($changeRequest->request_type) {
+            'bank_mandate' => 'shareholder_change_requests.approve_mandate',
+            'chn_update' => 'shareholder_change_requests.approve_chn',
+            default => 'shareholder_change_requests.approve',
+        };
 
-        if ($changeRequest->request_type === 'chn_update' && ! $request->user()?->can('shareholder_change_requests.approve_chn')) {
+        if (! $request->user()?->can($requiredPermission)) {
             return response()->json([
                 'success' => false,
-                'message' => "You are not authorized to {$action} CHN changes",
+                'message' => "You are not authorized to {$action} this type of change",
             ], 403);
         }
 
