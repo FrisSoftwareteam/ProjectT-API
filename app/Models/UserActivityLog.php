@@ -2,8 +2,8 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class UserActivityLog extends Model
@@ -22,6 +22,17 @@ class UserActivityLog extends Model
         'metadata' => 'array',
         'created_at' => 'datetime',
     ];
+
+    public function scopeForActorRole($query, string $role)
+    {
+        return $query->where(function ($builder) use ($role) {
+            $builder->whereJsonContains('metadata->actor->roles', $role)
+                ->orWhere(function ($legacy) use ($role) {
+                    $legacy->whereNull('metadata->actor->roles')
+                        ->whereHas('user.roles', fn ($roles) => $roles->where('name', $role));
+                });
+        });
+    }
 
     public function user()
     {

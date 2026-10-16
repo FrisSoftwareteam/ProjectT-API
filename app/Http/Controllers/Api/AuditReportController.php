@@ -34,13 +34,7 @@ class AuditReportController extends Controller
         }
 
         if (! empty($validated['role'])) {
-            $role = $validated['role'];
-            $query->where(function ($builder) use ($role) {
-                $builder->whereJsonContains('metadata->actor->roles', $role)
-                    ->orWhere(function ($legacy) use ($role) {
-                        $legacy->whereNull('metadata->actor')->whereHas('user.roles', fn ($roles) => $roles->where('name', $role));
-                    });
-            });
+            $query->forActorRole($validated['role']);
         }
 
         if (! empty($validated['shareholder_id'])) {
@@ -82,6 +76,7 @@ class AuditReportController extends Controller
 
         $report = $query
             ->paginate($validated['per_page'] ?? 15)
+            ->withQueryString()
             ->through(fn (UserActivityLog $log) => $this->formatLog($log));
 
         return response()->json([

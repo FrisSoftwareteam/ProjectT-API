@@ -267,6 +267,38 @@ class AuditReportApiTest extends TestCase
         $this->assertDatabaseCount('user_activity_logs', 0);
     }
 
+    public function test_role_filter_is_consistent_on_both_endpoints_and_pagination_preserves_it(): void
+    {
+        $viewer = $this->createAdmin('role-viewer@example.com');
+        foreach (['reports.audit', 'user_activity_logs.view'] as $permission) {
+            $viewer->givePermissionTo(Permission::create(['name' => $permission, 'guard_name' => 'web']));
+        }
+        $operations = $this->createAdmin('role-ops@example.com');
+        $operations->assignRole(Role::create(['name' => 'Operations', 'guard_name' => 'web']));
+        $audit = $this->createAdmin('role-audit@example.com');
+        $audit->assignRole(Role::create(['name' => 'Audit', 'guard_name' => 'web']));
+        foreach ([
+            [$operations->id, []],
+            [$audit->id, ['actor' => ['roles' => ['Operations']]]],
+            [$operations->id, ['actor' => ['roles' => ['Audit']]]],
+            [$audit->id, []],
+            [$operations->id, ['actor' => ['roles' => []]]],
+            [$operations->id, ['actor' => ['name' => 'Legacy actor without roles']]],
+        ] as [$actorId, $metadata]) {
+            UserActivityLog::create(['user_id' => $actorId, 'action' => 'test', 'metadata' => $metadata]);
+        }
+        foreach (['/api/reports/audit' => 'data.', '/api/user-activity-logs' => ''] as $endpoint => $prefix) {
+            $response = $this->actingAs($viewer, 'sanctum')->getJson($endpoint.'?role=Operations&per_page=1')
+                ->assertOk()->assertJsonPath($prefix.'total', 3);
+            $next = $response->json($prefix.'next_page_url');
+            parse_str(parse_url($next, PHP_URL_QUERY), $parameters);
+            $this->assertSame('Operations', $parameters['role']);
+            $this->assertSame('1', $parameters['per_page']);
+            $this->getJson($endpoint.'?'.http_build_query($parameters))->assertOk()->assertJsonPath($prefix.'total', 3);
+            $this->getJson($endpoint.'?role=Nonexistent')->assertOk()->assertJsonPath($prefix.'total', 0);
+        }
+    }
+
     private function createAdmin(string $email): AdminUser
     {
         return AdminUser::query()->create([

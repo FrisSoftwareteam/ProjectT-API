@@ -5,14 +5,21 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\UserActivityLogRequest;
 use App\Models\UserActivityLog;
-use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class UserActivityLogController extends Controller
 {
     public function index(Request $request)
     {
+        $validated = $request->validate([
+            'role' => ['nullable', 'string', 'max:255'],
+        ]);
         $query = UserActivityLog::with('user');
+
+        if (! empty($validated['role'])) {
+            $query->forActorRole($validated['role']);
+        }
 
         if ($request->filled('user_id')) {
             $query->where('user_id', $request->query('user_id'));
@@ -39,7 +46,7 @@ class UserActivityLogController extends Controller
         }
 
         $perPage = (int) $request->query('per_page', 15);
-        $data = $query->orderBy('created_at', 'desc')->paginate($perPage);
+        $data = $query->orderBy('created_at', 'desc')->paginate($perPage)->withQueryString();
 
         return response()->json($data);
     }
@@ -47,6 +54,7 @@ class UserActivityLogController extends Controller
     public function show(UserActivityLog $userActivityLog): JsonResponse
     {
         $userActivityLog->load('user');
+
         return response()->json($userActivityLog);
     }
 
@@ -54,18 +62,21 @@ class UserActivityLogController extends Controller
     {
         $payload = $request->validated();
         $log = UserActivityLog::create($payload);
+
         return response()->json($log, 201);
     }
 
     public function update(UserActivityLogRequest $request, UserActivityLog $userActivityLog): JsonResponse
     {
         $userActivityLog->update($request->validated());
+
         return response()->json($userActivityLog);
     }
 
     public function destroy(UserActivityLog $userActivityLog)
     {
         $userActivityLog->delete();
+
         return response()->noContent();
     }
 
@@ -76,6 +87,7 @@ class UserActivityLogController extends Controller
             return response()->json(['message' => 'No ids provided'], 422);
         }
         UserActivityLog::whereIn('id', $ids)->delete();
+
         return response()->noContent();
     }
 
@@ -86,6 +98,7 @@ class UserActivityLogController extends Controller
     {
         $log = UserActivityLog::withTrashed()->findOrFail($id);
         $log->restore();
+
         return response()->json($log);
     }
 
@@ -96,6 +109,7 @@ class UserActivityLogController extends Controller
     {
         $log = UserActivityLog::withTrashed()->findOrFail($id);
         $log->forceDelete();
+
         return response()->noContent();
     }
 }

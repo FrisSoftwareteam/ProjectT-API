@@ -30,3 +30,11 @@ Profile views, failed requests, writes outside the API middleware (including bac
 ## Deployment
 
 Deploy the updated audit controller, API activity middleware, AppServiceProvider, ActivityLogService, and the new ShareholderAuditService together. No database migration is required. Follow the normal application cache refresh and worker restart procedure for the online environment. Local verification does not update the hosted application.
+
+## Role filtering
+
+Both `GET /api/reports/audit?role=Operations` and `GET /api/user-activity-logs?role=Operations` support the same single role-name filter. Use `role`, not `roles` or a numeric role ID. Encode spaces, for example `role=Super%20Admin`. A role that matches no log returns an empty page.
+
+When `metadata.actor.roles` exists, filtering uses that historical role snapshot, including an empty role list. Logs without a role snapshot fall back to the admin's current roles. Pagination links preserve role and other query filters. The two endpoints retain their existing, different response wrappers.
+
+Deploy `UserActivityLog`, `UserActivityLogController`, and `AuditReportController` together for this role-filter correction. The online request URL is needed to confirm which deployed endpoint and parameter the frontend sends.
