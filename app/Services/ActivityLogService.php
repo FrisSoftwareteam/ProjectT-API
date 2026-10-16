@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\AdminUser;
 use App\Models\UserActivityLog;
 use Illuminate\Support\Facades\Log;
 
@@ -16,6 +17,15 @@ class ActivityLogService
         }
 
         try {
+            $actor = AdminUser::find($userId);
+            if ($actor) {
+                $metadata['actor'] = [
+                    'id' => $actor->id,
+                    'name' => trim("{$actor->first_name} {$actor->last_name}"),
+                    'email' => $actor->email,
+                    'roles' => $actor->roles->pluck('name')->values()->all(),
+                ];
+            }
             $log = UserActivityLog::create([
                 'user_id' => $userId,
                 'action' => $action,
@@ -23,7 +33,7 @@ class ActivityLogService
             ]);
 
             if (app()->bound('request')) {
-                request()->attributes->set(self::REQUEST_LOGGED_ATTRIBUTE, true);
+                request()->attributes->set(self::REQUEST_LOGGED_ATTRIBUTE, $log->id);
             }
 
             return $log;

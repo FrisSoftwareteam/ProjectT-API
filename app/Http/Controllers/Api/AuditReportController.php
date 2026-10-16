@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\UserActivityLog;
+use App\Services\ShareholderAuditService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
@@ -13,8 +14,8 @@ class AuditReportController extends Controller
     public function index(Request $request): JsonResponse
     {
         $validated = $request->validate([
-            'user_id' => ['nullable', 'integer', 'exists:admin_users,id'],
-            'shareholder_id' => ['nullable', 'integer'],
+            'user_id' => ['nullable', 'integer', 'min:1'],
+            'shareholder_id' => ['nullable', 'integer', 'min:1'],
             'shareholder_reference' => ['nullable', 'string', 'max:255'],
             'role' => ['nullable', 'string', 'max:255'],
             'activity_category' => ['nullable', 'string', 'max:100'],
@@ -26,7 +27,7 @@ class AuditReportController extends Controller
 
         $query = UserActivityLog::query()
             ->with(['user.roles'])
-            ->latest('created_at');
+            ->latest('created_at')->latest('id');
 
         if (! empty($validated['user_id'])) {
             $query->where('user_id', $validated['user_id']);
@@ -34,18 +35,16 @@ class AuditReportController extends Controller
 
         if (! empty($validated['role'])) {
             $role = $validated['role'];
-            $query->whereHas('user.roles', fn ($roles) => $roles->where('name', $role));
+            $query->where(function ($builder) use ($role) {
+                $builder->whereJsonContains('metadata->actor->roles', $role)
+                    ->orWhere(function ($legacy) use ($role) {
+                        $legacy->whereNull('metadata->actor')->whereHas('user.roles', fn ($roles) => $roles->where('name', $role));
+                    });
+            });
         }
 
         if (! empty($validated['shareholder_id'])) {
-            $this->whereMetadataContainsAny($query, [
-                '"shareholder_id":'.$validated['shareholder_id'],
-                '"shareholder_id": '.$validated['shareholder_id'],
-                '"shareholder":"'.$validated['shareholder_id'].'"',
-                '"shareholder": "'.$validated['shareholder_id'].'"',
-                '"shareholder":'.$validated['shareholder_id'],
-                '"shareholder": '.$validated['shareholder_id'],
-            ]);
+            app(ShareholderAuditService::class)->filter($query, (int) $validated['shareholder_id']);
         }
 
         if (! empty($validated['shareholder_reference'])) {
@@ -105,20 +104,27 @@ class AuditReportController extends Controller
     {
         $metadata = $log->metadata ?? [];
         $user = $log->user;
-        $roles = $user?->roles?->pluck('name')->values()->all() ?? [];
+        $roles = $metadata['actor']['roles'] ?? $user?->roles?->pluck('name')->values()->all() ?? [];
+        $shareholderIds = $metadata['shareholder_ids'] ?? array_values(array_unique(array_merge(
+            app(ShareholderAuditService::class)->shareholderIds($metadata),
+            app(ShareholderAuditService::class)->shareholderIds($metadata['route_parameters'] ?? [])
+        )));
 
         return [
             'id' => $log->id,
-            'user' => $user ? [
+            'user' => isset($metadata['actor']) ? Arr::only($metadata['actor'], ['id', 'name', 'email']) : ($user ? [
                 'id' => $user->id,
                 'name' => trim("{$user->first_name} {$user->last_name}"),
                 'email' => $user->email,
-            ] : null,
+            ] : null),
             'roles' => $roles,
             'activity_type' => $log->action,
             'activity_category' => $this->categoryFromAction($log->action),
             'affected_record' => $this->affectedRecord($metadata),
             'shareholder_reference' => $this->shareholderReference($metadata),
+            'shareholder_ids' => $shareholderIds,
+            'changes' => $metadata['changes'] ?? [],
+            'request' => Arr::only($metadata, ['method', 'path', 'route', 'route_parameters', 'status', 'ip']),
             'metadata' => $metadata,
             'date' => $log->created_at?->toDateString(),
             'time' => $log->created_at?->format('H:i:s'),

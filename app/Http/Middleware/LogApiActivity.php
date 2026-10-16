@@ -2,7 +2,9 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\UserActivityLog;
 use App\Services\ActivityLogService;
+use App\Services\ShareholderAuditService;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
@@ -14,12 +16,40 @@ class LogApiActivity
 
     public function __construct(
         private readonly ActivityLogService $activityLogService
-    ) {
-    }
+    ) {}
 
     public function handle(Request $request, Closure $next): Response
     {
-        $response = $next($request);
+        $audit = app(ShareholderAuditService::class);
+        $request->attributes->remove(ActivityLogService::REQUEST_LOGGED_ATTRIBUTE);
+        $tracking = in_array($request->method(), self::MUTATING_METHODS, true)
+            && ! Str::startsWith(trim($request->path(), '/'), ['api/user-activity-logs', 'user-activity-logs']);
+        if ($tracking) {
+            $request->attributes->set(ShareholderAuditService::CONTEXT, ['shareholder_ids' => [], 'changes' => []]);
+        }
+        try {
+            $response = $next($request);
+        } catch (\Throwable $e) {
+            $request->attributes->remove(ShareholderAuditService::CONTEXT);
+            throw $e;
+        }
+        $context = $request->attributes->get(ShareholderAuditService::CONTEXT, ['shareholder_ids' => [], 'changes' => []]);
+        $request->attributes->remove(ShareholderAuditService::CONTEXT);
+        $context['shareholder_ids'] = array_values(array_unique(array_merge(
+            $context['shareholder_ids'],
+            $audit->shareholderIds($this->safeRouteParameters($request))
+        )));
+        $metadata = array_merge($this->metadataFor($request, $response), $context);
+        $existingId = $request->attributes->get(ActivityLogService::REQUEST_LOGGED_ATTRIBUTE);
+        if ($existingId && $response->isSuccessful()) {
+            $log = UserActivityLog::find($existingId);
+            if ($log) {
+                $metadata['shareholder_ids'] = array_values(array_unique(array_merge(
+                    $metadata['shareholder_ids'], $audit->shareholderIds($log->metadata ?? [])
+                )));
+                $log->update(['metadata' => array_merge($log->metadata ?? [], $metadata)]);
+            }
+        }
 
         if (! $this->shouldLog($request, $response)) {
             return $response;
@@ -28,7 +58,7 @@ class LogApiActivity
         $this->activityLogService->log(
             $request->user()?->id,
             $this->actionFor($request),
-            $this->metadataFor($request, $response)
+            $metadata
         );
 
         return $response;

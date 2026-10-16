@@ -4,8 +4,12 @@ namespace Tests\Feature;
 
 use App\Http\Middleware\LogApiActivity;
 use App\Models\AdminUser;
+use App\Models\UserActivityLog;
+use App\Services\ActivityLogService;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Schema;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\Models\Role;
@@ -144,6 +148,123 @@ class AuditReportApiTest extends TestCase
             ->actingAs($user, 'sanctum')
             ->getJson('/api/reports/audit')
             ->assertForbidden();
+    }
+
+    public function test_shareholder_filter_matches_exact_numeric_and_string_ids_and_both_transfer_and_merge_participants(): void
+    {
+        $actor = $this->createAdmin('exact@example.com');
+        $actor->givePermissionTo(Permission::create(['name' => 'reports.audit', 'guard_name' => 'web']));
+        foreach ([
+            ['shareholder_id' => 15],
+            ['shareholder_id' => '15'],
+            ['route_parameters' => ['shareholder' => '15']],
+            ['from_shareholder_id' => 15, 'to_shareholder_id' => 20],
+            ['from_shareholder_id' => 20, 'to_shareholder_id' => 15],
+            ['primary_shareholder_id' => 15],
+            ['duplicate_shareholder_id' => 15],
+            ['shareholder_ids' => [15, 20]],
+            ['shareholder_id' => 150],
+            ['shareholder_id' => '150'],
+            ['route_parameters' => ['shareholder' => 150]],
+            ['shareholder_ids' => [150]],
+        ] as $metadata) {
+            UserActivityLog::create(['user_id' => $actor->id, 'action' => 'test', 'metadata' => $metadata]);
+        }
+        $this->actingAs($actor, 'sanctum')->getJson('/api/reports/audit?shareholder_id=15')
+            ->assertOk()->assertJsonPath('data.total', 8);
+    }
+
+    public function test_historical_related_record_logs_are_found_without_confusing_record_ids_with_shareholder_ids(): void
+    {
+        Schema::create('shareholder_register_accounts', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_id');
+        });
+        Schema::create('shareholder_change_requests', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_id');
+        });
+        try {
+            DB::table('shareholder_register_accounts')->insert(['id' => 90, 'shareholder_id' => 15]);
+            DB::table('shareholder_change_requests')->insert(['id' => 60, 'shareholder_id' => 15]);
+            $actor = $this->createAdmin('related@example.com');
+            $actor->givePermissionTo(Permission::create(['name' => 'reports.audit', 'guard_name' => 'web']));
+            foreach ([['route_parameters' => ['sra_id' => '90']], ['route_parameters' => ['changeRequest' => 60]], ['route_parameters' => ['sra_id' => 15]], ['shareholder_ids' => [999], 'route_parameters' => ['sra_id' => 90]]] as $metadata) {
+                UserActivityLog::create(['user_id' => $actor->id, 'action' => 'test', 'metadata' => $metadata]);
+            }
+            $this->actingAs($actor, 'sanctum')->getJson('/api/reports/audit?shareholder_id=15&user_id='.$actor->id)
+                ->assertOk()->assertJsonPath('data.total', 2);
+        } finally {
+            Schema::dropIfExists('shareholder_change_requests');
+            Schema::dropIfExists('shareholder_register_accounts');
+        }
+    }
+
+    public function test_new_related_changes_capture_before_after_and_enrich_explicit_log_without_duplicates(): void
+    {
+        Schema::create('shareholder_addresses', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_id');
+            $table->string('city');
+            $table->string('secret_token')->nullable();
+        });
+        try {
+            DB::table('shareholder_addresses')->insert(['id' => 1, 'shareholder_id' => 15, 'city' => 'Lagos', 'secret_token' => 'sensitive']);
+            $actor = $this->createAdmin('changes@example.com');
+            $actor->givePermissionTo(Permission::create(['name' => 'reports.audit', 'guard_name' => 'web']));
+            Route::middleware(['api', 'auth:sanctum', LogApiActivity::class])
+                ->put('/api/audit-test/address', function () use ($actor) {
+                    $address = new class extends Model
+                    {
+                        protected $table = 'shareholder_addresses';
+
+                        public $timestamps = false;
+                    };
+                    $address = $address->findOrFail(1);
+                    $address->city = 'Abuja';
+                    $address->secret_token = 'new-sensitive';
+                    $address->save();
+                    app(ActivityLogService::class)->log($actor->id, 'address_updated', ['reason' => 'Customer instruction']);
+
+                    return response()->json(['success' => true]);
+                });
+            $this->actingAs($actor, 'sanctum')->putJson('/api/audit-test/address')->assertOk();
+            $this->assertDatabaseCount('user_activity_logs', 1);
+            $this->getJson('/api/reports/audit?shareholder_id=15')
+                ->assertOk()->assertJsonPath('data.total', 1)
+                ->assertJsonPath('data.data.0.shareholder_ids', [15])
+                ->assertJsonPath('data.data.0.changes.0.before.city', 'Lagos')
+                ->assertJsonPath('data.data.0.changes.0.after.city', 'Abuja')
+                ->assertJsonPath('data.data.0.metadata.reason', 'Customer instruction')
+                ->assertJsonPath('data.data.0.request.method', 'PUT')
+                ->assertDontSee('sensitive');
+        } finally {
+            Schema::dropIfExists('shareholder_addresses');
+        }
+    }
+
+    public function test_actor_identity_and_role_are_preserved_after_admin_changes(): void
+    {
+        $actor = $this->createAdmin('original@example.com');
+        $actor->assignRole(Role::create(['name' => 'Operations', 'guard_name' => 'web']));
+        app(ActivityLogService::class)->log($actor->id, 'shareholder_updated', ['shareholder_id' => 15]);
+        $actor->update(['email' => 'renamed@example.com']);
+        $actor->syncRoles([]);
+        $viewer = $this->createAdmin('viewer-audit@example.com');
+        $viewer->givePermissionTo(Permission::create(['name' => 'reports.audit', 'guard_name' => 'web']));
+        $this->actingAs($viewer, 'sanctum')->getJson('/api/reports/audit?shareholder_id=15&role=Operations')
+            ->assertOk()->assertJsonPath('data.total', 1)
+            ->assertJsonPath('data.data.0.user.email', 'original@example.com')
+            ->assertJsonPath('data.data.0.roles', ['Operations']);
+    }
+
+    public function test_failed_requests_do_not_record_successful_change_history(): void
+    {
+        $actor = $this->createAdmin('failed@example.com');
+        Route::middleware(['api', 'auth:sanctum', LogApiActivity::class])
+            ->put('/api/audit-test/failure/{shareholder}', fn () => response()->json(['message' => 'Rejected'], 422));
+        $this->actingAs($actor, 'sanctum')->putJson('/api/audit-test/failure/15')->assertStatus(422);
+        $this->assertDatabaseCount('user_activity_logs', 0);
     }
 
     private function createAdmin(string $email): AdminUser
