@@ -2,8 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Jobs\ProcessCscsImportJob;
 use App\Http\Controllers\Api\CscsUploadController;
+use App\Jobs\ProcessCscsImportJob;
 use App\Models\AdminUser;
 use App\Models\CscsApprovalPolicy;
 use App\Models\CscsBatchSnapshot;
@@ -17,8 +17,8 @@ use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
 use App\Services\CscsImportService;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
@@ -340,6 +340,85 @@ class CscsWorkflowTest extends TestCase
         $this->assertContains('NEW_ACCOUNT', $submitted['risk_flags']);
         $this->assertCount(2, $submitted['required_approval_steps']);
         $this->assertSame('OVERSIGHT', $submitted['required_approval_steps'][1]['code']);
+    }
+
+    public function test_fidelity_six_original_movements_complete_with_explicit_account_links_and_no_contact_fallback(): void
+    {
+        CscsSecurityMapping::create(['security_code' => 'FIDELITYBK', 'register_id' => $this->register->id, 'share_class_id' => $this->shareClass->id, 'is_active' => true]);
+        $links = [
+            ['RG4285246', 'C5520941OH', '5000', 'Existing Holder One'],
+            ['RG4125842', 'C0618216AD', '1000', 'Existing Holder Two'],
+            ['RG4137963', 'C000677962AB', '5000', 'Existing Holder Three'],
+        ];
+        $master = '';
+        $accounts = [];
+        foreach ($links as $index => [$rg, $chn, $quantity, $name]) {
+            // Explicit test prerequisites, not name-based production matching.
+            $account = $this->account($chn, "fidelity{$index}@example.test", '0800000001'.$index, $quantity);
+            $account->update(['cscs_account_no' => $rg]);
+            $accounts[] = [$account, $quantity];
+            foreach ([$rg, $chn] as $identifier) {
+                $line = str_repeat(' ', 393);
+                $line = substr_replace($line, str_pad($identifier, 15), 0, 15);
+                $line = substr_replace($line, str_pad($name, 30), 15, 30);
+                $line = substr_replace($line, str_pad('Separate address, not holder name', 40), 55, 40);
+                $line = substr_replace($line, '0', 313, 1);
+                $master .= $line."\r\n";
+            }
+        }
+        $result = $this->service->import([
+            UploadedFile::fake()->createWithContent('FIDELITYBKs6.txt', file_get_contents(base_path('tests/Fixtures/Cscs/fidelity-small-movements.txt'))),
+            UploadedFile::fake()->createWithContent('FIDELITYBKmast.txt', $master),
+        ], $this->register->id, $this->maker->id, 'Six original movements, isolated test');
+        $batchId = $result['batch_id'];
+        $this->assertSame(6, CscsUploadRow::where('batch_id', $batchId)->where('resolution_status', 'READY')->count());
+        $profile = CscsUploadRow::where('batch_id', $batchId)->where('identifier_value', 'RG4137963')->where('file_type', 'movement')->firstOrFail();
+        $this->assertSame('Existing Holder Three', data_get($profile->extra_details, 'master_profile.full_name'));
+        $this->assertNull(data_get($profile->extra_details, 'master_profile.email'));
+        $this->assertNull(data_get($profile->extra_details, 'master_profile.phone'));
+        // Revalidation repairs parsed metadata on a batch staged before a parser fix.
+        $details = $profile->extra_details;
+        $details['master_profile']['full_name'] = 'Old parser included the address';
+        $profile->update(['extra_details' => $details]);
+        $reconciled = $this->service->reconcile($batchId, $this->maker->id, 'Explicit test links reviewed');
+        $this->assertSame('RECONCILED', $reconciled['status']);
+        $this->assertSame('Existing Holder Three', data_get($profile->fresh()->extra_details, 'master_profile.full_name'));
+        $this->assertSame('11000.000000', $reconciled['summary']['total_debit']);
+        $this->assertSame('11000.000000', $reconciled['summary']['total_credit']);
+        $this->service->submit($batchId, $this->maker->id, 'Isolated workflow test');
+        $this->service->approve($batchId, $this->checker, 'Isolated checker review');
+        $posted = $this->service->post($batchId, $this->poster, 'Isolated posting verification');
+        $this->assertSame('POSTED', $posted['status']);
+        $this->assertSame(6, CscsUploadRow::where('batch_id', $batchId)->where('status', 'posted')->count());
+        foreach ($accounts as [$account, $quantity]) {
+            $this->assertSame($quantity.'.000000', SharePosition::where('sra_id', $account->id)->value('quantity'));
+        }
+        $this->assertDatabaseCount('share_transactions', 6);
+    }
+
+    public function test_missing_debit_identifier_remains_blocked_until_an_audited_manual_mapping_is_supplied(): void
+    {
+        $master = $this->masterLine('RGTEST123', 'Debit Holder', '', '')."\r\n"
+            .$this->masterLine('C222222222', 'Credit Holder', '', '')."\r\n";
+        $movement = $this->movementLine('2606160005615022', '0', '-', 'RGTEST123', '1000')."\r\n"
+            .$this->movementLine('2606160005615022', '11', '+', 'C222222222', '1000')."\r\n";
+        $result = $this->service->import([
+            UploadedFile::fake()->createWithContent('master.txt', $master),
+            UploadedFile::fake()->createWithContent('movement.txt', $movement),
+        ], $this->register->id, $this->maker->id);
+        $row = CscsUploadRow::where('batch_id', $result['batch_id'])->where('identifier_value', 'RGTEST123')->where('file_type', 'movement')->firstOrFail();
+        $this->assertSame('INSUFFICIENT_MASTER_DATA', $row->exception_code);
+        $this->assertDatabaseCount('share_transactions', 0);
+        $this->service->resolveException($result['batch_id'], $row->id, $this->maker->id, [
+            'resolution_type' => 'MAP_ACCOUNT',
+            'register_account_id' => $this->debitAccount->id,
+            'reason' => 'Verified source ledger links this identifier to the existing account.',
+        ]);
+        $reconciled = $this->service->reconcile($result['batch_id'], $this->maker->id, 'Verified account link applied');
+        $this->assertSame('RECONCILED', $reconciled['status']);
+        $this->assertSame('manual_mapping', $row->fresh()->match_method);
+        $this->assertSame($this->maker->id, $row->fresh()->resolved_by);
+        $this->assertDatabaseCount('shareholders', 2);
     }
 
     private function stageAndSubmit(): CscsUploadBatch

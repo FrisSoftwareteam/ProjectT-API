@@ -309,12 +309,28 @@ class CscsImportService
         bool $markReconciled,
         ?string $comment = null
     ): array {
+        $profiles = [];
+        foreach (CscsUploadRow::where('batch_id', $batch->id)->where('file_type', 'master')->get() as $master) {
+            if (! $master->raw_line || strlen($master->raw_line) !== 393) {
+                continue;
+            }
+            $profile = $this->parseMasterLine($master->raw_line);
+            $profiles[$profile['identifier']][] = $profile;
+            $master->update(['extra_details' => array_merge($master->extra_details ?? [], ['profile' => $profile])]);
+        }
         $rows = CscsUploadRow::where('batch_id', $batch->id)
             ->where('file_type', 'movement')
             ->orderBy('id')
             ->get();
 
         foreach ($rows as $row) {
+            if (isset($profiles[$row->identifier_value])) {
+                $matches = $profiles[$row->identifier_value];
+                $row->extra_details = array_merge($row->extra_details ?? [], [
+                    'master_profile' => count($matches) === 1 ? $matches[0] : null,
+                    'master_profile_count' => count($matches),
+                ]);
+            }
             if (in_array($row->resolution_status, ['RULE_EXCLUDED', 'CONFIRMED_REPLAY'], true)) {
                 continue;
             }
@@ -992,7 +1008,12 @@ class CscsImportService
         }
 
         $identifier = trim(substr($line, 0, 12));
-        $name = trim(substr($line, 12, 80));
+        // Daily-advice masters have a 15-byte identifier area, a 30-byte
+        // name and a separate address at byte 55. Do not treat that address
+        // (or the control flag at byte 45) as part of the holder's name.
+        $name = substr($line, 12, 3) === '   '
+            ? trim(substr($line, 15, 30))
+            : trim(substr($line, 12, 80));
 
         return $identifier !== '' && $name !== ''
             && preg_match('/^[A-Z0-9._-]+$/i', $identifier) === 1;
@@ -1028,7 +1049,12 @@ class CscsImportService
     private function parseMasterLine(string $line): array
     {
         $identifier = trim(substr($line, 0, 12));
-        $name = trim(substr($line, 12, 80));
+        // Daily-advice masters have a 15-byte identifier area, a 30-byte
+        // name and a separate address at byte 55. Do not treat that address
+        // (or the control flag at byte 45) as part of the holder's name.
+        $name = substr($line, 12, 3) === '   '
+            ? trim(substr($line, 15, 30))
+            : trim(substr($line, 12, 80));
         $fixedEmail = trim(substr($line, 273, 39));
         $fixedPhone = trim(substr($line, 313, 14));
         preg_match('/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i', substr($line, 92), $email);
