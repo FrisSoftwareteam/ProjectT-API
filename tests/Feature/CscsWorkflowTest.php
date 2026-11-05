@@ -16,12 +16,17 @@ use App\Models\Shareholder;
 use App\Models\ShareholderRegisterAccount;
 use App\Models\SharePosition;
 use App\Services\CscsImportService;
+use App\Services\FidelitySmallRepairService;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
+use Spatie\Permission\PermissionRegistrar;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\TestCase;
 
@@ -419,6 +424,199 @@ class CscsWorkflowTest extends TestCase
         $this->assertSame('manual_mapping', $row->fresh()->match_method);
         $this->assertSame($this->maker->id, $row->fresh()->resolved_by);
         $this->assertDatabaseCount('shareholders', 2);
+    }
+
+    public function test_small_repair_preview_changes_nothing_and_apply_restores_only_missing_source_account(): void
+    {
+        $this->prepareSmallRepairSchema();
+        try {
+            $repair = app(FidelitySmallRepairService::class);
+            $preview = $repair->run();
+            $this->assertNotEmpty($preview['blocking']);
+            $this->assertNull($this->debitAccount->fresh()->chn);
+            $this->assertDatabaseCount('shareholders', 2);
+            $applied = $repair->run($this->maker->id, true, true, $preview['class_total_after']);
+            $this->assertTrue($applied['applied']);
+            $this->assertSame('C000677962AB', $this->debitAccount->fresh()->chn);
+            $this->assertSame('RG4137963', $this->debitAccount->fresh()->cscs_account_no);
+            $this->assertDatabaseCount('shareholders', 3);
+            $this->assertDatabaseCount('user_activity_logs', 3);
+            $third = ShareholderRegisterAccount::where('shareholder_no', '377853')->sole();
+            $this->assertSame('C5520941OH', $third->chn);
+            $this->assertSame('5000.000000', SharePosition::where('sra_id', $third->id)->value('quantity'));
+            $repair->run($this->maker->id, true);
+            $this->assertDatabaseCount('shareholders', 3);
+            $this->assertDatabaseCount('share_positions', 3);
+        } finally {
+            $this->dropSmallRepairTables();
+        }
+    }
+
+    public function test_small_repair_refuses_wrong_totals_and_identifier_conflicts_without_partial_changes(): void
+    {
+        $this->prepareSmallRepairSchema();
+        try {
+            $repair = app(FidelitySmallRepairService::class);
+            try {
+                $repair->run($this->maker->id, true, true, '1');
+                $this->fail('Wrong final total was accepted');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('final class total', $e->getMessage());
+            }
+            $this->assertNull($this->debitAccount->fresh()->chn);
+            $this->assertDatabaseCount('shareholders', 2);
+            $this->debitAccount->update(['chn' => 'CONFLICTING_CHN']);
+            $preview = $repair->run();
+            $this->assertStringContainsString('differs', implode(' ', $preview['blocking']));
+            $this->assertDatabaseCount('user_activity_logs', 0);
+        } finally {
+            $this->dropSmallRepairTables();
+        }
+    }
+
+    public function test_small_repair_audit_failure_rolls_back_every_account_and_opening_position(): void
+    {
+        $this->prepareSmallRepairSchema();
+        try {
+            $repair = app(FidelitySmallRepairService::class);
+            $preview = $repair->run();
+            Schema::drop('user_activity_logs');
+            try {
+                $repair->run($this->maker->id, true, true, $preview['class_total_after']);
+                $this->fail('Repair accepted missing audit storage');
+            } catch (QueryException $e) {
+                $this->assertStringContainsString('user_activity_logs', $e->getMessage());
+            }
+            $this->assertNull($this->debitAccount->fresh()->chn);
+            $this->assertDatabaseCount('shareholders', 2);
+            $this->assertDatabaseCount('share_positions', 2);
+        } finally {
+            $this->dropSmallRepairTables();
+        }
+    }
+
+    public function test_actor_fk_migration_repairs_the_wrong_empty_constraint_without_disabling_integrity(): void
+    {
+        Schema::create('users', fn (Blueprint $t) => $t->id());
+        Schema::table('share_transactions', fn (Blueprint $t) => $t->foreign('created_by')->references('id')->on('users'));
+        try {
+            $migration = require database_path('migrations/2026_11_05_000001_correct_empty_share_transaction_actor_fk.php');
+            $migration->up();
+            $migration->up();
+            $key = collect(Schema::getForeignKeys('share_transactions'))->firstWhere('columns', ['created_by']);
+            $this->assertSame('admin_users', $key['foreign_table']);
+        } finally {
+            Schema::table('share_transactions', fn (Blueprint $t) => $t->dropForeign(['created_by']));
+            Schema::drop('users');
+        }
+    }
+
+    public function test_actor_fk_migration_refuses_to_reassign_existing_historical_actors(): void
+    {
+        Schema::create('users', fn (Blueprint $t) => $t->id());
+        Schema::table('share_transactions', fn (Blueprint $t) => $t->foreign('created_by')->references('id')->on('users'));
+        try {
+            DB::table('users')->insert(['id' => 42]);
+            DB::table('share_transactions')->insert(['sra_id' => $this->debitAccount->id, 'share_class_id' => $this->shareClass->id, 'tx_type' => 'allot', 'quantity' => 1, 'tx_date' => now(), 'created_by' => 42]);
+            $migration = require database_path('migrations/2026_11_05_000001_correct_empty_share_transaction_actor_fk.php');
+            try {
+                $migration->up();
+                $this->fail('Historical actors were silently reassigned');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('explicit review', $e->getMessage());
+            }
+            $key = collect(Schema::getForeignKeys('share_transactions'))->firstWhere('columns', ['created_by']);
+            $this->assertSame('users', $key['foreign_table']);
+        } finally {
+            Schema::table('share_transactions', fn (Blueprint $t) => $t->dropForeign(['created_by']));
+            Schema::drop('users');
+        }
+    }
+
+    private function prepareSmallRepairSchema(): void
+    {
+        $this->register->update(['register_code' => '87']);
+        $this->shareClass->update(['class_code' => 'ORDINARY']);
+        $this->debitAccount->update(['shareholder_no' => '260382', 'chn' => null]);
+        $this->creditAccount->update(['shareholder_no' => '367705', 'chn' => null]);
+        Shareholder::whereKey($this->debitAccount->shareholder_id)->update(['full_name' => 'AMAEBI TIMI']);
+        Shareholder::whereKey($this->creditAccount->shareholder_id)->update(['full_name' => 'AGUNBIADE BABATUNDE A.']);
+        Schema::table('shareholders', function (Blueprint $t) {
+            $t->boolean('email_is_verified')->default(false);
+            $t->boolean('phone_is_verified')->default(false);
+            $t->boolean('contact_suppressed')->default(true);
+        });
+        Schema::table('shareholder_register_accounts', function (Blueprint $t) {
+            $t->unsignedBigInteger('shareholder_category_id')->nullable();
+            $t->string('kyc_level')->nullable();
+        });
+        Schema::create('shareholder_categories', function (Blueprint $t) {
+            $t->id();
+            $t->string('code');
+            $t->boolean('is_active');
+        });
+        DB::table('shareholder_categories')->insert(['code' => 'I', 'is_active' => true]);
+        Schema::create('shareholder_addresses', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('shareholder_id');
+            $t->string('address_line1');
+            $t->string('state')->nullable();
+            $t->string('country');
+            $t->boolean('is_primary');
+            $t->timestamps();
+        });
+        Schema::create('user_activity_logs', function (Blueprint $t) {
+            $t->id();
+            $t->unsignedBigInteger('user_id')->nullable();
+            $t->string('action');
+            $t->json('metadata');
+            $t->timestamps();
+        });
+        Schema::create('permissions', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+            $table->unique(['name', 'guard_name']);
+        });
+
+        Schema::create('roles', function (Blueprint $table) {
+            $table->id();
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+            $table->unique(['name', 'guard_name']);
+        });
+
+        Schema::create('model_has_permissions', function (Blueprint $table) {
+            $table->unsignedBigInteger('permission_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+            $table->primary(['permission_id', 'model_id', 'model_type']);
+        });
+
+        Schema::create('model_has_roles', function (Blueprint $table) {
+            $table->unsignedBigInteger('role_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+            $table->primary(['role_id', 'model_id', 'model_type']);
+        });
+
+        Schema::create('role_has_permissions', function (Blueprint $table) {
+            $table->unsignedBigInteger('permission_id');
+            $table->unsignedBigInteger('role_id');
+            $table->primary(['permission_id', 'role_id']);
+        });
+
+        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        Gate::define('cscs.admin', fn () => true);
+    }
+
+    private function dropSmallRepairTables(): void
+    {
+        foreach (['user_activity_logs', 'shareholder_addresses', 'shareholder_categories', 'role_has_permissions', 'model_has_roles', 'model_has_permissions', 'roles', 'permissions'] as $table) {
+            Schema::dropIfExists($table);
+        }
     }
 
     private function stageAndSubmit(): CscsUploadBatch

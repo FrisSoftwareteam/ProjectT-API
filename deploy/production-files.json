@@ -12,7 +12,8 @@
         "database/seeders/ShareholderCategorySeeder.php",
         "public",
         "resources",
-        "routes"
+        "routes",
+        "database/repairs"
     ],
     "runtime_directories": [
         "bootstrap/cache",

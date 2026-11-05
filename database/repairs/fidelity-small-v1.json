@@ -1,0 +1,96 @@
+{
+  "version": 1,
+  "register_code": "87",
+  "security_code": "FIDELITYBK",
+  "share_class_code": "ORDINARY",
+  "source_bundle_sha256": "3f80c5f32d9c04892c7531331a2c14c8b2cac9cd85ce977b44ad3d75c1157220",
+  "rows": [
+    {
+      "record": {
+        "source_row_number": 344286,
+        "source_key_hash": "be7088f882fc41cd30277644c514be9ac55543191889090b72ecaeda0716745a",
+        "source_account_number": "260382",
+        "source_row_hash": "feca611a90b6f76143fe4f7e4107a50be1e8ef0e1cd0d5e015350bc32b24d9ff",
+        "idempotency_key": "fec2044278c3ab3daa8836bea03a978f346da76f47dce6ce4852335a479b6152",
+        "target_account_no": "LBE7088F882FC41CD302",
+        "target_email": "legacy-be7088f882fc41cd30277644@invalid.projectt.local",
+        "target_phone": "LEGBE7088F882FC41CD30277644C514B",
+        "holder_type": "individual",
+        "category_code": "I",
+        "quantity": "5000.000000",
+        "holding_mode": "paper",
+        "full_name": "AMAEBI TIMI",
+        "address_line1": "C/O FIDELITY BANK PLC PMB 101 YENAGOA BAYELSA STATE",
+        "state": "BAYELSA",
+        "country": "Nigeria",
+        "status": "active",
+        "payload_sha256": "d72486da8fd9fef266403ebe31f2540e69aac4d007861d9169203a011af2fd21"
+      },
+      "cscs_account_no": "RG4137963",
+      "chn": "C000677962AB",
+      "source_transaction": "2606160005615012",
+      "source_unit_ids": [
+        26254084,
+        26254085
+      ]
+    },
+    {
+      "record": {
+        "source_row_number": 354367,
+        "source_key_hash": "a43ee098ccad67de4c5de26988e49b5524dc54f00728aa9a804a4e2acdde2e53",
+        "source_account_number": "367705",
+        "source_row_hash": "b563380094d967b5429861e0acfdd59fdee17dd50482a3f870a1a46dc7550368",
+        "idempotency_key": "a2bde609b0ccb73fd692fc482ba4a80899bc5d8e0d8824111805cdca1d13214e",
+        "target_account_no": "LA43EE098CCAD67DE4C5",
+        "target_email": "legacy-a43ee098ccad67de4c5de269@invalid.projectt.local",
+        "target_phone": "LEGA43EE098CCAD67DE4C5DE26988E49",
+        "holder_type": "individual",
+        "category_code": "I",
+        "quantity": "1000.000000",
+        "holding_mode": "paper",
+        "full_name": "AGUNBIADE BABATUNDE A.",
+        "address_line1": "16 ATUNRASE ST,S/LERE, LAGOS",
+        "state": "LAGOS",
+        "country": "Nigeria",
+        "status": "active",
+        "payload_sha256": "125917802f396ec4760f8db8527376801e9e935e6f3e5c2c700d993148ced944"
+      },
+      "cscs_account_no": "RG4125842",
+      "chn": "C0618216AD",
+      "source_transaction": "2606160005615010",
+      "source_unit_ids": [
+        26254086,
+        26254087
+      ]
+    },
+    {
+      "record": {
+        "source_row_number": 386342,
+        "source_key_hash": "15832612502a1b96c9d86fb96abcd30802ecf5a75df84ca09f28fe861555b6e5",
+        "source_account_number": "377853",
+        "source_row_hash": "70255c14ea95d582eca8611a2e328ad67f76bc95ced4f7ba31a44566b5a992ed",
+        "idempotency_key": "3f4fbc13bd78a95ebd1d63107512b5ad203c315f4f5e4926baf7fe266750046e",
+        "target_account_no": "L15832612502A1B96C9D",
+        "target_email": "legacy-15832612502a1b96c9d86fb9@invalid.projectt.local",
+        "target_phone": "LEG15832612502A1B96C9D86FB96ABCD",
+        "holder_type": "individual",
+        "category_code": "I",
+        "quantity": "5000.000000",
+        "holding_mode": "paper",
+        "full_name": "OPARAEKOCHA KENNETH EKENEME",
+        "address_line1": "P O BOX 62 OWERRI IMO STATE",
+        "state": "IMO",
+        "country": "Nigeria",
+        "status": "active",
+        "payload_sha256": "7a3d2ecc94fda3bec2b49993bcdadacd70d52de18527e12b2f65f5bd9d4132c5"
+      },
+      "cscs_account_no": "RG4285246",
+      "chn": "C5520941OH",
+      "source_transaction": "2606160005615005",
+      "source_unit_ids": [
+        26254073,
+        26254109
+      ]
+    }
+  ]
+}
