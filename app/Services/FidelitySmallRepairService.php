@@ -11,9 +11,9 @@ class FidelitySmallRepairService
 {
     private const CHECKSUM = 'e588fd47f0b539373a6e612f82c393819367bfee9d5e18a561d086eaa3f33621';
 
-    public function run(?int $actorId = null, bool $apply = false, bool $restoreMissing = false, ?string $expectedFinalTotal = null): array
+    public function run(?int $actorId = null, bool $apply = false, bool $restoreMissing = false, ?string $expectedFinalTotal = null, ?int $shareClassId = null): array
     {
-        return DB::transaction(function () use ($actorId, $apply, $restoreMissing, $expectedFinalTotal) {
+        return DB::transaction(function () use ($actorId, $apply, $restoreMissing, $expectedFinalTotal, $shareClassId) {
             $path = database_path('repairs/fidelity-small-v1.json');
             if (! hash_equals(self::CHECKSUM, hash_file('sha256', $path))) {
                 throw new RuntimeException('Repair evidence checksum mismatch.');
@@ -24,11 +24,30 @@ class FidelitySmallRepairService
                 throw new RuntimeException('Expected exactly one Fidelity register with code 87.');
             }
             $register = $registers->first();
-            $classes = DB::table('share_classes')->where('register_id', $register->id)->where('class_code', 'ORDINARY')->get();
-            if ($classes->count() !== 1) {
-                throw new RuntimeException('Expected exactly one ORDINARY share class.');
+            $classes = DB::table('share_classes')
+                ->where('register_id', $register->id)
+                ->whereNull('deleted_at')
+                ->orderBy('id')
+                ->get(['id', 'class_code', 'name']);
+            $inventory = $classes->map(fn ($item) => ['id' => $item->id, 'class_code' => $item->class_code, 'name' => $item->name])->values()->all();
+            $ordinary = $classes->filter(fn ($item) => strtoupper(trim((string) $item->class_code)) === 'ORDINARY')->values();
+            if ($shareClassId !== null) {
+                $class = $classes->firstWhere('id', $shareClassId);
+                if (! $class) {
+                    throw new RuntimeException('Share class '.$shareClassId.' is not an active class on register 87. Available active share classes: '.json_encode($inventory));
+                }
+                $classSelection = 'EXPLICIT_ID';
+            } elseif ($ordinary->count() === 1) {
+                $class = $ordinary->first();
+                $classSelection = 'ORDINARY_CODE';
+            } elseif ($classes->count() === 1) {
+                // Fidelity's approved source has one equity class. Production labels may differ from the source label.
+                $class = $classes->first();
+                $classSelection = 'SOLE_REGISTER_CLASS';
+            } else {
+                $examples = $classes->pluck('id')->map(fn ($id) => '--share-class-id='.$id)->implode(' or ');
+                throw new RuntimeException('Cannot safely select a share class for register 87. Available active share classes: '.json_encode($inventory).'. After confirming the Fidelity ordinary-equity class, re-run with '.$examples.'.');
             }
-            $class = $classes->first();
             $plan = [];
             $blocking = [];
             $missingQuantity = '0.000000';
@@ -91,7 +110,7 @@ class FidelitySmallRepairService
                     $schemaChecks['transaction_actor_fk'] = $key['foreign_table'];
                 }
             }
-            $report = ['schema_checks' => $schemaChecks, 'register_total_before' => $registerTotal, 'register_total_after' => $registerAfter, 'mode' => $apply ? 'APPLY' : 'PREVIEW', 'register_id' => $register->id, 'share_class_id' => $class->id, 'class_total_before' => $before, 'class_total_after' => $after, 'plan' => $plan, 'blocking' => $blocking];
+            $report = ['schema_checks' => $schemaChecks, 'register_total_before' => $registerTotal, 'register_total_after' => $registerAfter, 'mode' => $apply ? 'APPLY' : 'PREVIEW', 'register_id' => $register->id, 'share_class_id' => $class->id, 'share_class' => ['id' => $class->id, 'class_code' => $class->class_code, 'name' => $class->name, 'selection' => $classSelection, 'available_active_classes' => $inventory], 'class_total_before' => $before, 'class_total_after' => $after, 'plan' => $plan, 'blocking' => $blocking];
             if (! $apply) {
                 return $report;
             }

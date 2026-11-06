@@ -16,6 +16,12 @@ php artisan cscs:repair-fidelity-small
 
 This changes nothing. Save the JSON output. It resolves online IDs by register code 87 and legacy account numbers, not workstation IDs. It reports the before/after share-class totals, missing account, identifier conflicts, existing holder mismatches and basic posting-schema checks.
 
+The preview now returns `share_class`, including all active classes on register 87 and how one was selected. It uses a unique `ORDINARY` code when present; if Fidelity has exactly one active class under a different code, it uses that sole class and records `SOLE_REGISTER_CLASS`. If there are multiple classes and no unique `ORDINARY`, it stops without changing anything and prints their IDs, codes and names. After independently confirming the ordinary-equity class, rerun the preview with its ID:
+
+```bash
+php artisan cscs:repair-fidelity-small --share-class-id=CONFIRMED_ID
+```
+
 ## Schema checks
 
 If `schema_checks.approval_snapshot_table` is false, take a production backup and apply the existing missing-table migration:

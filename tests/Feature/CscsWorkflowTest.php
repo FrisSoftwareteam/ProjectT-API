@@ -474,6 +474,43 @@ class CscsWorkflowTest extends TestCase
         }
     }
 
+    public function test_small_repair_uses_the_only_active_register_class_even_when_its_code_differs(): void
+    {
+        $this->prepareSmallRepairSchema();
+        try {
+            $this->shareClass->update(['class_code' => 'ORD']);
+            $preview = app(FidelitySmallRepairService::class)->run();
+
+            $this->assertSame('SOLE_REGISTER_CLASS', $preview['share_class']['selection']);
+            $this->assertSame('ORD', $preview['share_class']['class_code']);
+            $this->assertSame($this->shareClass->id, $preview['share_class_id']);
+        } finally {
+            $this->dropSmallRepairTables();
+        }
+    }
+
+    public function test_small_repair_requires_an_explicit_class_when_register_has_multiple_nonordinary_classes(): void
+    {
+        $this->prepareSmallRepairSchema();
+        try {
+            $this->shareClass->update(['class_code' => 'ORD']);
+            $other = ShareClass::create(['register_id' => $this->register->id, 'class_code' => 'PREF', 'name' => 'Preference Shares']);
+            $repair = app(FidelitySmallRepairService::class);
+            try {
+                $repair->run();
+                $this->fail('Multiple classes were selected implicitly');
+            } catch (\RuntimeException $e) {
+                $this->assertStringContainsString('--share-class-id='.$this->shareClass->id, $e->getMessage());
+                $this->assertStringContainsString('PREF', $e->getMessage());
+            }
+            $preview = $repair->run(null, false, false, null, $other->id);
+            $this->assertSame('EXPLICIT_ID', $preview['share_class']['selection']);
+            $this->assertSame($other->id, $preview['share_class_id']);
+        } finally {
+            $this->dropSmallRepairTables();
+        }
+    }
+
     public function test_small_repair_audit_failure_rolls_back_every_account_and_opening_position(): void
     {
         $this->prepareSmallRepairSchema();
