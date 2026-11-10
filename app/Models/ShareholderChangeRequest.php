@@ -65,6 +65,11 @@ class ShareholderChangeRequest extends Model
         return $this->hasMany(ShareholderChangeApproval::class, 'change_request_id');
     }
 
+    public function documents()
+    {
+        return $this->hasMany(ShareholderChangeRequestDocument::class, 'shareholder_change_request_id');
+    }
+
     /**
      * {id, control_no} of the request this one corrected, or null if this
      * wasn't a resubmission.

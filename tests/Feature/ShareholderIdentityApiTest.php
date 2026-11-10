@@ -70,10 +70,24 @@ class ShareholderIdentityApiTest extends TestCase
             $table->timestamp('submitted_at')->useCurrent();
             $table->timestamp('updated_at')->useCurrent();
         });
+
+        Schema::create('shareholder_change_request_documents', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_change_request_id');
+            $table->string('category');
+            $table->string('document_type');
+            $table->string('file_name');
+            $table->string('file_path');
+            $table->string('mime_type')->nullable();
+            $table->unsignedInteger('size')->nullable();
+            $table->unsignedBigInteger('uploaded_by');
+            $table->timestamps();
+        });
     }
 
     protected function tearDown(): void
     {
+        Schema::dropIfExists('shareholder_change_request_documents');
         Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholder_identities');
         Schema::dropIfExists('shareholders');
