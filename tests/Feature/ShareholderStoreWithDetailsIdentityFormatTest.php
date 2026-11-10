@@ -63,6 +63,19 @@ class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
             $table->timestamp('updated_at')->useCurrent();
         });
 
+        Schema::create('shareholder_change_request_documents', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_change_request_id');
+            $table->string('category');
+            $table->string('document_type');
+            $table->string('file_name');
+            $table->string('file_path');
+            $table->string('mime_type')->nullable();
+            $table->unsignedInteger('size')->nullable();
+            $table->unsignedBigInteger('uploaded_by');
+            $table->timestamps();
+        });
+
         Schema::create('shareholder_change_approvals', function (Blueprint $table) {
             $table->id();
             $table->unsignedBigInteger('change_request_id');
@@ -164,6 +177,7 @@ class ShareholderStoreWithDetailsIdentityFormatTest extends TestCase
         Schema::dropIfExists('shareholder_bank_mandates');
         Schema::dropIfExists('shareholder_addresses');
         Schema::dropIfExists('shareholder_change_approvals');
+        Schema::dropIfExists('shareholder_change_request_documents');
         Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholders');
         Schema::dropIfExists('admin_users');

@@ -183,6 +183,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
     Route::prefix('shareholder-change-requests')->group(function () {
         Route::get('/', [ShareholderChangeRequestController::class, 'index'])->middleware('permission:shareholder_change_requests.view');
         Route::get('/{changeRequest}', [ShareholderChangeRequestController::class, 'show'])->middleware('permission:shareholder_change_requests.view');
+        Route::post('/{changeRequest}/documents', [ShareholderChangeRequestController::class, 'uploadDocument'])->middleware('permission:shareholder_change_requests.create|shareholders.edit|shareholder_change_requests.edit_name|shareholder_change_requests.edit_address|shareholder_mandates.create|shareholder_mandates.edit');
         Route::post('/{changeRequest}/approve', [ShareholderChangeRequestController::class, 'approve'])->middleware('permission:shareholder_change_requests.approve|shareholder_change_requests.approve_mandate|shareholder_change_requests.approve_chn');
         Route::post('/{changeRequest}/reject', [ShareholderChangeRequestController::class, 'reject'])->middleware('permission:shareholder_change_requests.approve|shareholder_change_requests.approve_mandate|shareholder_change_requests.approve_chn');
         Route::post('/{changeRequest}/request-info', [ShareholderChangeRequestController::class, 'requestInfo'])->middleware('permission:shareholder_change_requests.approve|shareholder_change_requests.approve_mandate|shareholder_change_requests.approve_chn');
