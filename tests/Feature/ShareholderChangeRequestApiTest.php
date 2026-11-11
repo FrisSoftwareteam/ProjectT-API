@@ -7,7 +7,9 @@ use App\Models\AdminUser;
 use App\Models\Shareholder;
 use App\Models\ShareholderChangeRequest;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Facades\Storage;
 use Spatie\Permission\Models\Permission;
 use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
@@ -104,6 +106,19 @@ class ShareholderChangeRequestApiTest extends TestCase
             $table->timestamp('info_requested_at')->nullable();
         });
 
+        Schema::create('shareholder_change_request_documents', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('shareholder_change_request_id');
+            $table->string('category');
+            $table->string('document_type');
+            $table->string('file_name');
+            $table->string('file_path');
+            $table->string('mime_type')->nullable();
+            $table->unsignedInteger('size')->nullable();
+            $table->unsignedBigInteger('uploaded_by');
+            $table->timestamps();
+        });
+
         Schema::create('shareholder_change_approvals', function (Blueprint $table) {
             $table->id();
             $table->foreignId('change_request_id');
@@ -161,6 +176,7 @@ class ShareholderChangeRequestApiTest extends TestCase
         Schema::dropIfExists('roles');
         Schema::dropIfExists('permissions');
         Schema::dropIfExists('shareholder_change_approvals');
+        Schema::dropIfExists('shareholder_change_request_documents');
         Schema::dropIfExists('shareholder_change_requests');
         Schema::dropIfExists('shareholder_cautions');
         Schema::dropIfExists('shareholder_addresses');
@@ -1080,6 +1096,127 @@ class ShareholderChangeRequestApiTest extends TestCase
         ]);
     }
 
+    public function test_uploading_a_document_attaches_it_and_it_appears_on_show(): void
+    {
+        Storage::fake('public');
+        $maker = $this->createAdminWithPermissions('doc-maker@example.com', [
+            'shareholder_change_requests.edit_name',
+            'shareholder_change_requests.view',
+        ]);
+        $shareholder = $this->createShareholder('doc1');
+        $changeRequest = $this->createChangeRequest($shareholder, $maker, 'submitted', ['request_type' => 'name_change']);
+
+        $response = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/documents", [
+                'file' => UploadedFile::fake()->create('affidavit.pdf', 200, 'application/pdf'),
+                'document_type' => 'Affidavit of name change',
+                'category' => 'name',
+            ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.category', 'name')
+            ->assertJsonPath('data.document_type', 'Affidavit of name change')
+            ->assertJsonPath('data.file_name', 'affidavit.pdf');
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->getJson("/api/shareholder-change-requests/{$changeRequest->id}")
+            ->assertOk()
+            ->assertJsonPath('data.documents.0.category', 'name')
+            ->assertJsonPath('data.documents.0.file_name', 'affidavit.pdf');
+    }
+
+    public function test_uploading_a_document_rejects_a_category_that_does_not_match_the_request_type(): void
+    {
+        Storage::fake('public');
+        $maker = $this->createAdminWithPermission('doc-maker2@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('doc2');
+        $changeRequest = $this->createChangeRequest($shareholder, $maker, 'submitted', ['request_type' => 'name_change']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/documents", [
+                'file' => UploadedFile::fake()->create('mandate.pdf', 200, 'application/pdf'),
+                'document_type' => 'Bank letter',
+                'category' => 'bank',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.category.0', "Documents of category 'bank' aren't supported for a name_change change request.");
+    }
+
+    public function test_uploading_a_document_requires_the_matching_category_permission(): void
+    {
+        Storage::fake('public');
+        $maker = $this->createAdminWithPermission('doc-maker3@example.com', 'shareholder_change_requests.edit_address');
+        $shareholder = $this->createShareholder('doc3');
+        $changeRequest = $this->createChangeRequest($shareholder, $maker, 'submitted', ['request_type' => 'name_change']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/documents", [
+                'file' => UploadedFile::fake()->create('affidavit.pdf', 200, 'application/pdf'),
+                'document_type' => 'Affidavit of name change',
+                'category' => 'name',
+            ])
+            ->assertStatus(403);
+    }
+
+    public function test_uploading_a_document_is_blocked_once_the_request_has_been_decided(): void
+    {
+        Storage::fake('public');
+        $maker = $this->createAdminWithPermission('doc-maker4@example.com', 'shareholder_change_requests.create');
+        $shareholder = $this->createShareholder('doc4');
+        $changeRequest = $this->createChangeRequest($shareholder, $maker, 'applied', ['request_type' => 'name_change']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/documents", [
+                'file' => UploadedFile::fake()->create('affidavit.pdf', 200, 'application/pdf'),
+                'document_type' => 'Affidavit of name change',
+                'category' => 'name',
+            ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.status.0', 'Documents can only be added to a pending (submitted or awaiting more info) change request.');
+    }
+
+    public function test_uploading_a_bank_document_requires_a_mandate_permission_not_the_name_one(): void
+    {
+        Storage::fake('public');
+        $maker = $this->createAdminWithPermission('doc-maker5@example.com', 'shareholder_mandates.edit');
+        $shareholder = $this->createShareholder('doc5');
+        $changeRequest = $this->createChangeRequest($shareholder, $maker, 'submitted', ['request_type' => 'bank_mandate']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/documents", [
+                'file' => UploadedFile::fake()->create('mandate.pdf', 200, 'application/pdf'),
+                'document_type' => 'Bank mandate letter',
+                'category' => 'bank',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'bank');
+    }
+
+    public function test_legacy_blanket_permission_can_upload_documents_for_any_category(): void
+    {
+        Storage::fake('public');
+        $maker = $this->createAdminWithPermission('doc-maker6@example.com', 'shareholders.edit');
+        $shareholder = $this->createShareholder('doc6');
+        $changeRequest = $this->createChangeRequest($shareholder, $maker, 'submitted', ['request_type' => 'profile_update']);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$changeRequest->id}/documents", [
+                'file' => UploadedFile::fake()->create('proof.pdf', 200, 'application/pdf'),
+                'document_type' => 'Proof of address',
+                'category' => 'address',
+            ])
+            ->assertCreated()
+            ->assertJsonPath('data.category', 'address');
+    }
+
     private function createRegisterAccount(Shareholder $shareholder, ?string $chn = null): int
     {
         $registerId = \Illuminate\Support\Facades\DB::table('registers')->insertGetId(['register_code' => 'REG-'.uniqid()]);
@@ -1134,13 +1271,13 @@ class ShareholderChangeRequestApiTest extends TestCase
         ]);
     }
 
-    private function createChangeRequest(Shareholder $shareholder, AdminUser $actor, string $status): ShareholderChangeRequest
+    private function createChangeRequest(Shareholder $shareholder, AdminUser $actor, string $status, array $overrides = []): ShareholderChangeRequest
     {
-        return ShareholderChangeRequest::factory()->create([
+        return ShareholderChangeRequest::factory()->create(array_merge([
             'shareholder_id' => $shareholder->id,
             'status' => $status,
             'submitted_by' => $actor->id,
-        ]);
+        ], $overrides));
     }
 
     private function createAddress(Shareholder $shareholder, array $overrides = []): \App\Models\ShareholderAddress

@@ -6,10 +6,12 @@ use App\Models\AdminUser;
 use App\Models\Shareholder;
 use App\Models\ShareholderChangeApproval;
 use App\Models\ShareholderChangeRequest;
+use App\Models\ShareholderChangeRequestDocument;
 use App\Models\ShareholderIdentity;
 use App\Models\ShareholderMandate;
 use App\Models\ShareholderRegisterAccount;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -53,6 +55,29 @@ class ShareholderChangeRequestService
      * replacement for whoever already has blanket access.
      */
     private const LEGACY_BYPASS_PERMISSIONS = ['shareholder_change_requests.create', 'shareholders.edit'];
+
+    /**
+     * Which document categories a change request can accept evidence for,
+     * keyed by its request_type. A type missing from this map doesn't
+     * support document uploads at all.
+     */
+    private const REQUEST_TYPE_DOCUMENT_CATEGORIES = [
+        'name_change' => ['name'],
+        'address_change' => ['address'],
+        'profile_update' => ['name', 'address'],
+        'bank_mandate' => ['bank'],
+    ];
+
+    /**
+     * Permission(s) required to attach a document of a given category —
+     * mirrors whichever permission already lets an officer submit that
+     * category of change in the first place.
+     */
+    private const DOCUMENT_CATEGORY_PERMISSIONS = [
+        'name' => ['shareholder_change_requests.edit_name'],
+        'address' => ['shareholder_change_requests.edit_address'],
+        'bank' => ['shareholder_mandates.create', 'shareholder_mandates.edit'],
+    ];
 
     public function __construct(
         protected ShareholderChangeRequestReferenceService $referenceService,
@@ -136,6 +161,63 @@ class ShareholderChangeRequestService
         if (! $actor->can($permission)) {
             throw new AuthorizationException("You do not have permission to edit: {$label}");
         }
+    }
+
+    /**
+     * Attach a supporting document (evidence) to a still-pending change
+     * request. The file is already stored on disk by the time this runs —
+     * this only validates eligibility and records the metadata.
+     */
+    public function addDocument(
+        ShareholderChangeRequest $changeRequest,
+        AdminUser $actor,
+        string $category,
+        string $documentType,
+        UploadedFile $file,
+        string $storedPath
+    ): ShareholderChangeRequestDocument {
+        $allowedCategories = self::REQUEST_TYPE_DOCUMENT_CATEGORIES[$changeRequest->request_type] ?? [];
+        if (! in_array($category, $allowedCategories, true)) {
+            throw ValidationException::withMessages([
+                'category' => ["Documents of category '{$category}' aren't supported for a {$changeRequest->request_type} change request."],
+            ]);
+        }
+
+        if (! in_array($changeRequest->status, ['submitted', 'info_requested'], true)) {
+            throw ValidationException::withMessages([
+                'status' => ['Documents can only be added to a pending (submitted or awaiting more info) change request.'],
+            ]);
+        }
+
+        $this->assertCategoryPermission($actor, $category);
+
+        return ShareholderChangeRequestDocument::create([
+            'shareholder_change_request_id' => $changeRequest->id,
+            'category' => $category,
+            'document_type' => $documentType,
+            'file_name' => $file->getClientOriginalName(),
+            'file_path' => $storedPath,
+            'mime_type' => $file->getClientMimeType(),
+            'size' => $file->getSize(),
+            'uploaded_by' => $actor->id,
+        ]);
+    }
+
+    private function assertCategoryPermission(AdminUser $actor, string $category): void
+    {
+        foreach (self::LEGACY_BYPASS_PERMISSIONS as $bypass) {
+            if ($actor->can($bypass)) {
+                return;
+            }
+        }
+
+        foreach (self::DOCUMENT_CATEGORY_PERMISSIONS[$category] ?? [] as $permission) {
+            if ($actor->can($permission)) {
+                return;
+            }
+        }
+
+        throw new AuthorizationException("You do not have permission to attach {$category} documents");
     }
 
     public function submitMandateChange(

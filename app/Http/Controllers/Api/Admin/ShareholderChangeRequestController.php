@@ -9,12 +9,14 @@ use App\Http\Requests\ShareholderChangeRequestStoreRequest;
 use App\Models\AdminUser;
 use App\Models\Shareholder;
 use App\Models\ShareholderChangeRequest;
+use App\Models\ShareholderChangeRequestDocument;
 use App\Services\ShareholderChangeRequestService;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ShareholderChangeRequestController extends Controller
@@ -293,6 +295,67 @@ class ShareholderChangeRequestController extends Controller
     }
 
     /**
+     * Attach a supporting document (evidence) to a pending change request.
+     * POST /shareholder-change-requests/{changeRequest}/documents
+     */
+    public function uploadDocument(Request $request, ShareholderChangeRequest $changeRequest): JsonResponse
+    {
+        try {
+            $validated = $request->validate([
+                'file' => ['required', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:10240'],
+                'document_type' => ['required', 'string', 'max:150'],
+                'category' => ['required', 'string', 'in:name,bank,address'],
+            ]);
+
+            $path = $validated['file']->store(
+                "change-request-documents/{$changeRequest->id}",
+                'public'
+            );
+
+            try {
+                $document = $this->changeRequestService->addDocument(
+                    $changeRequest,
+                    $request->user(),
+                    $validated['category'],
+                    $validated['document_type'],
+                    $validated['file'],
+                    $path
+                );
+            } catch (\Exception $e) {
+                Storage::disk('public')->delete($path);
+                throw $e;
+            }
+
+            return response()->json([
+                'success' => true,
+                'message' => 'Document attached to the change request',
+                'data' => $this->formatDocument($document),
+            ], 201);
+        } catch (AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        } catch (\Exception $e) {
+            Log::error('Error attaching document to shareholder change request: '.$e->getMessage(), [
+                'change_request_id' => $changeRequest->id,
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Error attaching document to change request',
+                'error' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    /**
      * Shared authorization gate for approve/reject/request-info: bank mandate
      * changes require the dedicated approve_mandate/approve_chn permissions
      * instead of the general shareholder_change_requests.approve, and
@@ -343,6 +406,7 @@ class ShareholderChangeRequestController extends Controller
             'submitter:id,first_name,last_name,email',
             'approvals.decider:id,first_name,last_name,email',
             'infoRequestedBy:id,first_name,last_name,email',
+            'documents',
         ]);
 
         $latestDecision = $changeRequest->approvals->sortByDesc('decided_at')->first();
@@ -369,6 +433,19 @@ class ShareholderChangeRequestController extends Controller
             'info_requested_note' => $changeRequest->info_requested_note,
             'info_requested_by' => $this->formatUser($changeRequest->infoRequestedBy),
             'info_requested_at' => $changeRequest->info_requested_at,
+            'documents' => $changeRequest->documents->map(fn ($document) => $this->formatDocument($document)),
+        ];
+    }
+
+    private function formatDocument(ShareholderChangeRequestDocument $document): array
+    {
+        return [
+            'id' => $document->id,
+            'document_type' => $document->document_type,
+            'category' => $document->category,
+            'file_name' => $document->file_name,
+            'url' => $document->url,
+            'uploaded_at' => $document->created_at,
         ];
     }
 
