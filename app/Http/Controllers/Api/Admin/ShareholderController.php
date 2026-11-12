@@ -643,9 +643,39 @@ class ShareholderController extends Controller
             ->where('shareholder_id', $shareholder->id)
             ->firstOrFail();
 
-        $address->update($request->validated());
+        $extra = $request->validate([
+            'reason' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'resubmitted_from_id' => ['sometimes', 'nullable', 'integer', 'exists:shareholder_change_requests,id'],
+        ]);
 
-        return response()->json($address);
+        try {
+            $changeRequest = $this->changeRequestService->submitProfileUpdate(
+                $shareholder,
+                $request->user(),
+                [],
+                $request->validated(),
+                $extra['reason'] ?? null,
+                $extra['resubmitted_from_id'] ?? null,
+                $address->id
+            );
+        } catch (\Illuminate\Auth\Access\AuthorizationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage(),
+            ], 403);
+        } catch (ValidationException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Validation failed',
+                'errors' => $e->errors(),
+            ], 422);
+        }
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Address update submitted for approval',
+            'data' => $changeRequest,
+        ], 202);
     }
 
     public function addMandate($id, ShareholderMandateChangeRequest $request)
