@@ -11,9 +11,9 @@ class FidelitySmallRepairService
 {
     private const CHECKSUM = 'e588fd47f0b539373a6e612f82c393819367bfee9d5e18a561d086eaa3f33621';
 
-    public function run(?int $actorId = null, bool $apply = false, bool $restoreMissing = false, ?string $expectedFinalTotal = null, ?int $shareClassId = null): array
+    public function run(?int $actorId = null, bool $apply = false, bool $restoreMissing = false, ?string $expectedFinalTotal = null, ?int $shareClassId = null, bool $existingLinksOnly = false): array
     {
-        return DB::transaction(function () use ($actorId, $apply, $restoreMissing, $expectedFinalTotal, $shareClassId) {
+        return DB::transaction(function () use ($actorId, $apply, $restoreMissing, $expectedFinalTotal, $shareClassId, $existingLinksOnly) {
             $path = database_path('repairs/fidelity-small-v1.json');
             if (! hash_equals(self::CHECKSUM, hash_file('sha256', $path))) {
                 throw new RuntimeException('Repair evidence checksum mismatch.');
@@ -66,6 +66,13 @@ class FidelitySmallRepairService
                         $blocking[] = 'Holder name differs from approved source for '.$record['source_account_number'];
                     }
                 }
+                $plan[] = $entry;
+                // This deliberately skips every check and write for the missing account.
+                // It is used only to prove the two independently verified existing accounts
+                // can receive their identifier links and complete the reduced CSCS test.
+                if ($existingLinksOnly && ! $account) {
+                    continue;
+                }
                 if (! $account) {
                     $candidate = DB::table('shareholders')->where('account_no', $record['target_account_no'])->orWhereRaw('UPPER(full_name) = ?', [strtoupper($record['full_name'])])->exists();
                     if ($candidate) {
@@ -91,7 +98,9 @@ class FidelitySmallRepairService
                 if ($account && ! DB::table('share_positions')->where('sra_id', $account->id)->where('share_class_id', $class->id)->exists()) {
                     $blocking[] = 'Existing account has no opening position: '.$record['source_account_number'];
                 }
-                $plan[] = $entry;
+            }
+            if ($existingLinksOnly) {
+                $plan = array_values(array_filter($plan, fn (array $entry) => $entry['action'] === 'LINK_IDENTIFIERS'));
             }
             $before = (string) DB::table('share_positions')->where('share_class_id', $class->id)->sum('quantity');
             $after = bcadd($before, $missingQuantity, 6);
@@ -110,7 +119,7 @@ class FidelitySmallRepairService
                     $schemaChecks['transaction_actor_fk'] = $key['foreign_table'];
                 }
             }
-            $report = ['schema_checks' => $schemaChecks, 'register_total_before' => $registerTotal, 'register_total_after' => $registerAfter, 'mode' => $apply ? 'APPLY' : 'PREVIEW', 'register_id' => $register->id, 'share_class_id' => $class->id, 'share_class' => ['id' => $class->id, 'class_code' => $class->class_code, 'name' => $class->name, 'selection' => $classSelection, 'available_active_classes' => $inventory], 'class_total_before' => $before, 'class_total_after' => $after, 'plan' => $plan, 'blocking' => $blocking];
+            $report = ['schema_checks' => $schemaChecks, 'register_total_before' => $registerTotal, 'register_total_after' => $registerAfter, 'mode' => $apply ? 'APPLY' : 'PREVIEW', 'scope' => $existingLinksOnly ? 'EXISTING_LINKS_ONLY' : 'FULL_THREE_ACCOUNT_REPAIR', 'register_id' => $register->id, 'share_class_id' => $class->id, 'share_class' => ['id' => $class->id, 'class_code' => $class->class_code, 'name' => $class->name, 'selection' => $classSelection, 'available_active_classes' => $inventory], 'class_total_before' => $before, 'class_total_after' => $after, 'plan' => $plan, 'blocking' => $blocking];
             if (! $apply) {
                 return $report;
             }

@@ -489,6 +489,24 @@ class CscsWorkflowTest extends TestCase
         }
     }
 
+    public function test_small_repair_can_apply_only_the_two_existing_fidelity_identifier_links(): void
+    {
+        $this->prepareSmallRepairSchema();
+        try {
+            $report = app(FidelitySmallRepairService::class)->run($this->maker->id, true, false, null, null, true);
+
+            $this->assertTrue($report['applied']);
+            $this->assertSame('EXISTING_LINKS_ONLY', $report['scope']);
+            $this->assertCount(2, $report['plan']);
+            $this->assertSame('RG4137963', $this->debitAccount->fresh()->cscs_account_no);
+            $this->assertSame('C0618216AD', $this->creditAccount->fresh()->chn);
+            $this->assertDatabaseMissing('shareholder_register_accounts', ['shareholder_no' => '377853']);
+            $this->assertSame('300000.000000', SharePosition::where('sra_id', $this->debitAccount->id)->value('quantity'));
+        } finally {
+            $this->dropSmallRepairTables();
+        }
+    }
+
     public function test_small_repair_requires_an_explicit_class_when_register_has_multiple_nonordinary_classes(): void
     {
         $this->prepareSmallRepairSchema();
