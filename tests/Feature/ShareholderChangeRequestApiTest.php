@@ -1217,6 +1217,83 @@ class ShareholderChangeRequestApiTest extends TestCase
             ->assertJsonPath('data.category', 'address');
     }
 
+    public function test_updating_an_address_submits_a_pending_request_instead_of_writing_directly(): void
+    {
+        $actor = $this->createAdminWithPermission('addr-editor@example.com', 'shareholder_change_requests.edit_address');
+        $shareholder = $this->createShareholder('addrdirect');
+        $address = $this->createAddress($shareholder, ['address_line1' => 'Old Address, Lagos']);
+
+        $response = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/addresses/{$address->id}", [
+                'address_line1' => '2 Aminu Kano Crescent, Ikoyi',
+                'is_primary' => true,
+            ]);
+
+        $response->assertStatus(202)
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('data.status', 'submitted')
+            ->assertJsonPath('data.request_type', 'address_change')
+            ->assertJsonPath('data.payload_new.address_id', $address->id);
+
+        $this->assertDatabaseHas('shareholder_addresses', [
+            'id' => $address->id,
+            'address_line1' => 'Old Address, Lagos',
+        ]);
+    }
+
+    public function test_approving_an_address_update_applies_it_to_the_specific_address_targeted(): void
+    {
+        $maker = $this->createAdminWithPermission('addr-editor2@example.com', 'shareholder_change_requests.edit_address');
+        $approver = $this->createAdminWithPermission('addr-approver@example.com', 'shareholder_change_requests.approve');
+        $shareholder = $this->createShareholder('addrnonprimary');
+        $primary = $this->createAddress($shareholder, ['address_line1' => 'Primary Address, Lagos', 'is_primary' => true]);
+        $secondary = $this->createAddress($shareholder, ['address_line1' => 'Secondary Address, Abuja', 'is_primary' => false]);
+
+        $submit = $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($maker, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/addresses/{$secondary->id}", [
+                'address_line1' => 'Updated Secondary Address, Abuja',
+                'is_primary' => false,
+            ])
+            ->assertStatus(202);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($approver, 'sanctum')
+            ->postJson("/api/shareholder-change-requests/{$submit->json('data.id')}/approve", [])
+            ->assertOk()
+            ->assertJsonPath('data.change_request.status', 'applied');
+
+        $this->assertDatabaseHas('shareholder_addresses', [
+            'id' => $secondary->id,
+            'address_line1' => 'Updated Secondary Address, Abuja',
+        ]);
+        $this->assertDatabaseHas('shareholder_addresses', [
+            'id' => $primary->id,
+            'address_line1' => 'Primary Address, Lagos',
+        ]);
+    }
+
+    public function test_updating_an_address_requires_permission(): void
+    {
+        $actor = $this->createAdmin('no-perms@example.com');
+        $shareholder = $this->createShareholder('addrnoperm');
+        $address = $this->createAddress($shareholder);
+
+        $this->withoutMiddleware(LogApiActivity::class)
+            ->actingAs($actor, 'sanctum')
+            ->putJson("/api/shareholders/{$shareholder->id}/addresses/{$address->id}", [
+                'address_line1' => 'New Address, Lagos',
+                'is_primary' => true,
+            ])
+            ->assertStatus(403);
+
+        $this->assertDatabaseHas('shareholder_addresses', [
+            'id' => $address->id,
+            'address_line1' => $address->address_line1,
+        ]);
+    }
+
     private function createRegisterAccount(Shareholder $shareholder, ?string $chn = null): int
     {
         $registerId = \Illuminate\Support\Facades\DB::table('registers')->insertGetId(['register_code' => 'REG-'.uniqid()]);

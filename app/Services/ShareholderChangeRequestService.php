@@ -90,7 +90,8 @@ class ShareholderChangeRequestService
         array $proposedFields,
         ?array $proposedAddress,
         ?string $reason,
-        ?int $resubmittedFromId = null
+        ?int $resubmittedFromId = null,
+        ?int $addressId = null
     ): ShareholderChangeRequest {
         $fieldKeys = array_keys($proposedFields);
         if ($proposedAddress !== null) {
@@ -104,13 +105,26 @@ class ShareholderChangeRequestService
         $payloadNew = $proposedFields;
 
         if ($proposedAddress !== null) {
-            $primaryAddress = $shareholder->addresses()->where('is_primary', true)->first();
+            $targetAddress = $addressId !== null
+                ? $shareholder->addresses()->where('id', $addressId)->first()
+                : $shareholder->addresses()->where('is_primary', true)->first();
+
+            if ($addressId !== null && $targetAddress === null) {
+                throw ValidationException::withMessages([
+                    'address_id' => ['This address does not belong to this shareholder.'],
+                ]);
+            }
 
             $payloadOld['address'] = collect($proposedAddress)
                 ->keys()
-                ->mapWithKeys(fn ($field) => [$field => $primaryAddress?->{$field}])
+                ->mapWithKeys(fn ($field) => [$field => $targetAddress?->{$field}])
                 ->toArray();
             $payloadNew['address'] = $proposedAddress;
+
+            if ($addressId !== null) {
+                $payloadOld['address_id'] = $targetAddress->id;
+                $payloadNew['address_id'] = $targetAddress->id;
+            }
         }
 
         $requestType = $this->inferProfileRequestType($proposedFields, $proposedAddress !== null);
@@ -327,10 +341,19 @@ class ShareholderChangeRequestService
         }
 
         $addressPayload = $changeRequest->payload_new['address'] ?? null;
-        if ($addressPayload !== null && ! $changeRequest->shareholder->hasActiveAddress()) {
-            throw ValidationException::withMessages([
-                'status' => ['Shareholder has no primary address on file to update. Add one via the addresses endpoint before approving this request.'],
-            ]);
+        if ($addressPayload !== null) {
+            $addressId = $changeRequest->payload_new['address_id'] ?? null;
+            $hasTarget = $addressId !== null
+                ? $changeRequest->shareholder->addresses()->where('id', $addressId)->exists()
+                : $changeRequest->shareholder->hasActiveAddress();
+
+            if (! $hasTarget) {
+                throw ValidationException::withMessages([
+                    'status' => [$addressId !== null
+                        ? 'The address this request refers to no longer exists.'
+                        : 'Shareholder has no primary address on file to update. Add one via the addresses endpoint before approving this request.'],
+                ]);
+            }
         }
 
         $result = DB::transaction(function () use ($changeRequest, $approver, $remarks) {
@@ -493,14 +516,19 @@ class ShareholderChangeRequestService
     private function applyProfileChange(Shareholder $shareholder, ShareholderChangeRequest $changeRequest): array
     {
         $addressPayload = $changeRequest->payload_new['address'] ?? null;
-        $flatPayload = Arr::except($changeRequest->payload_new, ['address']);
+        $flatPayload = Arr::except($changeRequest->payload_new, ['address', 'address_id']);
 
         if (! empty($flatPayload)) {
             $shareholder->update($flatPayload);
         }
 
         if ($addressPayload !== null) {
-            $shareholder->addresses()->where('is_primary', true)->first()->update($addressPayload);
+            $addressId = $changeRequest->payload_new['address_id'] ?? null;
+            $address = $addressId !== null
+                ? $shareholder->addresses()->where('id', $addressId)->first()
+                : $shareholder->addresses()->where('is_primary', true)->first();
+
+            $address?->update($addressPayload);
         }
 
         return ['shareholder' => $shareholder->fresh()->load('activeCautions', 'addresses')];

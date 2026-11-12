@@ -165,7 +165,7 @@ Route::middleware(['auth:sanctum', 'activity.log'])->group(function () {
         Route::put('/{shareholder}', [ShareholderController::class, 'update'])->middleware('permission:shareholders.edit|shareholder_change_requests.create|shareholder_change_requests.edit_name|shareholder_change_requests.edit_address|shareholder_change_requests.edit_date_of_birth|shareholder_change_requests.edit_gender|shareholder_change_requests.edit_email|shareholder_change_requests.edit_phone|shareholder_change_requests.edit_identification');
         Route::delete('/{shareholder}', [ShareholderController::class, 'destroy'])->middleware('permission:shareholders.delete');
         Route::post('/{shareholder}/addresses', [ShareholderController::class, 'addAddress'])->middleware('permission:shareholders.edit');
-        Route::put('/{shareholder}/addresses/{address}', [ShareholderController::class, 'updateAddress'])->middleware('permission:shareholders.edit');
+        Route::put('/{shareholder}/addresses/{address}', [ShareholderController::class, 'updateAddress'])->middleware('permission:shareholders.edit|shareholder_change_requests.create|shareholder_change_requests.edit_address');
         Route::post('/{shareholder}/mandates', [ShareholderController::class, 'addMandate'])->middleware('permission:shareholder_mandates.create');
         Route::put('/{shareholder}/mandates/{mandate}', [ShareholderController::class, 'updateMandate'])->middleware('permission:shareholder_mandates.edit');
         Route::post('/{shareholder}/identities', [ShareholderController::class, 'shareholderIdentityCreate'])->middleware('permission:shareholder_identities.create');
