@@ -15,7 +15,7 @@ return new class extends Migration
         Schema::create('shareholder_change_request_documents', function (Blueprint $table) {
             $table->id();
             $table->foreignId('shareholder_change_request_id')
-                ->constrained('shareholder_change_requests')
+                ->constrained('shareholder_change_requests', 'id', 'scrd_change_request_id_fk')
                 ->cascadeOnDelete();
             $table->enum('category', ['name', 'bank', 'address']);
             $table->string('document_type', 150);
@@ -23,9 +23,9 @@ return new class extends Migration
             $table->string('file_path', 255);
             $table->string('mime_type', 100)->nullable();
             $table->unsignedInteger('size')->nullable();
-            $table->foreignId('uploaded_by')->constrained('admin_users')->restrictOnDelete();
+            $table->foreignId('uploaded_by')->constrained('admin_users', 'id', 'scrd_uploaded_by_fk')->restrictOnDelete();
             $table->timestamps();
-            $table->index(['shareholder_change_request_id', 'category']);
+            $table->index(['shareholder_change_request_id', 'category'], 'scrd_request_category_idx');
         });
     }
 
