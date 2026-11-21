@@ -155,9 +155,122 @@ class NibssPayService
         return $this->request('POST', 'schedules/create', $payload);
     }
 
+    public function addTransactions(array $payload): array
+    {
+        return $this->request('POST', 'Schedules/AddTransactions', $payload);
+    }
+
+    public function uploadValidationJson(string $referenceId, array $payload): array
+    {
+        return $this->request('POST', "Validation/uploadJson/{$referenceId}", $payload);
+    }
+
+    public function uploadValidationFile(string $referenceNo, int $paymentMode, string $filePath): array
+    {
+        $endpoint = "Validation/{$referenceNo}/{$paymentMode}";
+
+        try {
+            $token   = $this->getToken();
+            $fullUrl = "{$this->apiUrl}/{$endpoint}";
+
+            Log::info('NIBSS PAY outgoing request', [
+                'method' => 'POST',
+                'url'    => $fullUrl,
+            ]);
+
+            $response = Http::withToken($token)
+                ->when($this->subscriptionKey, fn ($h) => $h->withHeaders([
+                    'Ocp-Apim-Subscription-Key' => $this->subscriptionKey,
+                ]))
+                ->timeout(30)
+                ->attach('file', file_get_contents($filePath), basename($filePath))
+                ->post($fullUrl);
+
+            $body = $response->json();
+
+            if ($response->successful()) {
+                return ['success' => true, 'data' => $body, 'message' => 'Request successful.'];
+            }
+
+            Log::warning('NIBSS PAY API error response', [
+                'endpoint' => $endpoint,
+                'status'   => $response->status(),
+                'body'     => $body,
+            ]);
+
+            return [
+                'success' => false,
+                'data'    => null,
+                'message' => $body['message'] ?? 'NIBSS PAY request failed.',
+            ];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('NIBSS PAY connection error', [
+                'endpoint' => $endpoint,
+                'error'    => $e->getMessage(),
+            ]);
+            return ['success' => false, 'data' => null, 'message' => 'Could not reach NIBSS PAY. Please try again.'];
+        } catch (\RuntimeException $e) {
+            return ['success' => false, 'data' => null, 'message' => $e->getMessage()];
+        }
+    }
+
+    public function uploadPaymentFile(int $scheduleId, string $filePath): array
+    {
+        $endpoint = "Schedules/{$scheduleId}";
+
+        try {
+            $token   = $this->getToken();
+            $fullUrl = "{$this->apiUrl}/{$endpoint}";
+
+            Log::info('NIBSS PAY outgoing request', [
+                'method' => 'POST',
+                'url'    => $fullUrl,
+            ]);
+
+            $response = Http::withToken($token)
+                ->when($this->subscriptionKey, fn ($h) => $h->withHeaders([
+                    'Ocp-Apim-Subscription-Key' => $this->subscriptionKey,
+                ]))
+                ->timeout(30)
+                ->attach('file', file_get_contents($filePath), basename($filePath))
+                ->post($fullUrl);
+
+            $body = $response->json();
+
+            if ($response->successful()) {
+                return ['success' => true, 'data' => $body, 'message' => 'Request successful.'];
+            }
+
+            Log::warning('NIBSS PAY API error response', [
+                'endpoint' => $endpoint,
+                'status'   => $response->status(),
+                'body'     => $body,
+            ]);
+
+            return [
+                'success' => false,
+                'data'    => null,
+                'message' => $body['message'] ?? 'NIBSS PAY request failed.',
+            ];
+        } catch (\Illuminate\Http\Client\ConnectionException $e) {
+            Log::error('NIBSS PAY connection error', [
+                'endpoint' => $endpoint,
+                'error'    => $e->getMessage(),
+            ]);
+            return ['success' => false, 'data' => null, 'message' => 'Could not reach NIBSS PAY. Please try again.'];
+        } catch (\RuntimeException $e) {
+            return ['success' => false, 'data' => null, 'message' => $e->getMessage()];
+        }
+    }
+
     public function getSchedule(): array
     {
         return $this->request('GET', 'schedules');
+    }
+
+    public function closeSchedule(int $scheduleId): array
+    {
+        return $this->request('POST', 'Schedules/Close', ['scheduleId' => (string) $scheduleId]);
     }
 
     public function postAccount(array $payload): array
